@@ -47,7 +47,7 @@ config_schema:
   hotkey:
     type: str
     default: "AltRight"
-    description: "In-browser push-to-talk / spotlight key code (e.g., 'AltRight', 'Backquote', 'F8')."
+    description: "Keyboard key (KeyboardEvent.code) that locks/unlocks the pointer target for safe HUD interaction (e.g., 'AltRight', 'Backquote', 'F8'). Push-to-talk is always Spacebar."
   whisper_model:
     type: str
     default: "base.en"

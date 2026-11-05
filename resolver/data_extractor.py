@@ -6,7 +6,7 @@ import csv
 import html
 import io
 import json
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 def extract_structured_data(
@@ -55,15 +55,19 @@ def _parse_numeric(val: Any) -> float:
 def render_svg_scatter(
     headers: Sequence[str],
     rows: Sequence[Sequence[Any]],
-    x_col: str = "Spend",
-    y_col: str = "ROAS",
+    x_col: Optional[str] = None,
+    y_col: Optional[str] = None,
     label_col: str = "Campaign",
 ) -> str:
-    """Render a compact, self-contained SVG scatter plot for the Chrome HUD overlay."""
+    """Render a compact, self-contained SVG scatter plot for the Chrome HUD overlay.
+    Axis columns default to the 2nd and last headers; labels always name the columns
+    actually plotted — no fabricated axis names on arbitrary tables."""
     h_lower = [h.lower() for h in headers]
-    ix = h_lower.index(x_col.lower()) if x_col.lower() in h_lower else min(1, max(len(headers) - 2, 0))
-    iy = h_lower.index(y_col.lower()) if y_col.lower() in h_lower else max(len(headers) - 1, 0)
+    ix = h_lower.index(x_col.lower()) if x_col and x_col.lower() in h_lower else min(1, max(len(headers) - 2, 0))
+    iy = h_lower.index(y_col.lower()) if y_col and y_col.lower() in h_lower else max(len(headers) - 1, 0)
     il = h_lower.index(label_col.lower()) if label_col.lower() in h_lower else 0
+    x_label = headers[ix] if ix < len(headers) else "x"
+    y_label = headers[iy] if iy < len(headers) else "y"
 
     pts: List[Tuple[str, float, float]] = []
     for r in rows:
@@ -100,8 +104,8 @@ def render_svg_scatter(
         f'style="background:#09090b;border:1px solid #27272a;border-radius:6px;margin-top:6px;">'
         f'<line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{pad_t + plot_h}" stroke="#3f3f46" stroke-width="1"/>'
         f'<line x1="{pad_l}" y1="{pad_t + plot_h}" x2="{pad_l + plot_w}" y2="{pad_t + plot_h}" stroke="#3f3f46" stroke-width="1"/>'
-        f'<text x="{pad_l + plot_w / 2:.1f}" y="{h - 6}" fill="#a1a1aa" font-size="10" text-anchor="middle" font-family="sans-serif">{html.escape(x_col)}</text>'
-        f'<text x="12" y="{pad_t + plot_h / 2:.1f}" fill="#a1a1aa" font-size="10" text-anchor="middle" font-family="sans-serif" transform="rotate(-90 12 {pad_t + plot_h / 2:.1f})">{html.escape(y_col)}</text>'
+        f'<text x="{pad_l + plot_w / 2:.1f}" y="{h - 6}" fill="#a1a1aa" font-size="10" text-anchor="middle" font-family="sans-serif">{html.escape(str(x_label))}</text>'
+        f'<text x="12" y="{pad_t + plot_h / 2:.1f}" fill="#a1a1aa" font-size="10" text-anchor="middle" font-family="sans-serif" transform="rotate(-90 12 {pad_t + plot_h / 2:.1f})">{html.escape(str(y_label))}</text>'
         + "".join(circles)
         + "</svg>"
     )

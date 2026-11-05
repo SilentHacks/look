@@ -47,6 +47,19 @@ GAZE_RESOLVE_SCHEMA = _schema(
             "type": "number",
             "description": "Optional viewport Y coordinate (used in headless/offline testing when Chrome is not focused).",
         },
+        "record_voice": {
+            "type": "boolean",
+            "description": "Record the microphone for duration_s and resolve the transcribed utterance instead of 'utterance'.",
+        },
+        "duration_s": {
+            "type": "number",
+            "description": "Microphone recording length in seconds when record_voice is true (default 2.6).",
+        },
+        "word_timestamps": {
+            "type": "array",
+            "items": {"type": "object"},
+            "description": "Optional [{word, start, end}] wall-clock word timestamps to anchor deictics temporally.",
+        },
     },
     required=["utterance"],
 )
@@ -186,8 +199,6 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
                 svg_chart = render_svg_scatter(
                     raw_table.get("headers") or [],
                     raw_table.get("rows") or [],
-                    x_col="Spend",
-                    y_col="ROAS",
                 )
         if hud_message.strip().startswith("<div"):
             full_hud = hud_message + (f"<div>{svg_chart}</div>" if svg_chart else "")

@@ -40,7 +40,9 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
         return None
 
     session = get_shared_session()
-    if not session.is_chrome_reachable():
+    # Gate on the overlay being live — never lazily connect/inject here, or a stray
+    # "this"/"it" in chat would hijack whatever page happens to be pages[0].
+    if not session.overlay_is_live():
         return None
 
     try:

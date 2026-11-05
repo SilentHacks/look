@@ -13,8 +13,10 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import functools
+import html
 import json
 import logging
+import secrets
 import subprocess
 import threading
 import time
@@ -64,7 +66,10 @@ def _overlay_source() -> str:
 
 
 def _guarded_inject(src: str) -> str:
-    return f"if (!window.__HERMES_GAZE_OVERLAY__) {{ {src} }}"
+    # The overlay IIFE tears down and replaces any prior instance (preserving input
+    # state) — always re-run it so a stale api from an older build never survives an
+    # upgrade (e.g. one missing setIntentNonce).
+    return src
 
 
 def _fixation_from_wire(raw: Dict[str, Any], source: str = "hover") -> FixationSample:
@@ -119,6 +124,10 @@ class CdpSession:
             max_workers=2, thread_name_prefix="hermes-gaze-intent"
         )
         self._closed = False
+        # Pushed after every (re)injection so the overlay survives navigations/reloads
+        # with the latest config; the nonce keeps in-page scripts from forging intents.
+        self.overlay_config: Dict[str, Any] = {}
+        self.intent_nonce: str = ""
 
     def _thread_main(self) -> None:
         loop = asyncio.new_event_loop()
@@ -134,7 +143,14 @@ class CdpSession:
     def _ensure_thread(self) -> None:
         with self._state_lock:
             if self._closed:
-                raise RuntimeError("CdpSession is closed")
+                if self._thread is not None and self._thread.is_alive():
+                    raise RuntimeError("CdpSession is closing")
+                # Reopen after close(): the shared session outlives plugin unload/reload
+                # cycles, so the transport must be restartable rather than one-shot.
+                self._closed = False
+                self._handler_pool = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=2, thread_name_prefix="hermes-gaze-intent"
+                )
             if self._thread is None or not self._thread.is_alive():
                 self._loop_ready.clear()
                 self._thread = threading.Thread(target=self._thread_main, name="hermes-gaze-cdp", daemon=True)
@@ -170,6 +186,15 @@ class CdpSession:
     def set_intent_handler(self, fn: Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]) -> None:
         """Register fn(intent, reply) invoked on the intent pool for each binding call."""
         self._intent_handler = fn
+
+    @property
+    def is_connected(self) -> bool:
+        """True only when a websocket is already live — never attempts a connection."""
+        return self._ws is not None
+
+    def push_overlay_config(self) -> None:
+        """Push stored overlay config + intent nonce into the live overlay (post-inject)."""
+        self._submit(self._push_overlay_config(), timeout=8.0)
 
     def close(self) -> None:
         with self._state_lock:
@@ -232,7 +257,8 @@ class CdpSession:
         if tab is None:
             return False
         self._target_id = str(tab.get("id") or "") or None
-        self._ws = await websockets.connect(str(tab["webSocketDebuggerUrl"]), max_size=16 * 1024 * 1024)
+        # 32 MiB > the service's max transcribe payload (~16.9M base64 chars + envelope)
+        self._ws = await websockets.connect(str(tab["webSocketDebuggerUrl"]), max_size=32 * 1024 * 1024)
         self._pump_task = asyncio.ensure_future(self._pump(self._ws))
         try:
             for method, params in (
@@ -245,10 +271,22 @@ class CdpSession:
             if src:
                 await self._send_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": src}, timeout=5.0)
                 await self._eval_coro(_guarded_inject(src), timeout=8.0)
+            await self._push_overlay_config()
         except Exception:
             await self._drop_ws()
             raise
         return True
+
+    async def _push_overlay_config(self) -> None:
+        # IIFE is mandatory: top-level const/let in Runtime.evaluate persists in the
+        # page's global lexical scope and would collide on the next push/re-inject.
+        expr = (
+            "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (api) {"
+            f"api.Configure({json.dumps(self.overlay_config)});"
+            f"api.setIntentNonce({json.dumps(self.intent_nonce)});"
+            "} return true; })()"
+        )
+        await self._eval_coro(expr, timeout=5.0)
 
     async def _drop_ws(self) -> None:
         self._fail_pending(ConnectionError("CDP connection reset"))
@@ -309,6 +347,7 @@ class CdpSession:
             src = _overlay_source()
             if src:
                 await self._eval_coro(_guarded_inject(src), timeout=8.0)
+            await self._push_overlay_config()
         except Exception as exc:
             logger.debug("context re-arm failed: %s", exc)
 
@@ -326,10 +365,9 @@ class CdpSession:
 
         def reply(reply_payload: Dict[str, Any]) -> None:
             msg = dict(reply_payload or {})
-            if intent.get("id") is not None:
-                msg.setdefault("id", intent["id"])
-            if intent.get("type") is not None:
-                msg.setdefault("type", intent["type"])
+            for key in ("id", "type", "resolution_id"):
+                if intent.get(key) is not None:
+                    msg.setdefault(key, intent[key])
             try:
                 self.eval_js(
                     "window.__HERMES_GAZE_OVERLAY__ && "
@@ -412,6 +450,11 @@ class GazeSession:
         self._dwell_ms, self._wiggle_trigger, self._hotkey = 450, True, "AltRight"
         self._candidate_radius_px = 380.0
         self._ingested_keys: set = set()
+        # Intents must carry this nonce; pushed into the overlay via setIntentNonce so a
+        # hostile in-page script cannot forge resolves/transcribes/explains on the binding.
+        self._intent_nonce = secrets.token_hex(8)
+        self._cdp.intent_nonce = self._intent_nonce
+        self._sync_overlay_config()
 
     @property
     def cdp(self) -> CdpSession:
@@ -443,20 +486,42 @@ class GazeSession:
         if not self.ensure_connected():
             return False
         try:
-            if self.eval_js("!!window.__HERMES_GAZE_OVERLAY__"):
+            # setIntentNonce doubles as an api-version probe: an overlay from an older
+            # build is re-injected rather than trusted.
+            if self.eval_js("!!(window.__HERMES_GAZE_OVERLAY__ && window.__HERMES_GAZE_OVERLAY__.setIntentNonce)"):
                 return True
             src = _overlay_source()
             if src:
                 self.eval_js(src)
+                self._cdp.push_overlay_config()
             return bool(src)
         except Exception as exc:
             logger.debug("ensure_overlay failed: %s", exc)
             return False
 
+    def overlay_is_live(self) -> bool:
+        """Read-only probe: True only if the overlay api already answers in the pinned tab.
+        Never connects or injects — used to gate hooks so they don't hijack pages[0]."""
+        if not self._cdp.is_connected:
+            return False
+        try:
+            return bool(self.eval_js("!!window.__HERMES_GAZE_OVERLAY__", timeout=2.0))
+        except Exception:
+            return False
+
+    def _sync_overlay_config(self) -> None:
+        self._cdp.overlay_config = {
+            "mode": self.tracker.mode, "sigmaPx": self.tracker.sigma_px,
+            "dwellMs": self._dwell_ms, "wiggleTrigger": self._wiggle_trigger,
+            "hotkey": self._hotkey, "candidateRadiusPx": self._candidate_radius_px,
+        }
+
     def configure(self, mode: Optional[str] = None, sigma_px: Optional[float] = None,
                   dwell_ms: Optional[int] = None, wiggle_trigger: Optional[bool] = None,
                   hotkey: Optional[str] = None, candidate_radius_px: Optional[float] = None) -> bool:
-        """Store overlay config locally and push it to ``api.Configure({...})`` (None keeps stored)."""
+        """Store overlay config (None keeps stored). Pushes to the overlay ONLY when a
+        websocket is already live — never connects or injects, so callers inside plugin
+        registration cannot block on CDP I/O. Stored opts are pushed post-inject anyway."""
         with self._lock:
             if mode is not None:
                 self.tracker.mode = str(mode)
@@ -470,13 +535,11 @@ class GazeSession:
                 self._hotkey = str(hotkey)
             if candidate_radius_px is not None:
                 self._candidate_radius_px = float(candidate_radius_px)
-            opts = {"mode": self.tracker.mode, "sigmaPx": self.tracker.sigma_px, "dwellMs": self._dwell_ms,
-                    "wiggleTrigger": self._wiggle_trigger, "hotkey": self._hotkey,
-                    "candidateRadiusPx": self._candidate_radius_px}
-        if not self.ensure_overlay():
+            self._sync_overlay_config()
+        if not self._cdp.is_connected:
             return False
         try:
-            self.eval_js(f"window.__HERMES_GAZE_OVERLAY__.Configure({json.dumps(opts)}); true;")
+            self._cdp.push_overlay_config()
             return True
         except Exception as exc:
             logger.debug("overlay Configure failed: %s", exc)
@@ -512,9 +575,13 @@ class GazeSession:
                 self.ring_buffer.add(s)
 
     def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> List[CandidateElement]:
-        """Pull pointer + fixations + nearby candidates from the pinned tab in ONE eval."""
+        """Pull pointer + fixations + nearby candidates from the pinned tab in ONE eval.
+        Returns [] honestly — never stale last_candidates — when Chrome or a real
+        pointer position is unavailable."""
         if not self.is_chrome_reachable():
-            return self.last_candidates
+            with self._lock:
+                self.last_candidates = []
+            return []
         js = (
             "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (!api || !api.state) return null;"
             " const s = api.state; return {"
@@ -525,11 +592,16 @@ class GazeSession:
         )
         data = self.eval_js(js) or {}
         self.ingest(data.get("fixations") or [])
-        if not self.ring_buffer.latest() and isinstance(data.get("pointer"), dict):
-            p = data["pointer"]
+        p = data.get("pointer") if isinstance(data.get("pointer"), dict) else {}
+        if p.get("x_vp") is None or p.get("y_vp") is None:
+            with self._lock:
+                self.last_candidates = []
+            return []
+        if not self.ring_buffer.latest():
             self.tracker.record_point(
-                float(p.get("x_vp", 500.0)), float(p.get("y_vp", 300.0)),
-                scroll_x=float(p.get("scroll_x", 0.0)), scroll_y=float(p.get("scroll_y", 0.0)))
+                float(p["x_vp"]), float(p["y_vp"]),
+                scroll_x=float(p.get("scroll_x", 0.0)), scroll_y=float(p.get("scroll_y", 0.0)),
+                bias_offset=self.recalibrator.offset)
 
         cands = [_candidate_from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
         with self._lock:
@@ -544,45 +616,48 @@ class GazeSession:
             return self.resolution_id
 
     def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None) -> None:
-        with self._lock:
-            rid = self.new_resolution(resolution)
-            if not self.is_chrome_reachable():
-                return
-            if resolution.decision in ("open_semantic_lens", "confirm_destructive"):
-                cards = [sc.to_dict() for sc in resolution.ranked[:4]]
-                prompt = (
-                    "⚠️ High-Consequence Action — Confirm in Semantic Lens"
-                    if resolution.decision == "confirm_destructive"
-                    else f"🔍 Ambiguous Target — Select in Semantic Lens (Hover {self._dwell_ms}ms, Key 1-{len(cards)}, or Click)"
+        # new_resolution under the lock; browser I/O outside it so slow evals don't
+        # serialize choose/ingest/intent dispatch behind a potentially slow tab.
+        rid = self.new_resolution(resolution)
+        if not self.is_chrome_reachable():
+            return
+        esc = html.escape
+        if resolution.decision in ("open_semantic_lens", "confirm_destructive"):
+            cards = [sc.to_dict() for sc in resolution.ranked[:4]]
+            prompt = (
+                "⚠️ High-Consequence Action — Confirm in Semantic Lens"
+                if resolution.decision == "confirm_destructive"
+                else f"🔍 Ambiguous Target — Select in Semantic Lens (Hover {self._dwell_ms}ms, Key 1-{len(cards)}, or Click)"
+            )
+            js = f"window.__HERMES_GAZE_OVERLAY__.renderSemanticLens({json.dumps(cards)}, {json.dumps(prompt)}, {rid}); true;"
+        else:
+            pins = [sc.to_dict() for sc in (resolution.multi_referents or resolution.ranked[:1])]
+            if pins:
+                top_pin = pins[0]
+                role_label = esc(str(top_pin.get("role") or top_pin.get("tag") or "Element")).capitalize()
+                conf_pct = int(top_pin.get("probability", 1.0) * 100)
+                msg = hud_html or (
+                    f"<div style='font-size:13.5px;'><strong style='color:#38bdf8;'>🔍 Inspecting: {esc(str(top_pin.get('label', '')))}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_label})</span></div>"
+                    f"<div style='margin-top:5px;color:#f8fafc;font-size:12.5px;line-height:1.45;'>{esc(str(top_pin.get('consequence_preview') or top_pin.get('summary', '')))}</div>"
+                    f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;'>"
+                    f"<span>Target: {esc(str(top_pin.get('selector', '')))}</span><span>Confidence: {conf_pct}%</span>"
+                    f"</div>"
                 )
-                js = f"window.__HERMES_GAZE_OVERLAY__.renderSemanticLens({json.dumps(cards)}, {json.dumps(prompt)}, {rid}); true;"
             else:
-                pins = [sc.to_dict() for sc in (resolution.multi_referents or resolution.ranked[:1])]
-                if pins:
-                    top_pin = pins[0]
-                    role_label = str(top_pin.get("role") or top_pin.get("tag") or "Element").capitalize()
-                    conf_pct = int(top_pin.get("probability", 1.0) * 100)
-                    msg = hud_html or (
-                        f"<div style='font-size:13.5px;'><strong style='color:#38bdf8;'>🔍 Inspecting: {top_pin.get('label', '')}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_label})</span></div>"
-                        f"<div style='margin-top:5px;color:#f8fafc;font-size:12.5px;line-height:1.45;'>{top_pin.get('consequence_preview') or top_pin.get('summary', '')}</div>"
-                        f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;'>"
-                        f"<span>Target: {top_pin.get('selector', '')}</span><span>Confidence: {conf_pct}%</span>"
-                        f"</div>"
-                    )
-                else:
-                    msg = hud_html or "No matching target."
-                if resolution.intent_class == "read_only":
-                    # The overlay emits an `explain` intent for read_only + pin_immediate and
-                    # writes the reply into this element inside the pin HUD.
-                    msg += (
-                        '<div id="gaze-explanation-text" style="margin-top:6px;color:#cbd5e1;font-size:12px;line-height:1.4;">'
-                        "⏳ Asking Hermes...</div>"
-                    )
-                js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
-            try:
-                self.eval_js(js)
-            except Exception as exc:
-                logger.debug("render_resolution_in_browser eval failed: %s", exc)
+                msg = hud_html or "No matching target."
+            if resolution.intent_class == "read_only":
+                # The overlay emits an `explain` intent for read_only + pin_immediate and
+                # writes the reply into this element inside the pin HUD; data-rid ties the
+                # reply to THIS resolution epoch.
+                msg += (
+                    f'<div id="gaze-explanation-text" data-rid="{rid}" style="margin-top:6px;color:#cbd5e1;font-size:12px;line-height:1.4;">'
+                    "⏳ Asking Hermes...</div>"
+                )
+            js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
+        try:
+            self.eval_js(js)
+        except Exception as exc:
+            logger.debug("render_resolution_in_browser eval failed: %s", exc)
 
     def choose(self, resolution_id: Optional[int] = None, candidate_index: int = 1,
                modality: str = "semantic_lens", execute: bool = True) -> Dict[str, Any]:
@@ -605,11 +680,12 @@ class GazeSession:
                     sigma=latest_fix.sigma_x, weight=0.25,
                 )
         if self.is_chrome_reachable():
-            role_disp = chosen.candidate.role.capitalize()
+            esc = html.escape
+            role_disp = esc(chosen.candidate.role).capitalize()
             msg = (
-                f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {chosen.candidate.label}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {modality})</span></div>"
-                f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{chosen.consequence_preview}</div>"
-                f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {chosen.candidate.selector}</div>"
+                f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {esc(chosen.candidate.label)}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {esc(str(modality))})</span></div>"
+                f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{esc(str(chosen.consequence_preview))}</div>"
+                f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {esc(chosen.candidate.selector)}</div>"
             )
             click_stmt = (
                 f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
@@ -620,6 +696,8 @@ class GazeSession:
                 )
             except Exception as exc:
                 return {"ok": False, "error": f"browser choose failed: {exc}"}
+        with self._lock:
+            self.last_resolution = None  # consume — a second choose must not re-click stale state
         return {
             "ok": True,
             "selected_index": idx + 1,

@@ -13,12 +13,12 @@ import logging
 import os
 import threading
 import wave
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "base.en"
-_WHISPER_MODEL = None
+_WHISPER_MODELS: Dict[str, Any] = {}  # per-name cache — config may switch models mid-session
 _MODEL_LOCK = threading.Lock()
 
 # Base64 audio payloads from the overlay's transcribe intent are bounded before decode.
@@ -26,15 +26,16 @@ MAX_AUDIO_BYTES = 12 * 1024 * 1024
 
 
 def get_whisper_model(model_name: str = _DEFAULT_MODEL) -> Any:
-    """Lazy singleton loader for the local faster-whisper model."""
-    global _WHISPER_MODEL
+    """Lazy per-name singleton loader for the local faster-whisper model."""
     with _MODEL_LOCK:
-        if _WHISPER_MODEL is None:
+        model = _WHISPER_MODELS.get(model_name)
+        if model is None:
             from faster_whisper import WhisperModel
 
             logger.info("Loading faster-whisper model '%s' on CPU (int8)...", model_name)
-            _WHISPER_MODEL = WhisperModel(model_name, device="cpu", compute_type="int8")
-        return _WHISPER_MODEL
+            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            _WHISPER_MODELS[model_name] = model
+        return model
 
 
 def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
@@ -88,8 +89,13 @@ def transcribe_audio_buffer(
     audio_bytes: bytes,
     sample_rate: int = 16000,
     model_name: str = _DEFAULT_MODEL,
+    audio_epoch: Optional[float] = None,
 ) -> Tuple[str, List[Dict[str, object]]]:
-    """Transcribe WebM, WAV, or PCM bytes into text with word-level timestamps."""
+    """Transcribe WebM, WAV, or PCM bytes into text with word-level timestamps.
+
+    ``audio_epoch`` is the wall-clock time (time.time()) when recording began; when
+    given, the audio-relative whisper word times are shifted to wall-clock epochs so
+    the temporal aligner can weight them against real fixations."""
     import numpy as np
 
     audio_np = decode_audio_to_float32(audio_bytes, sample_rate=sample_rate)
@@ -111,12 +117,13 @@ def transcribe_audio_buffer(
         language="en",
         condition_on_previous_text=False,
     )
+    epoch_off = float(audio_epoch or 0.0)
     words: List[Dict[str, object]] = []
     text_parts: List[str] = []
     for seg in segments:
         text_parts.append(seg.text.strip())
         for w in getattr(seg, "words", None) or []:
-            words.append({"word": w.word, "start": float(w.start), "end": float(w.end)})
+            words.append({"word": w.word, "start": float(w.start) + epoch_off, "end": float(w.end) + epoch_off})
 
     full_text = " ".join(text_parts).strip()
     return full_text, words

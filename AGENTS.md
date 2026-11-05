@@ -39,6 +39,15 @@ Bayesian spatial-semantic resolution.
   new HTTP endpoints, no `Runtime.evaluate` polling for decisions. The binding keeps a
   single ordered channel that works on file:// and any origin without CORS. Replies
   are callback-style (`reply({...})` → `api.onIntentResult`) — intents return nothing.
+  Every intent carries `nonce`, pushed to the overlay via `api.setIntentNonce` after
+  each (re)injection; `handle_intent` rejects intents without the session's
+  `session._intent_nonce` — the binding is callable by any same-frame page script,
+  so the nonce is what stops forged resolves/transcribes/explains.
+- **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
+  `audio_epoch` (wall-clock recording start: `state.recordStartEpoch` in the overlay,
+  `time.time()` before `record_microphone` on the tool path) and shifts each word.
+  The temporal aligner compares anchors against fixation epochs — unshifted word
+  times silently collapse alignment onto the latest fixation.
 - **Relative imports only inside the package.** Hermes loads this plugin as
   `hermes_plugins.hermes_gaze`; `import hermes_gaze` inside a module would exec a
   SECOND copy of the package (the split-brain singleton bug this refactor removed).
@@ -71,7 +80,8 @@ python3 -m unittest tests.test_service_intents   # one module
 python3 -m py_compile tests/*.py service.py tools.py
 node --check browser/overlay.js                  # JS syntax check
 ruff check                                        # if ruff is installed
-python3 -m benchmark.run_benchmark 2>/dev/null   # accuracy table (run from plugin root)
+# accuracy table — benchmark has package-relative imports, so load the tests shell first:
+python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_benchmark_suite, format_benchmark_markdown; print(format_benchmark_markdown(run_benchmark_suite()))"
 ```
 
 ## Known limits

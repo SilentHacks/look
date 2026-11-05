@@ -1,4 +1,8 @@
 (function () {
+  // Main frame only — addScriptToEvaluateOnNewDocument runs in EVERY frame; untrusted
+  // iframes must not render a second HUD or reach the intent binding.
+  if (window.top !== window.self) return;
+
   // Always tear down any prior overlay instance cleanly (removing window listeners & streams)
   const prevApi = window.__HERMES_GAZE_OVERLAY__;
   const prevState = prevApi && prevApi.state ? prevApi.state : null;
@@ -34,8 +38,11 @@
     tucked: false,
     armed: false, // When true, lockedX / lockedY stay frozen while user interacts with HUD
     armedAt: 0,
-    pointerX: prevState && typeof prevState.pointerX === "number" ? prevState.pointerX : Math.round(window.innerWidth * 0.5),
-    pointerY: prevState && typeof prevState.pointerY === "number" ? prevState.pointerY : Math.round(window.innerHeight * 0.35),
+    // null until the first real mousemove — a fabricated center point is never a valid pointer
+    pointerX: prevState && typeof prevState.pointerX === "number" ? prevState.pointerX : null,
+    pointerY: prevState && typeof prevState.pointerY === "number" ? prevState.pointerY : null,
+    choosePending: false,
+    recordStartEpoch: 0, // Date.now()/1000 when the current mic recording began (word timestamps are audio-relative)
     lockedX: null,
     lockedY: null,
     ringBuffer: prevState && Array.isArray(prevState.ringBuffer) ? prevState.ringBuffer.slice(-250) : [], // {x_vp, y_vp, x_doc, y_doc, t, sigma}
@@ -475,11 +482,11 @@
     <div class="hud-body">
       <div class="target-bar" id="hg-target-bar">
         <div class="target-info">
-          <div class="target-state-label" id="hg-lock-label">🟢 FOLLOWING CURSOR (Press \` or wiggle to lock target)</div>
+          <div class="target-state-label" id="hg-lock-label">🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)</div>
           <div class="target-name" id="hg-target-name">Move cursor over any page element...</div>
           <div class="target-sub" id="hg-target-sub">—</div>
         </div>
-        <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">🔒 Lock (\`)</button>
+        <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">🔒 Lock (${hotkeyLabel()})</button>
       </div>
 
       <div class="chips-row">
@@ -497,7 +504,7 @@
       <div class="hud-reply" id="hg-reply" style="display:none;"></div>
 
       <div class="hud-help">
-        <span>Tip: Hold <strong>Spacebar</strong> to speak or press <strong>\`</strong> to lock</span>
+        <span id="hg-hotkey-tip">Tip: Hold <strong>Spacebar</strong> to speak or press <strong>${hotkeyLabel()}</strong> to lock</span>
         <span>Drag header ⠿ to move</span>
       </div>
     </div>
@@ -611,8 +618,24 @@
     clearOverlays("clearBtn");
   });
 
+  function hotkeyLabel() {
+    return { Backquote: "`", AltRight: "Right Alt", AltLeft: "Left Alt", Space: "Space" }[state.hotkey] || state.hotkey;
+  }
+
+  function refreshHotkeyLabels() {
+    if (!state.armed) {
+      lockLabel.textContent = `🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)`;
+      lockBtn.textContent = `🔒 Lock (${hotkeyLabel()})`;
+    }
+    const tip = hud.querySelector("#hg-hotkey-tip");
+    if (tip) tip.innerHTML = `Tip: Hold <strong>Spacebar</strong> to speak or press <strong>${escapeHtml(hotkeyLabel())}</strong> to lock`;
+  }
+
   // --- Target Lock / Unlock ---
   function setTargetLocked(locked, triggerSource = "manual") {
+    if (locked && (typeof state.pointerX !== "number" || typeof state.pointerY !== "number")) {
+      return; // no real pointer position yet — nothing to lock onto
+    }
     state.armed = locked;
     if (locked) {
       state.armedAt = Date.now() / 1000;
@@ -628,8 +651,8 @@
       state.lockedY = null;
       spotlight.classList.remove("armed");
       targetBar.classList.remove("locked");
-      lockLabel.textContent = "🟢 FOLLOWING CURSOR (Press ` or wiggle to lock target)";
-      lockBtn.textContent = "🔒 Lock (`)";
+      lockLabel.textContent = `🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)`;
+      lockBtn.textContent = `🔒 Lock (${hotkeyLabel()})`;
       lockBtn.classList.remove("active");
     }
     const activeX = state.armed && state.lockedX !== null ? state.lockedX : state.pointerX;
@@ -642,6 +665,12 @@
   });
 
   function updateSpotlightPosition(x, y) {
+    if (typeof x !== "number" || typeof y !== "number") {
+      spotlight.style.opacity = "0";
+      spotlightTag.textContent = "";
+      return;
+    }
+    spotlight.style.opacity = "1";
     const r = state.mode === "hover" ? 46 : Math.max(state.sigmaPx * 1.45, 110);
     spotlight.style.width = `${r}px`;
     spotlight.style.height = `${r}px`;
@@ -654,6 +683,12 @@
   }
 
   function updateLiveInspector(x, y) {
+    if (typeof x !== "number" || typeof y !== "number") {
+      state.hoveredCandidate = null;
+      targetName.textContent = "Move cursor over any page element...";
+      targetSub.textContent = "—";
+      return;
+    }
     const near = extractCandidatesNear(x, y, 220);
     // Find best candidate directly under or closest to (x, y)
     let best = null;
@@ -751,10 +786,15 @@
   let _lastSentResolveId = 0;
   let _pendingUtterance = "";
   let _pendingExplainFallback = "";
+  let _pendingExplainRid = 0;
+  // Session nonce set via setIntentNonce() after Python (re)injects us. Stays in closure —
+  // page scripts can call the binding but cannot read this value, so they cannot forge intents.
+  let _intentNonce = "";
   const _transcribeTimers = new Map();
 
   function _emit(intent) {
     intent.id = ++_intentSeq;
+    intent.nonce = _intentNonce;
     if (typeof window.__hermesGazeIntent !== "function") {
       showHudMessage('<div style="color:#f87171;">⚠️ Resolver offline (session not connected).</div>');
       return false;
@@ -769,6 +809,10 @@
     const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
     const px = locked ? state.lockedX : state.pointerX;
     const py = locked ? state.lockedY : state.pointerY;
+    if (typeof px !== "number" || typeof py !== "number") {
+      showHudMessage('<div style="color:#fbbf24;">🎯 Aim the pointer at an element first, then speak or type.</div>');
+      return false;
+    }
     const intent = {
       type: "resolve",
       utterance: text,
@@ -801,6 +845,8 @@
       audio_base64: audioBase64,
       mime_type: mimeType || "audio/webm",
       sample_rate: 16000,
+      // wall-clock recording start — Python shifts audio-relative whisper timestamps by this
+      audio_epoch: state.recordStartEpoch || 0,
     };
     if (!_emit(intent)) {
       resetMicUiIdle("⚠️ Resolver offline (session not connected).");
@@ -809,7 +855,7 @@
     const timerId = setTimeout(() => {
       _transcribeTimers.delete(intent.id);
       resetMicUiIdle("❌ Transcription timed out — resolver did not respond.");
-    }, 12000);
+    }, 90000); // generous: first-run whisper model download can take tens of seconds
     _transcribeTimers.set(intent.id, timerId);
     return true;
   }
@@ -865,12 +911,14 @@
       }
       if (msg.needs_explain && msg.top) {
         _pendingExplainFallback = msg.top.summary || "";
+        _pendingExplainRid = msg.resolution_id || 0;
         _emit({
           type: "explain",
           utterance: _pendingUtterance,
           label: msg.top.label || "",
           role: msg.top.role || "",
           summary: msg.top.summary || "",
+          resolution_id: _pendingExplainRid,
         });
       }
       return;
@@ -878,7 +926,8 @@
 
     if (msg.type === "explain") {
       const expEl = shadow.querySelector("#gaze-explanation-text");
-      if (expEl) {
+      // correlate the reply with the pin that asked for it (a newer pin wins the element)
+      if (expEl && String(expEl.dataset.rid || "") === String(msg.resolution_id || "")) {
         if (msg.ok && msg.explanation) {
           expEl.innerHTML = `<span style="color:#f8fafc;">${escapeHtml(msg.explanation)}</span>`;
         } else {
@@ -890,7 +939,11 @@
     }
 
     if (msg.type === "choose") {
-      if (!msg.ok) {
+      state.choosePending = false;
+      if (msg.ok) {
+        state.lensActive = false; // consumed — Python already re-rendered the pin
+      } else {
+        // keep the lens live so dwell/keys still work after a failed choose
         showHudMessage(`<div style="color:#f87171;">⚠️ ${escapeHtml(msg.error || "Selection failed.")}</div>`);
       }
       return;
@@ -1075,6 +1128,7 @@
 
       recorder.start(80);
       recordingStartedAt = performance.now();
+      state.recordStartEpoch = Date.now() / 1000; // sent with audio so Python can shift whisper word times to wall-clock
     } catch (err) {
       isListening = false;
       releaseAudioStream();
@@ -1322,8 +1376,8 @@
   }
 
   function extractTableData(selector) {
-    const el = document.querySelector(selector) || document.querySelector("table");
-    if (!el) return null;
+    const el = selector ? document.querySelector(selector) : null;
+    if (!el) return null; // honest miss — never silently extract an arbitrary table
     const headers = Array.from(el.querySelectorAll("thead th, tr:first-child th")).map((th) => th.innerText.trim());
     const rows = Array.from(el.querySelectorAll("tbody tr")).map((tr) =>
       Array.from(tr.querySelectorAll("td")).map((td) => td.innerText.trim())
@@ -1431,8 +1485,8 @@
           <span class="lens-key">[${idx + 1}] Select</span>
           <span class="lens-prob">P = ${probPct}%</span>
         </div>
-        <div class="lens-title">${cand.label || cand.selector}</div>
-        <div class="lens-desc">↳ ${cand.consequence_preview || cand.consequence || "Execute action"}</div>
+        <div class="lens-title">${escapeHtml(cand.label || cand.selector)}</div>
+        <div class="lens-desc">↳ ${escapeHtml(cand.consequence_preview || cand.consequence || "Execute action")}</div>
         <div class="lens-desc" style="margin-top:5px;font-size:10px;color:#64748b;">Dwell ${state.dwellMs}ms · Key ${idx + 1} · Click</div>
         <div class="dwell-bar" id="dwell-${idx}"></div>
       `;
@@ -1471,10 +1525,10 @@
   }
 
   function selectLensCandidate(idx, modality) {
-    if (!state.lensActive) return;
+    if (!state.lensActive || state.choosePending) return;
     if (idx < 0 || idx >= state.lensCandidates.length) return;
     if (emitChoose(idx, modality)) {
-      state.lensActive = false; // Python re-renders; don't fire duplicate chooses while it responds
+      state.choosePending = true; // Python re-renders; cleared by the choose reply
     }
   }
 
@@ -1516,7 +1570,11 @@
     Configure(opts) {
       Object.assign(state, opts || {});
       syncModeUI();
+      refreshHotkeyLabels();
       updateLiveInspector(state.pointerX, state.pointerY);
+    },
+    setIntentNonce(n) {
+      _intentNonce = String(n || "");
     },
     getInputValue() {
       return hudInput ? hudInput.value : "";

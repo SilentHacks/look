@@ -90,6 +90,11 @@ class TestServiceIntents(unittest.TestCase):
 
     # -- helpers ---------------------------------------------------------
 
+    def _intent(self, **fields: Any) -> Dict[str, Any]:
+        # Every intent on the binding must carry the per-session nonce.
+        fields.setdefault("nonce", self.session._intent_nonce)
+        return fields
+
     def _await_reply(self, replies: List[Dict[str, Any]], timeout: float = 2.0) -> Dict[str, Any]:
         deadline = time.time() + timeout
         while not replies and time.time() < deadline:
@@ -100,12 +105,12 @@ class TestServiceIntents(unittest.TestCase):
     def _resolve_via_intent(self) -> Dict[str, Any]:
         replies: List[Dict[str, Any]] = []
         service.handle_intent(
-            {
-                "id": 41,
-                "type": "resolve",
-                "utterance": "what does this do",
+            self._intent(
+                id=41,
+                type="resolve",
+                utterance="what does this do",
                 **_pushed(time.time()),
-            },
+            ),
             replies.append,
         )
         return self._await_reply(replies)
@@ -143,14 +148,14 @@ class TestServiceIntents(unittest.TestCase):
 
         replies: List[Dict[str, Any]] = []
         service.handle_intent(
-            {
-                "id": 50,
-                "type": "choose",
-                "resolution_id": self.session.resolution_id + 99,
-                "candidate_index": 1,
-                "modality": "semantic_lens",
-                "execute": True,
-            },
+            self._intent(
+                id=50,
+                type="choose",
+                resolution_id=self.session.resolution_id + 99,
+                candidate_index=1,
+                modality="semantic_lens",
+                execute=True,
+            ),
             replies.append,
         )
         stale_reply = self._await_reply(replies)
@@ -159,14 +164,14 @@ class TestServiceIntents(unittest.TestCase):
 
         replies.clear()
         service.handle_intent(
-            {
-                "id": 51,
-                "type": "choose",
-                "resolution_id": self.session.resolution_id,
-                "candidate_index": 1,
-                "modality": "semantic_lens",
-                "execute": True,
-            },
+            self._intent(
+                id=51,
+                type="choose",
+                resolution_id=self.session.resolution_id,
+                candidate_index=1,
+                modality="semantic_lens",
+                execute=True,
+            ),
             replies.append,
         )
         ok_reply = self._await_reply(replies)
@@ -175,14 +180,14 @@ class TestServiceIntents(unittest.TestCase):
     def test_choose_without_active_resolution(self) -> None:
         replies: List[Dict[str, Any]] = []
         service.handle_intent(
-            {
-                "id": 52,
-                "type": "choose",
-                "resolution_id": 1,
-                "candidate_index": 1,
-                "modality": "semantic_lens",
-                "execute": True,
-            },
+            self._intent(
+                id=52,
+                type="choose",
+                resolution_id=1,
+                candidate_index=1,
+                modality="semantic_lens",
+                execute=True,
+            ),
             replies.append,
         )
         reply = self._await_reply(replies)
@@ -195,13 +200,13 @@ class TestServiceIntents(unittest.TestCase):
         """A ~24MB base64 payload is far over the ~16MB bound and must be rejected, not decoded."""
         replies: List[Dict[str, Any]] = []
         service.handle_intent(
-            {
-                "id": 60,
-                "type": "transcribe",
-                "audio_base64": "QUJD" * 6_000_000,
-                "mime_type": "audio/webm",
-                "sample_rate": 16000,
-            },
+            self._intent(
+                id=60,
+                type="transcribe",
+                audio_base64="QUJD" * 6_000_000,
+                mime_type="audio/webm",
+                sample_rate=16000,
+            ),
             replies.append,
         )
         reply = self._await_reply(replies)
@@ -211,13 +216,13 @@ class TestServiceIntents(unittest.TestCase):
         """Tiny undecodable audio must reply (ok False, or ok True with empty text) — never raise."""
         replies: List[Dict[str, Any]] = []
         service.handle_intent(
-            {
-                "id": 61,
-                "type": "transcribe",
-                "audio_base64": base64.b64encode(b"not real audio").decode("ascii"),
-                "mime_type": "audio/webm",
-                "sample_rate": 16000,
-            },
+            self._intent(
+                id=61,
+                type="transcribe",
+                audio_base64=base64.b64encode(b"not real audio").decode("ascii"),
+                mime_type="audio/webm",
+                sample_rate=16000,
+            ),
             replies.append,
         )
         reply = self._await_reply(replies, timeout=120.0)
@@ -231,22 +236,23 @@ class TestServiceIntents(unittest.TestCase):
     def test_configure_intent_flips_mode(self) -> None:
         replies: List[Dict[str, Any]] = []
         service.handle_intent(
-            {
-                "id": 70,
-                "type": "configure",
-                "mode": "simulated",
-                "sigma_px": 140.0,
-            },
+            self._intent(
+                id=70,
+                type="configure",
+                mode="simulated",
+                sigma_px=140.0,
+            ),
             replies.append,
         )
         reply = self._await_reply(replies)
-        self.assertIs(reply.get("ok"), True)
+        # ok reports the push result — no live ws on the dead port, but values are stored.
+        self.assertIs(reply.get("ok"), False)
         self.assertEqual(self.session.tracker.mode, "simulated")
         self.assertAlmostEqual(self.session.tracker.sigma_px, 140.0)
 
     def test_unknown_intent_type_replies_ok_false(self) -> None:
         replies: List[Dict[str, Any]] = []
-        service.handle_intent({"id": 80, "type": "frobnicate"}, replies.append)
+        service.handle_intent(self._intent(id=80, type="frobnicate"), replies.append)
         reply = self._await_reply(replies)
         self.assertIs(reply.get("ok"), False)
         self.assertIn("unknown", str(reply.get("error", "")).lower())

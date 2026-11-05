@@ -397,7 +397,7 @@ def resolve_candidates(
             or (primary_ranked[0].probability - primary_ranked[1].probability) < LLM_RERANK_MAX_MARGIN
         )
     ):
-        _try_llm_rerank(primary_ranked[:LLM_RERANK_TOP_K], utterance, llm_client)
+        _try_llm_rerank(primary_ranked, utterance, llm_client)
 
     top = primary_ranked[0] if primary_ranked else None
     margin = (primary_ranked[0].probability - primary_ranked[1].probability) if len(primary_ranked) >= 2 else (top.probability if top else 0.0)
@@ -430,11 +430,14 @@ def resolve_candidates(
 
 
 def _try_llm_rerank(
-    top_candidates: List[ScoredCandidate],
+    ranked: List[ScoredCandidate],
     utterance: str,
     llm_client: Any,
 ) -> None:
-    """Best-effort structured re-ranking via ctx.llm (never raises if unconfigured)."""
+    """Best-effort structured re-ranking via ctx.llm (never raises if unconfigured).
+    Scores the top LLM_RERANK_TOP_K of ``ranked``, then re-sorts the whole list —
+    sorting a slice would leave the caller's ordering unchanged."""
+    top_candidates = ranked[:LLM_RERANK_TOP_K]
     try:
         items = [
             {
@@ -469,6 +472,6 @@ def _try_llm_rerank(
             if total > 0:
                 for sc in top_candidates:
                     sc.probability /= total
-            top_candidates.sort(key=lambda s: s.probability, reverse=True)
+            ranked.sort(key=lambda s: s.probability, reverse=True)
     except Exception:
         return

@@ -45,8 +45,9 @@ class _SessionRequestHandler(BaseHTTPRequestHandler):
     """GET-only request handler: demo page + /api/status JSON."""
 
     def log_message(self, format: str, *args: Any) -> None:
-        # Keep logs clean; only log errors
-        if args and str(args[0]).startswith(("4", "5")):
+        # Keep logs clean; only log errors. BaseHTTPRequestHandler calls this as
+        # log_message(template, requestline, code, size) — the status code is args[1].
+        if len(args) >= 2 and str(args[1]).startswith(("4", "5")):
             logger.warning("%s - - [%s] %s", self.client_address[0], self.log_date_time_string(), format % args)
 
     def do_GET(self) -> None:

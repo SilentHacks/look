@@ -49,7 +49,8 @@ def extract_deictic_anchors(
             raw_word = str(item.get("word") or "").strip().lower()
             clean = re.sub(r"[^a-z]", "", raw_word)
             if clean in ALL_DEICTICS:
-                t_start = float(item.get("start") or t_arm)
+                start_v = item.get("start")
+                t_start = float(start_v) if start_v is not None else t_arm
                 anchors.append(
                     DeicticAnchor(
                         word=clean,

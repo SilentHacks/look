@@ -9,6 +9,7 @@ explanation requests (``explain_element``) via ``ctx.llm``.
 from __future__ import annotations
 
 import base64
+import html
 import json
 import logging
 import time
@@ -54,8 +55,10 @@ def resolve_now(
     when absent the live state is pulled from the pinned Chrome tab. Returns the
     ResolutionResult dict plus chrome_connected/mode (and speech_recognition meta).
     """
+    if mode is not None and str(mode) not in ("hover", "simulated"):
+        return {"ok": False, "error": f"unsupported tracking mode: {mode!r} (supported: hover, simulated)"}
     mode = str(mode or session.tracker.mode or "hover")
-    session.tracker.mode = mode
+    session.configure(mode=mode)  # stores; pushes to the overlay only when a ws is live
 
     raw_utterance = str(utterance or "").strip()
     word_timestamps = words
@@ -65,8 +68,11 @@ def resolve_now(
         from .voice import record_microphone, transcribe_audio_buffer
 
         try:
+            audio_epoch = time.time()  # whisper word times are audio-relative; shift to wall-clock
             audio_pcm = record_microphone(duration_s=duration_s)
-            transcribed_text, word_ts = transcribe_audio_buffer(audio_pcm, model_name=_whisper_model_name())
+            transcribed_text, word_ts = transcribe_audio_buffer(
+                audio_pcm, model_name=_whisper_model_name(), audio_epoch=audio_epoch
+            )
         except Exception as exc:
             return {"ok": False, "error": f"voice capture/transcription failed: {exc}"}
         if transcribed_text:
@@ -78,19 +84,23 @@ def resolve_now(
                 "recorded_duration_s": duration_s,
             }
 
-    utterance = raw_utterance or "What is this?"
+    if not raw_utterance:
+        return {"ok": False, "error": "empty utterance — no spoken or typed query to resolve"}
+    utterance = raw_utterance
     now = time.time()
 
     if pushed is not None:
         session.ingest(pushed.get("fixations") or [])
         pointer = pushed.get("pointer")
-        if isinstance(pointer, dict):
+        # A null pointer is honest "no pointer yet" — never record it as a fixation.
+        if isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
             session.tracker.record_point(
-                float(pointer.get("x_vp", 0.0)),
-                float(pointer.get("y_vp", 0.0)),
+                float(pointer["x_vp"]),
+                float(pointer["y_vp"]),
                 scroll_x=float(pointer.get("scroll_x", 0.0)),
                 scroll_y=float(pointer.get("scroll_y", 0.0)),
                 timestamp=now,
+                bias_offset=session.recalibrator.offset,
             )
         candidates = [
             CandidateElement.from_wire(raw)
@@ -111,7 +121,8 @@ def resolve_now(
         return {"ok": False, "error": "No pointer/gaze fixations recorded yet."}
 
     res = resolve_candidates(
-        candidates, fixations, utterance, t_arm=now, word_timestamps=word_timestamps, llm_client=llm
+        candidates, fixations, utterance, t_arm=now, word_timestamps=word_timestamps,
+        llm_client=llm if llm is not None else _LLM,
     )
     payload = res.to_dict()
 
@@ -135,11 +146,12 @@ def resolve_now(
             payload["extracted_data"] = extracted_str
             payload["svg_scatter"] = svg_chart
             hud_html = (
-                f"<div><strong>Extracted {res.top.candidate.label} ({len(table_payload.get('rows') or [])} rows):</strong></div>"
+                f"<div><strong>Extracted {html.escape(str(res.top.candidate.label))} ({len(table_payload.get('rows') or [])} rows):</strong></div>"
                 f"<div style='margin-top:6px;'>{svg_chart}</div>"
             )
 
     session.render_resolution_in_browser(res, hud_html=hud_html)
+    payload["resolution_id"] = session.resolution_id
     payload["chrome_connected"] = session.is_chrome_reachable()
     payload["mode"] = mode
     if transcription_meta:
@@ -173,6 +185,11 @@ def explain_element(utterance: str, label: str, role: str, summary: str, llm: An
 def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None]) -> None:
     """Dispatch one overlay -> Python intent (Runtime.addBinding) to the right handler."""
     session = get_shared_session()
+    if intent.get("nonce") != session._intent_nonce:
+        # The binding is callable by any same-frame page script; only the overlay we
+        # injected (post-inject setIntentNonce) knows the per-session nonce.
+        reply({"ok": False, "error": "unauthorized intent"})
+        return
     itype = str(intent.get("type") or "")
     try:
         if itype == "resolve":
@@ -196,6 +213,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                     "ok": True,
                     "decision": res.get("decision"),
                     "intent_class": res.get("intent_class"),
+                    "resolution_id": res.get("resolution_id"),
                     "needs_explain": res.get("intent_class") == "read_only" and res.get("decision") == "pin_immediate",
                     "top": {
                         "label": top.get("label"),
@@ -245,15 +263,18 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             audio_bytes = base64.b64decode(b64_data)
             sample_rate = int(intent.get("sample_rate") or 16000)
+            epoch_raw = intent.get("audio_epoch")
+            audio_epoch = float(epoch_raw) if epoch_raw else None
             text, words_out = transcribe_audio_buffer(
-                audio_bytes, sample_rate=sample_rate, model_name=_whisper_model_name()
+                audio_bytes, sample_rate=sample_rate, model_name=_whisper_model_name(),
+                audio_epoch=audio_epoch,
             )
             reply({"ok": True, "text": text, "words": words_out})
             return
 
         if itype == "configure":
-            session.configure(mode=intent.get("mode"), sigma_px=intent.get("sigma_px"))
-            reply({"ok": True, "mode": session.tracker.mode})
+            ok = session.configure(mode=intent.get("mode"), sigma_px=intent.get("sigma_px"))
+            reply({"ok": ok, "mode": session.tracker.mode})
             return
 
         reply({"ok": False, "error": "unknown intent type"})
