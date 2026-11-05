@@ -2,8 +2,7 @@
 
 Registers:
 - 5 tools: ``gaze_resolve``, ``gaze_choose``, ``gaze_highlight``, ``gaze_calibrate``, ``gaze_benchmark``
-- 2 hooks: ``pre_llm_call`` (auto-injects resolved DOM candidates when deictic pronouns are used)
-  and ``on_session_end``
+- 1 hook: ``pre_llm_call`` (auto-injects resolved DOM candidates when deictic pronouns are used)
 - In-session slash command ``/gaze`` and CLI subcommand ``hermes gaze``
 - Bundled skill ``gaze-telepathy``
 """
@@ -67,10 +66,6 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
         logger.debug("hermes-gaze pre_llm_call resolution skipped: %s", exc)
         return None
 
-
-def _on_session_end(**kwargs: Any) -> None:
-    """Preserve pins and answer embed across turns until the next question or manual clear."""
-    return
 
 
 def _handle_slash_command(raw_args: str) -> str:
@@ -191,7 +186,6 @@ def register(ctx: Any) -> None:
         )
 
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
-    ctx.register_hook("on_session_end", _on_session_end)
     ctx.register_command(
         "gaze",
         handler=_handle_slash_command,

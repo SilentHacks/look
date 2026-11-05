@@ -2,23 +2,8 @@
 
 from __future__ import annotations
 
-import importlib.util
-import json
-import sys
 import unittest
 from pathlib import Path
-
-_PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-if "hermes_gaze" not in sys.modules:
-    _spec = importlib.util.spec_from_file_location(
-        "hermes_gaze",
-        _PLUGIN_ROOT / "__init__.py",
-        submodule_search_locations=[str(_PLUGIN_ROOT)],
-    )
-    assert _spec is not None and _spec.loader is not None
-    _pkg = importlib.util.module_from_spec(_spec)
-    sys.modules["hermes_gaze"] = _pkg
-    _spec.loader.exec_module(_pkg)
 
 from hermes_gaze.benchmark.run_benchmark import build_synthetic_dashboard_candidates, run_benchmark_suite
 from hermes_gaze.resolver.bayesian_fusion import gaussian_box_integral, resolve_candidates

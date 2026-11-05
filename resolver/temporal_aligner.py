@@ -120,26 +120,3 @@ def align_fixations_to_utterance(
     return results
 
 
-def transcribe_audio_pcm16(
-    pcm_samples: bytes,
-    sample_rate: int = 16000,
-    model_name: str = "base.en",
-) -> Tuple[str, List[Dict[str, object]]]:
-    """Optional local faster-whisper transcription with word-level timestamps."""
-    import importlib.util
-
-    if importlib.util.find_spec("faster_whisper") is None:
-        return "", []
-    import numpy as np
-    from faster_whisper import WhisperModel
-
-    audio_np = np.frombuffer(pcm_samples, dtype=np.int16).astype(np.float32) / 32768.0
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
-    segments, _info = model.transcribe(audio_np, word_timestamps=True, language="en")
-    words: List[Dict[str, object]] = []
-    text_parts: List[str] = []
-    for seg in segments:
-        text_parts.append(seg.text.strip())
-        for w in getattr(seg, "words", None) or []:
-            words.append({"word": w.word, "start": float(w.start), "end": float(w.end)})
-    return " ".join(text_parts).strip(), words

@@ -143,7 +143,7 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
 
     bridge = get_shared_bridge()
     raw_utterance = str(args.get("utterance") or "").strip()
-    record_voice = bool(args.get("record_voice", False)) or raw_utterance.lower() in ("voice", "speak", "mic")
+    record_voice = bool(args.get("record_voice", False))
     mode = str(args.get("mode") or bridge.tracker.mode or "hover")
     bridge.tracker.mode = mode
 
@@ -242,7 +242,7 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
 
 def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
     bridge = get_shared_bridge()
-    raw_idx = args.get("candidate_index") if "candidate_index" in args else args.get("choice", 1)
+    raw_idx = args.get("candidate_index", 1)
     idx = int(raw_idx) - 1
     execute = bool(args.get("execute", True))
 

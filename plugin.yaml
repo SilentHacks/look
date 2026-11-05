@@ -4,7 +4,6 @@ description: "Point with your eyes or cursor, command with your voice: multimoda
 author: "Abid"
 kind: standalone
 license: MIT
-homepage: "https://github.com/Abid/hermes-gaze"
 requires_hermes: ">=0.22.0"
 platforms:
   - macos
@@ -24,7 +23,6 @@ provides_tools:
   - gaze_benchmark
 provides_hooks:
   - pre_llm_call
-  - on_session_end
 config_schema:
   mode:
     type: str

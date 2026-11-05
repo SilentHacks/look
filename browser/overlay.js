@@ -1386,7 +1386,6 @@
   }
 
   function clearOverlays(source) {
-    window.__LAST_CLEAR_REASON__ = (source || "unknown") + " at " + new Date().toISOString() + "\n" + new Error().stack;
     pinsLayer.innerHTML = "";
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
