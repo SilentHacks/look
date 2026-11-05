@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
-from .browser.cdp_bridge import get_shared_bridge, launch_chrome_with_cdp
+from .browser.cdp_bridge import get_shared_session, launch_chrome_with_cdp
 from .resolver.bayesian_fusion import resolve_candidates
 from .resolver.temporal_aligner import has_deictic_pronoun
 from .tools import ALL_TOOLS, check_gaze_requirements, handle_gaze_resolve
@@ -41,7 +41,7 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
     if not text or not has_deictic_pronoun(text):
         return None
 
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
     if not bridge.is_chrome_reachable():
         return None
 
@@ -71,7 +71,7 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
 def _handle_slash_command(raw_args: str) -> str:
     argv = (raw_args or "").strip().split()
     sub = argv[0].lower() if argv else "status"
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
 
     if sub == "demo":
         from .tracker.voice_listener import get_shared_voice_server
@@ -81,7 +81,7 @@ def _handle_slash_command(raw_args: str) -> str:
         url = f"http://{server.host}:{server.port}/"
         if not bridge.is_chrome_reachable() or not bridge.is_mic_capture_working():
             try:
-                bridge.eval_js("window.close();", inject_overlay=False)
+                bridge.eval_js("window.close();")
             except Exception:
                 pass
             launch_chrome_with_cdp(url)
@@ -142,7 +142,7 @@ def _setup_cli(subparser: argparse.ArgumentParser) -> None:
 def _run_cli(args: argparse.Namespace) -> int:
     sub = getattr(args, "gaze_subcommand", None) or "status"
     if sub == "demo":
-        bridge = get_shared_bridge()
+        bridge = get_shared_session()
         bridge.tracker.mode = args.mode
         print(_handle_slash_command("demo"))
         return 0
@@ -169,7 +169,7 @@ def register(ctx: Any) -> None:
     sigma_px = float(ctx.get_config("sigma_px", 120.0) or 120.0)
     cdp_url = str(ctx.get_config("cdp_url", "http://127.0.0.1:9222") or "http://127.0.0.1:9222")
 
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
     bridge.cdp_http_url = cdp_url.rstrip("/")
     bridge.tracker.mode = mode
     bridge.tracker.sigma_px = sigma_px

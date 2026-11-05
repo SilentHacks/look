@@ -7,7 +7,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .benchmark.run_benchmark import build_synthetic_dashboard_candidates, format_benchmark_markdown, run_benchmark_suite
-from .browser.cdp_bridge import get_shared_bridge
+from .browser.cdp_bridge import get_shared_session
 from .resolver.bayesian_fusion import resolve_candidates
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 from .tracker.simulated_gaze import FixationSample
@@ -141,7 +141,7 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
     if os.environ.get("HERMES_GAZE_INTERNAL") == "1":
         return json.dumps({"ok": False, "error": "Internal explanation session - CDP disabled."})
 
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
     raw_utterance = str(args.get("utterance") or "").strip()
     record_voice = bool(args.get("record_voice", False))
     mode = str(args.get("mode") or bridge.tracker.mode or "hover")
@@ -211,7 +211,6 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
             sel = json.dumps(res.top.candidate.selector)
             table_payload = bridge.eval_js(
                 f"window.__HERMES_GAZE_OVERLAY__.extractTableData({sel});",
-                inject_overlay=False,
             )
         if not table_payload:
             table_payload = {
@@ -241,7 +240,7 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
     raw_idx = args.get("candidate_index", 1)
     idx = int(raw_idx) - 1
     execute = bool(args.get("execute", True))
@@ -281,7 +280,6 @@ def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
         )
         bridge.eval_js(
             f"window.__HERMES_GAZE_OVERLAY__.renderPins({pin_js}, {json.dumps(msg)}); {click_stmt} true;",
-            inject_overlay=True,
         )
 
     return json.dumps(
@@ -303,7 +301,7 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
     if os.environ.get("HERMES_GAZE_INTERNAL") == "1":
         return json.dumps({"ok": False, "error": "Internal explanation session - CDP disabled."})
 
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
     selector = str(args.get("selector") or "")
     label = str(args.get("label") or selector)
     hud_message = str(args.get("hud_message") or "")
@@ -315,7 +313,6 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
         if extract_table:
             raw_table = bridge.eval_js(
                 f"window.__HERMES_GAZE_OVERLAY__.extractTableData({json.dumps(selector)})",
-                inject_overlay=True,
             )
             if isinstance(raw_table, dict) and raw_table.get("rows"):
                 table_csv = extract_structured_data(raw_table, fmt="csv")
@@ -350,7 +347,7 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
           return true;
         }})()
         """
-        bridge.eval_js(js, inject_overlay=True)
+        bridge.eval_js(js)
 
     return json.dumps(
         {
@@ -367,7 +364,7 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def handle_gaze_calibrate(args: Dict[str, Any], **kwargs: Any) -> str:
-    bridge = get_shared_bridge()
+    bridge = get_shared_session()
     mode = str(args.get("mode") or bridge.tracker.mode or "hover")
     sigma_px = float(args.get("sigma_px", bridge.tracker.sigma_px))
     if args.get("reset_drift"):

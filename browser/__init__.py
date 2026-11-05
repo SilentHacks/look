@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from .cdp_bridge import CDPBridge, get_shared_bridge
+from .cdp_bridge import CdpSession, GazeSession, get_shared_session
 
 __all__ = [
-    "CDPBridge",
-    "get_shared_bridge",
+    "CdpSession",
+    "GazeSession",
+    "get_shared_session",
 ]

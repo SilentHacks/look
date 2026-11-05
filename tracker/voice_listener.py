@@ -246,9 +246,9 @@ class VoiceServerHandler(BaseHTTPRequestHandler):
 
         if path == "/api/status":
             _ensure_package_importable()
-            from hermes_gaze.browser.cdp_bridge import get_shared_bridge
+            from hermes_gaze.browser.cdp_bridge import get_shared_session
 
-            bridge = get_shared_bridge()
+            bridge = get_shared_session()
             status = {
                 "ok": True,
                 "stt_engine": "faster-whisper",
