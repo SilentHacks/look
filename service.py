@@ -12,8 +12,12 @@ import base64
 import html
 import json
 import logging
+import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
+
+_RECORD_LOCK = threading.Lock()
 
 from .browser.cdp_bridge import GazeSession, get_shared_session
 from .config import GazeConfig
@@ -37,6 +41,78 @@ def set_runtime(config: Optional[GazeConfig], llm: Any = None) -> None:
 def _whisper_model_name() -> str:
     return _CONFIG.whisper_model if _CONFIG is not None else GazeConfig.whisper_model
 
+def _record_path() -> Path:
+    try:
+        from plugins.plugin_storage import plugin_data_dir
+        root = plugin_data_dir("hermes-gaze")
+    except ImportError:
+        root = Path.home() / ".cache" / "hermes-gaze"
+    return Path(root) / "replay.jsonl"
+
+
+def _append_record(session: GazeSession, event: Dict[str, Any]) -> str:
+    path = _record_path()
+    with _RECORD_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    session.last_record_path = str(path)
+    return str(path)
+
+
+def _compact_context(selected: Dict[str, Any], scopes: Sequence[Dict[str, Any]]) -> str:
+    def description(scope: Dict[str, Any]) -> str:
+        return f"{scope.get('scope') or scope.get('role') or 'element'} {str(scope.get('label') or scope.get('id'))[:65]}"
+
+    actions = {}
+    for scope in scopes:
+        for action in scope.get("actions") or []:
+            actions.setdefault(action.get("selector"), action)
+    text = f"[gaze_ref] Subject: {description(selected)} ({str(selected.get('selector') or '')[:120]})"
+    text += ": " + str(selected.get("summary") or selected.get("consequence") or "")[:160]
+    alternatives = [description(scope) for scope in scopes if scope.get("id") != selected.get("id")]
+    if alternatives:
+        text += " | Alternatives: " + "; ".join(alternatives[:7])
+    if actions:
+        text += " | Actions (separate controls): " + "; ".join(
+            f"{str(a.get('label', 'action'))[:35]} {str(a.get('selector') or '')[:65]}: {str(a.get('consequence') or '')[:75]}"
+            for a in list(actions.values())[:3]
+        )
+    return text[:900]
+
+
+def _scope_payload(session: GazeSession, ranked: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    candidates = {str(c.get("id")): c for c in session.last_candidate_wire if c.get("id")}
+    anchor = (next((c for c in ranked if c.get("is_direct_hit")), None)
+              or next((c for c in session.last_candidate_wire if c.get("is_direct_hit")), None)
+              or (ranked[0] if ranked else {}))
+    anchor = candidates.get(str(anchor.get("id")), anchor)
+    anchor_id = str(anchor.get("id") or "")
+    chain = anchor.get("scope_ids") or [anchor_id]
+    scopes = [dict(candidates[str(sid)]) for sid in chain[:8] if str(sid) in candidates]
+    if not scopes and anchor:
+        scopes = [dict(anchor)]
+    ids = {s.get("id") for s in scopes}
+    default_id = ranked[0].get("id") if ranked and ranked[0].get("id") in ids else anchor_id
+    selected_id = session.scope_selection.get(anchor_id, default_id)
+    if selected_id not in ids:
+        selected_id = scopes[0]["id"] if scopes else anchor_id
+    selected = next((s for s in scopes if s.get("id") == selected_id), anchor)
+    return {"scopes": scopes, "selected_scope_id": selected_id, "context": _compact_context(selected, scopes),
+            "top": selected, "scope_anchor_id": anchor_id}
+
+
+def _render_scope(session: GazeSession, info: Dict[str, Any]) -> None:
+    if not session.is_chrome_reachable():
+        return
+    selected = info["top"]
+    message = f"<strong>Subject: {html.escape(str(selected.get('label') or ''))}</strong>"
+    message += f"<div>{html.escape(str(selected.get('summary') or ''))}</div>"
+    if info.get("needs_explain"):
+        message += f'<div id="gaze-explanation-text" data-rid="{session.resolution_id}">Asking Hermes…</div>'
+    session.eval_js(
+        f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([selected])}, {json.dumps(message)});true"
+    )
 
 def resolve_now(
     session: GazeSession,
@@ -107,18 +183,29 @@ def resolve_now(
             for raw in pushed.get("candidates") or []
             if isinstance(raw, dict)
         ]
+        session.last_candidate_wire = list(pushed.get("candidates") or [])
+        session.last_resolution_input = {"pointer": pointer, "fixations": pushed.get("fixations") or [],
+                                         "candidates": pushed.get("candidates") or [], "words": word_timestamps or [],
+                                         "utterance": utterance, "page_url": pushed.get("page_url")}
         with session._lock:
             session.last_candidates = candidates
     else:
         candidates = session.fetch_live_state_and_candidates(
             radius_px=getattr(session, "_candidate_radius_px", 380.0)
         )
+        session.last_candidate_wire = [vars(candidate).copy() for candidate in candidates]
 
     if not candidates:
         return {"ok": False, "error": "No DOM candidates extracted — is the overlay injected into the Chrome tab?"}
     fixations = session.ring_buffer.snapshot(now)
+    if pushed is None:
+        session.last_resolution_input.update({"words": word_timestamps or [], "utterance": utterance})
     if not fixations:
         return {"ok": False, "error": "No pointer/gaze fixations recorded yet."}
+    page_url = session.last_resolution_input.get("page_url")
+    if page_url != session.scope_page_url:
+        session.scope_selection.clear()
+        session.scope_page_url = page_url
 
     res = resolve_candidates(
         candidates, fixations, utterance, t_arm=now, word_timestamps=word_timestamps,
@@ -139,10 +226,7 @@ def resolve_now(
                 logger.debug("extractTableData eval failed: %s", exc)
         if table_payload:
             extracted_str = extract_structured_data(table_payload, fmt="csv")
-            svg_chart = render_svg_scatter(
-                table_payload.get("headers") or [],
-                table_payload.get("rows") or [],
-            )
+            svg_chart = render_svg_scatter(table_payload.get("headers") or [], table_payload.get("rows") or [])
             payload["extracted_data"] = extracted_str
             payload["svg_scatter"] = svg_chart
             hud_html = (
@@ -154,6 +238,25 @@ def resolve_now(
     payload["resolution_id"] = session.resolution_id
     payload["chrome_connected"] = session.is_chrome_reachable()
     payload["mode"] = mode
+    payload["page_url"] = page_url
+    payload.update(_scope_payload(session, payload.get("ranked") or []))
+    if payload["scope_anchor_id"] in session.scope_selection:
+        _render_scope(session, {**payload, "needs_explain": res.intent_class == "read_only"})
+    if session.is_chrome_reachable():
+        view = {key: payload[key] for key in ("scopes", "selected_scope_id", "resolution_id", "utterance")}
+        session.eval_js(f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(view)});true")
+    try:
+        _append_record(session, {"type": "resolution", "wall_time": time.time(),
+                                 "resolution_id": session.resolution_id, "mode": mode,
+                                 "page_url": payload["page_url"], "utterance": utterance,
+                                 "words": word_timestamps or [], "pointer": session.last_resolution_input.get("pointer", {}),
+                                 "fixations": session.last_resolution_input.get("fixations", []),
+                                 "candidates": session.last_resolution_input.get("candidates", []),
+                                 "result": payload})
+    except Exception as exc:
+        payload["ok"] = False
+        payload["error"] = f"resolution recorder failed: {exc}"
+        payload["record_error"] = str(exc)
     if transcription_meta:
         payload["speech_recognition"] = transcription_meta
     return payload
@@ -193,45 +296,22 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
     itype = str(intent.get("type") or "")
     try:
         if itype == "resolve":
-            res = resolve_now(
-                session,
-                utterance=str(intent.get("utterance") or ""),
-                words=intent.get("words"),
-                pushed={
-                    "pointer": intent.get("pointer"),
-                    "fixations": intent.get("fixations"),
-                    "candidates": intent.get("candidates"),
-                },
-            )
+            pushed = {"pointer": intent.get("pointer"), "fixations": intent.get("fixations"),
+                      "candidates": intent.get("candidates"), "page_url": intent.get("page_url")}
+            res = resolve_now(session, utterance=str(intent.get("utterance") or ""),
+                              words=intent.get("words"), pushed=pushed)
             if res.get("ok") is False:
                 reply({"ok": False, "error": str(res.get("error") or "resolution failed")})
                 return
-            ranked = res.get("ranked") or []
-            top = ranked[0] if ranked else {}
-            reply(
-                {
-                    "ok": True,
-                    "decision": res.get("decision"),
-                    "intent_class": res.get("intent_class"),
-                    "resolution_id": res.get("resolution_id"),
-                    "needs_explain": res.get("intent_class") == "read_only" and res.get("decision") == "pin_immediate",
-                    "top": {
-                        "label": top.get("label"),
-                        "role": top.get("role"),
-                        "summary": top.get("summary"),
-                        "selector": top.get("selector"),
-                        "probability": top.get("probability"),
-                    }
-                    if top
-                    else {},
-                }
-            )
+            reply({"ok": True, "decision": res.get("decision"), "intent_class": res.get("intent_class"),
+                   "resolution_id": res.get("resolution_id"), "needs_explain": res.get("intent_class") == "read_only",
+                   "scopes": res.get("scopes"), "selected_scope_id": res.get("selected_scope_id"),
+                   "context": res.get("context"), "top": res.get("top") or {}})
             return
 
         if itype == "choose":
-            # resolution_id 0/absent from the overlay means "active resolution" (no epoch check).
             payload = session.choose(
-                resolution_id=intent.get("resolution_id") or None,
+                resolution_id=intent.get("resolution_id"),
                 candidate_index=int(intent.get("candidate_index") or 1),
                 modality=str(intent.get("modality") or "semantic_lens"),
                 execute=bool(intent.get("execute", True)),
@@ -239,21 +319,80 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             reply(payload)
             return
 
-        if itype == "explain":
-            reply(
-                {
-                    "ok": True,
-                    "explanation": explain_element(
-                        str(intent.get("utterance") or ""),
-                        str(intent.get("label") or ""),
-                        str(intent.get("role") or ""),
-                        str(intent.get("summary") or ""),
-                        llm=_LLM,
-                    ),
-                }
-            )
+        if itype == "scope":
+            if intent.get("resolution_id") is None or int(intent["resolution_id"]) != session.resolution_id or session.last_resolution is None:
+                reply({"ok": False, "error": "stale or missing resolution"})
+                return
+            payload = session.last_resolution.to_dict()
+            info = _scope_payload(session, payload.get("ranked") or [])
+            sid = intent.get("scope_id")
+            chosen = next((s for s in info["scopes"] if s.get("id") == sid), None)
+            if chosen is None:
+                reply({"ok": False, "error": "scope_id is not a scope of the current resolution"})
+                return
+            session.scope_selection[info["scope_anchor_id"]] = sid
+            info.update({"selected_scope_id": sid, "top": chosen,
+                         "context": _compact_context(chosen, info["scopes"]),
+                         "resolution_id": session.resolution_id,
+                         "needs_explain": payload.get("intent_class") == "read_only"})
+            try:
+                _append_record(session, {"type": "scope", "wall_time": time.time(),
+                                         "resolution_id": session.resolution_id, "scope_id": sid,
+                                         "result": info, "input": session.last_resolution_input})
+            except Exception as exc:
+                reply({"ok": False, "error": f"could not record scope correction: {exc}"})
+                return
+            _render_scope(session, info)
+            reply({"ok": True, **info})
             return
 
+        if itype == "record":
+            if intent.get("resolution_id") is None or int(intent["resolution_id"]) != session.resolution_id or session.last_resolution is None:
+                reply({"ok": False, "error": "stale or missing resolution"})
+                return
+            info = _scope_payload(session, session.last_resolution.to_dict().get("ranked") or [])
+            sid = intent.get("scope_id")
+            chosen = next((s for s in info["scopes"] if s.get("id") == sid), None)
+            if chosen is None:
+                reply({"ok": False, "error": "scope_id is not a scope of the current resolution"})
+                return
+            session.scope_selection[info["scope_anchor_id"]] = sid
+            try:
+                path = _append_record(session, {"type": "record", "wall_time": time.time(),
+                                                "resolution_id": session.resolution_id, "scope_id": sid,
+                                                "confirmed_scope": chosen, "result": info,
+                                                "input": session.last_resolution_input})
+            except Exception as exc:
+                reply({"ok": False, "error": f"could not record confirmation: {exc}"})
+                return
+            reply({"ok": True, "path": path, "resolution_id": session.resolution_id})
+            return
+
+        if itype == "explain":
+            if intent.get("resolution_id") is None or int(intent["resolution_id"]) != session.resolution_id or session.last_resolution is None:
+                reply({"ok": False, "error": "stale or missing resolution"})
+                return
+            info = _scope_payload(session, session.last_resolution.to_dict().get("ranked") or [])
+            sid = intent.get("scope_id")
+            chosen = next((s for s in info["scopes"] if s.get("id") == sid), None)
+            if chosen is None:
+                reply({"ok": False, "error": "scope_id is not a scope of the current resolution"})
+                return
+            context = _compact_context(chosen, info["scopes"])
+            explanation = explain_element(str(intent.get("utterance") or ""),
+                                          str(chosen.get("label") or ""), str(chosen.get("scope") or chosen.get("role") or ""),
+                                          context, llm=_LLM)
+            try:
+                _append_record(session, {"type": "explain", "wall_time": time.time(),
+                                         "resolution_id": session.resolution_id, "scope_id": sid,
+                                         "utterance": intent.get("utterance"), "explanation": explanation,
+                                         "input": session.last_resolution_input})
+            except Exception as exc:
+                reply({"ok": False, "error": f"could not record explanation: {exc}"})
+                return
+            reply({"ok": True, "resolution_id": session.resolution_id, "scope_id": sid,
+                   "context": context, "explanation": explanation})
+            return
         if itype == "transcribe":
             from . import voice as _voice
 

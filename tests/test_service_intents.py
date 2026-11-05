@@ -10,8 +10,10 @@ Chrome is running on :9222. ``handle_intent`` replies are callback-style: we pas
 from __future__ import annotations
 
 import base64
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
@@ -78,6 +80,8 @@ def _pushed(now: float) -> Dict[str, Any]:
 
 class TestServiceIntents(unittest.TestCase):
     def setUp(self) -> None:
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"))
         # Port 1 is never a debuggable Chrome: keeps every pull path deterministic.
         self.session = GazeSession(cdp_http_url="http://127.0.0.1:1")
         self.addCleanup(self.session.close)

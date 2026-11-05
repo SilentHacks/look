@@ -13,7 +13,6 @@ not HTTP — the local demo server only serves the page + read-only status.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -50,13 +49,11 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
         ranked = res.get("ranked") or []
         if res.get("ok") is False or not ranked:
             return None
-        top_list = ranked[:3]
         context_block = (
-            "[gaze_ref — Live Chrome Deictic Resolution]\n"
+            f"{res.get('context', '[gaze_ref]')}\n"
             f"Utterance: {text}\n"
-            f"Intent Class: {res.get('intent_class')} | Decision Policy: {res.get('decision')}\n"
-            f"Top Resolved DOM Candidates: {json.dumps(top_list, ensure_ascii=False)}\n"
-            "Use `gaze_highlight` to display your answer in the Chrome HUD or `gaze_choose` to confirm a Lens card."
+            f"Intent: {res.get('intent_class')} | Decision: {res.get('decision')}\n"
+            "Use gaze_highlight to display the answer or gaze_choose to confirm an action."
         )
         return {"context": context_block}
     except Exception as exc:

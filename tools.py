@@ -175,8 +175,8 @@ def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
     session = get_shared_session()
     idx = int(args.get("candidate_index", 1))
     execute = bool(args.get("execute", True))
-    # Tool-initiated choose targets the active resolution; only the overlay sends an epoch id.
-    payload = session.choose(resolution_id=None, candidate_index=idx, execute=execute)
+    # Tool requests target the active resolution; binding requests supply their own epoch.
+    payload = session.choose(resolution_id=session.resolution_id, candidate_index=idx, execute=execute)
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 

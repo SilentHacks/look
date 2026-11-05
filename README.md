@@ -19,10 +19,34 @@ Raw gaze/pointer tracking suffers from ~80–180 px of spatial jitter and drift�
 ## Architecture
 
 - **One resolver, in Python.** All spatial-semantic scoring and the decision policy (`pin_immediate` / `execute_safe` / `open_semantic_lens` / `confirm_destructive`) live in `resolver/bayesian_fusion.py`. `browser/overlay.js` is a *terminal*: it renders the spotlight, pins, HUD, and Semantic Lens, and ships the raw inputs (pointer, fixations, candidates, mic audio) — it never re-implements resolution.
-- **Persistent CDP session.** `browser/cdp_bridge.py` keeps ONE websocket per pinned Chrome tab on a dedicated worker loop and registers `Runtime.addBinding("__hermesGazeIntent")`. Overlay → Python traffic is JSON intents (`resolve`, `choose`, `explain`, `transcribe`, `configure`); Python → overlay replies are `window.__HERMES_GAZE_OVERLAY__.onIntentResult(...)` evals. There is no HTTP API surface.
+- **Persistent CDP session.** `browser/cdp_bridge.py` keeps ONE websocket per pinned Chrome tab on a dedicated worker loop and registers `Runtime.addBinding("__hermesGazeIntent")`. Overlay → Python traffic is JSON intents (`resolve`, `scope`, `record`, `choose`, `explain`, `transcribe`, `configure`); Python → overlay replies are `window.__HERMES_GAZE_OVERLAY__.onIntentResult(...)` evals. There is no HTTP API surface.
 - **Honest failures.** When candidates or fixations are missing, `service.py` returns `{"ok": false, "error": ...}` — never a fabricated stand-in.
 - **Pointing modes:** `hover` (Magic Pointer, σ = 24 px) and `simulated` (cursor + Gaussian noise, default σ = 120 px) for developing and benchmarking the resolver under eye-tracker-grade uncertainty; camera-based tracking is deliberately not implemented in this revision.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
+
+### Scope context (demo foundation)
+
+Point at a campaign cell and resolve a question. The HUD offers **Cell · Row ·
+Column · Table · Panel**; rows and columns are sibling alternatives, not ancestors.
+Buttons and product cards also expose their containing scopes. Labels and summaries
+come from DOM semantics; demo `data-gaze-*` annotations are optional.
+
+- Click a scope, or use **↑** for the next alternative and **↓** for the previous.
+  This changes the subject and highlight, **never clicks a page control**.
+- The compact `[gaze_ref]` includes the selected subject, nearby scope alternatives,
+  and associated action controls. The hook and HUD explanations use the same context.
+  Action controls are described separately from the subject; this is not a new
+  automatic scope decider or action-execution system.
+- Click **Confirm intended scope & save trial** even when the initial selection
+  was correct. Corrections are not ground-truth confirmations until you confirm.
+
+Resolution, correction, and confirmation events append to `replay.jsonl` in
+Hermes's `plugin_data_dir("hermes-gaze")`, or `~/.cache/hermes-gaze/` standalone.
+These local recordings contain page URLs, utterances, word timestamps, pointer/
+fixation samples, DOM candidates, and results, **not microphone audio**. Treat them
+as potentially sensitive browsing data. Each line is JSON; `record` events identify
+confirmed intended scopes for later replay. Step 1 adds no external model service,
+training pipeline, or automatic scope-selection benchmark.
 
 ## Quickstart
 
@@ -38,7 +62,7 @@ Raw gaze/pointer tracking suffers from ~80–180 px of spatial jitter and drift�
 # from the shell
 hermes gaze demo
 hermes gaze benchmark
-python3 -m unittest         # full test suite (stdlib only — no Chrome needed)
+python3 -m unittest discover -s tests -t .  # full suite; no Chrome needed
 ```
 
 ## Documentation

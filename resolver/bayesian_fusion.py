@@ -107,6 +107,9 @@ class CandidateElement:
     is_direct_hit: bool = False
     summary: str = ""
     consequence: str = ""
+    scope: str = ""
+    scope_ids: List[str] = field(default_factory=list)
+    actions: List[Dict[str, Any]] = field(default_factory=list)
     backend_node_id: Optional[int] = None
     parent_container_id: Optional[str] = None
     attributes: Dict[str, Any] = field(default_factory=dict)
@@ -130,6 +133,11 @@ class CandidateElement:
             is_direct_hit=bool(raw.get("is_direct_hit", False)),
             summary=str(raw.get("summary") or ""),
             consequence=str(raw.get("consequence") or ""),
+            parent_container_id=raw.get("parent_container_id"),
+            scope=str(raw.get("scope") or ""),
+            scope_ids=list(raw.get("scope_ids") or []),
+            actions=list(raw.get("actions") or []),
+            attributes=dict(raw.get("attributes") or {}),
         )
 
     @property

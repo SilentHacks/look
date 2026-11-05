@@ -447,6 +447,10 @@ class GazeSession:
         self.last_candidates: List[CandidateElement] = []
         self.last_resolution: Optional[ResolutionResult] = None
         self.resolution_id = 0
+        self.scope_selection: Dict[str, str] = {}
+        self.last_candidate_wire: List[Dict[str, Any]] = []
+        self.last_resolution_input: Dict[str, Any] = {}
+        self.scope_page_url: Optional[str] = None
         self._dwell_ms, self._wiggle_trigger, self._hotkey = 450, True, "AltRight"
         self._candidate_radius_px = 380.0
         self._ingested_keys: set = set()
@@ -584,13 +588,15 @@ class GazeSession:
             return []
         js = (
             "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (!api || !api.state) return null;"
-            " const s = api.state; return {"
-            " pointer: { x_vp: s.pointerX, y_vp: s.pointerY, scroll_x: window.scrollX, scroll_y: window.scrollY },"
+            " const s = api.state; const locked = s.armed && s.lockedX !== null; return {"
+            " page_url: location.href,"
+            " pointer: { x_vp: locked ? s.lockedX : s.pointerX, y_vp: locked ? s.lockedY : s.pointerY, scroll_x: window.scrollX, scroll_y: window.scrollY },"
             " fixations: s.ringBuffer.slice(-25),"
-            f" candidates: api.extractCandidatesNear(s.pointerX, s.pointerY, {float(radius_px)})"
+            f" candidates: api.extractCandidatesNear(locked ? s.lockedX : s.pointerX, locked ? s.lockedY : s.pointerY, {float(radius_px)})"
             " }; })()"
         )
         data = self.eval_js(js) or {}
+        self.last_resolution_input = data
         self.ingest(data.get("fixations") or [])
         p = data.get("pointer") if isinstance(data.get("pointer"), dict) else {}
         if p.get("x_vp") is None or p.get("y_vp") is None:
@@ -666,7 +672,9 @@ class GazeSession:
             res = self.last_resolution
             if res is None or not res.ranked:
                 return {"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."}
-            if resolution_id is not None and int(resolution_id) != self.resolution_id:
+            if resolution_id is None:
+                return {"ok": False, "error": "resolution_id is required"}
+            if int(resolution_id) != self.resolution_id:
                 return {"ok": False, "error": "stale resolution"}
             idx = int(candidate_index) - 1
             if idx < 0 or idx >= len(res.ranked):

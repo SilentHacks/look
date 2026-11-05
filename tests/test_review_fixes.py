@@ -8,9 +8,11 @@ consuming its resolution, and LLM rerank actually re-ordering ``primary_ranked``
 
 from __future__ import annotations
 
+import tempfile
 import time
 import types
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
@@ -113,6 +115,8 @@ class TestSessionLifecycle(unittest.TestCase):
 
 class TestHonestNoPointer(unittest.TestCase):
     def setUp(self) -> None:
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"))
         self.session = GazeSession(cdp_http_url="http://127.0.0.1:1")
         self.addCleanup(self.session.close)
 
@@ -142,16 +146,18 @@ class TestHonestNoPointer(unittest.TestCase):
 
 class TestChooseConsumesResolution(unittest.TestCase):
     def setUp(self) -> None:
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"))
         self.session = GazeSession(cdp_http_url="http://127.0.0.1:1")
         self.addCleanup(self.session.close)
 
     def test_second_choose_fails_after_success(self) -> None:
         res = service.resolve_now(self.session, utterance="click this", pushed=_pushed(time.time()))
         self.assertNotEqual(res.get("ok"), False)
-        first = self.session.choose(candidate_index=1, execute=False)
+        first = self.session.choose(resolution_id=self.session.resolution_id, candidate_index=1, execute=False)
         self.assertIs(first.get("ok"), True)
         self.assertIsNone(self.session.last_resolution)
-        second = self.session.choose(candidate_index=1, execute=False)
+        second = self.session.choose(resolution_id=self.session.resolution_id, candidate_index=1, execute=False)
         self.assertIs(second.get("ok"), False)
 
 

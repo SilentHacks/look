@@ -35,6 +35,9 @@
     candidateRadiusPx: (prevState && prevState.candidateRadiusPx) || 380,
     hotkey: (prevState && prevState.hotkey) || "Backquote",
     resolutionId: 0,
+    scopes: [],
+    selectedScopeId: null,
+    scopePending: false,
     tucked: false,
     armed: false, // When true, lockedX / lockedY stay frozen while user interacts with HUD
     armedAt: 0,
@@ -488,6 +491,12 @@
         </div>
         <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">🔒 Lock (${hotkeyLabel()})</button>
       </div>
+      <nav id="hg-scopes" aria-label="Subject scope" style="display:none;margin:8px 0;font-size:12px;">
+        <div id="hg-scope-options" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+        <div style="margin-top:5px;color:#94a3b8;">↑/↓ change scope · Row and column are alternatives, not ancestors.</div>
+        <button class="ctrl-btn" id="hg-record" style="margin-top:5px;">Confirm intended scope &amp; save trial</button>
+        <span id="hg-record-status" role="status"></span>
+      </nav>
 
       <div class="chips-row">
         <button class="chip" data-prompt="What happens if I press this?">❓ What does this do?</button>
@@ -524,6 +533,15 @@
   const hudInput = hud.querySelector("#hg-input");
   const hudSend = hud.querySelector("#hg-send");
   const hudReply = hud.querySelector("#hg-reply");
+  const scopeNav = hud.querySelector("#hg-scopes");
+  const scopeOptions = hud.querySelector("#hg-scope-options");
+  const recordStatus = hud.querySelector("#hg-record-status");
+  hud.querySelector("#hg-record").addEventListener("click", () => {
+    if (state.selectedScopeId && !state.scopePending) {
+      recordStatus.textContent = "Saving…";
+      _emit({ type: "record", resolution_id: state.resolutionId, scope_id: state.selectedScopeId });
+    }
+  });
   if (prevInputVal && hudInput) {
     hudInput.value = prevInputVal;
   }
@@ -690,20 +708,8 @@
       return;
     }
     const near = extractCandidatesNear(x, y, 220);
-    // Find best candidate directly under or closest to (x, y)
-    let best = null;
-    let bestDist = Infinity;
-    for (const c of near) {
-      const [rx, ry, rw, rh] = c.rect_vp;
-      const inside = x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
-      const cx = rx + rw / 2;
-      const cy = ry + rh / 2;
-      const dist = Math.hypot(x - cx, y - cy) + (c.is_container ? 45 : 0) + (inside ? -100 : 0);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = c;
-      }
-    }
+    // The DOM hit identifies the inspector target; decisions stay in Python.
+    const best = near.find((c) => c.is_direct_hit) || null;
     state.hoveredCandidate = best;
     if (best) {
       targetName.textContent = `${best.label} (${formatRoleDisplayName(best.role || best.tag)})`;
@@ -803,9 +809,43 @@
     return true;
   }
 
+  function renderScopeOptions(msg) {
+    state.resolutionId = msg.resolution_id;
+    state.scopes = msg.scopes || [];
+    state.selectedScopeId = msg.selected_scope_id;
+    scopeOptions.replaceChildren();
+    scopeNav.style.display = state.scopes.length ? "block" : "none";
+    recordStatus.textContent = "";
+    for (const scope of state.scopes) {
+      const button = document.createElement("button");
+      button.className = "ctrl-btn";
+      button.textContent = scope.scope || scope.role;
+      button.title = `${scope.label}: ${scope.summary || ""}`;
+      button.setAttribute("aria-pressed", String(scope.id === state.selectedScopeId));
+      if (scope.id === state.selectedScopeId) button.style.borderColor = "#38bdf8";
+      button.addEventListener("click", () => selectScope(scope.id));
+      scopeOptions.appendChild(button);
+    }
+  }
+
+  function selectScope(scopeId) {
+    if (state.scopePending || scopeId === state.selectedScopeId) return;
+    state.scopePending = _emit({
+      type: "scope", resolution_id: state.resolutionId, scope_id: scopeId,
+    });
+  }
+
+  function stepScope(direction) {
+    const index = state.scopes.findIndex((scope) => scope.id === state.selectedScopeId);
+    const next = state.scopes[index + direction];
+    if (next) selectScope(next.id);
+  }
   function emitResolve(utterance, words) {
     const text = (utterance || "").trim();
     if (!text) return false;
+    state.scopePending = false;
+    state.scopes = [];
+    scopeNav.style.display = "none";
     const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
     const px = locked ? state.lockedX : state.pointerX;
     const py = locked ? state.lockedY : state.pointerY;
@@ -816,6 +856,7 @@
     const intent = {
       type: "resolve",
       utterance: text,
+      page_url: location.href,
       pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
       fixations: state.ringBuffer.slice(-25),
       candidates: extractCandidatesNear(px, py, state.candidateRadiusPx || 380),
@@ -903,21 +944,30 @@
       return;
     }
 
-    if (msg.type === "resolve") {
-      if (msg.id < _lastSentResolveId) return; // stale response — last resolve wins
+    if (msg.type === "record") {
+      if (msg.resolution_id && msg.resolution_id !== state.resolutionId) return;
+      recordStatus.textContent = msg.ok ? `Saved: ${msg.path}` : `Save failed: ${msg.error}`;
+      return;
+    }
+
+    if (msg.type === "resolve" || msg.type === "scope") {
+      if (msg.type === "resolve" && msg.id < _lastSentResolveId) return;
+      if (msg.type === "scope") {
+        state.scopePending = false;
+        if (msg.resolution_id && msg.resolution_id < state.resolutionId) return;
+      }
       if (!msg.ok) {
         showHudMessage(`<div style="color:#f87171;">⚠️ ${escapeHtml(msg.error || "Resolver error.")}</div>`);
         return;
       }
+      renderScopeOptions(msg);
       if (msg.needs_explain && msg.top) {
         _pendingExplainFallback = msg.top.summary || "";
         _pendingExplainRid = msg.resolution_id || 0;
         _emit({
           type: "explain",
           utterance: _pendingUtterance,
-          label: msg.top.label || "",
-          role: msg.top.role || "",
-          summary: msg.top.summary || "",
+          scope_id: state.selectedScopeId,
           resolution_id: _pendingExplainRid,
         });
       }
@@ -925,6 +975,7 @@
     }
 
     if (msg.type === "explain") {
+      if (msg.scope_id !== state.selectedScopeId) return;
       const expEl = shadow.querySelector("#gaze-explanation-text");
       // correlate the reply with the pin that asked for it (a newer pin wins the element)
       if (expEl && String(expEl.dataset.rid || "") === String(msg.resolution_id || "")) {
@@ -1192,6 +1243,11 @@
 
   hudInput.addEventListener("keydown", (e) => {
     e.stopPropagation();
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && state.scopes.length) {
+      e.preventDefault();
+      stepScope(e.key === "ArrowUp" ? 1 : -1);
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault();
       emitResolve(hudInput.value);
@@ -1215,6 +1271,12 @@
 
   function onWindowKeyDown(e) {
     if (isEditableTarget(e)) return;
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && state.scopes.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      stepScope(e.key === "ArrowUp" ? 1 : -1);
+      return;
+    }
     if (e.code === "Space" && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
@@ -1272,121 +1334,225 @@
   }
 
   function buildSelector(el) {
-    if (el.id) return `#${el.id}`;
-    const tag = el.tagName.toLowerCase();
-    if (tag === "th" || tag === "td") {
-      const parentTable = el.closest("table");
-      const tablePrefix = parentTable && parentTable.id ? `#${parentTable.id} ` : "";
-      const idx = el.cellIndex !== undefined ? el.cellIndex + 1 : 1;
-      return `${tablePrefix}${tag}:nth-child(${idx})`;
+    if (!el || !el.tagName) return "";
+    const parts = [];
+    let node = el;
+    while (node && node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase();
+      if (node.id) {
+        const idSelector = `#${CSS.escape(node.id)}`;
+        if (document.querySelectorAll(idSelector).length === 1) {
+          parts.unshift(idSelector);
+          break;
+        }
+      }
+      const siblings = node.parentElement
+        ? Array.from(node.parentElement.children).filter((sibling) => sibling.tagName === node.tagName)
+        : [];
+      parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(node) + 1})` : tag);
+      node = node.parentElement;
     }
-    const cls = Array.from(el.classList || []).slice(0, 2).join(".");
-    return cls ? `${tag}.${cls}` : tag;
+    return parts.join(" > ");
   }
 
   function extractCandidatesNear(x, y, radiusPx) {
     const rad = radiusPx || 240;
-    const selectors = "button, a, input, select, textarea, [role='button'], [data-gaze-target], table, th, td, [role='columnheader'], [role='cell'], [data-card], section.panel, article.card, [data-metric], abbr";
+    const selectors = "button, a, input, select, textarea, [role='button'], [data-gaze-target], table, tr, th, td, [role='grid'], [role='row'], [role='columnheader'], [role='cell'], [role='gridcell'], [role='rowheader'], [data-card], section, article, [data-metric], abbr";
     const nodes = Array.from(document.querySelectorAll(selectors));
-
-    // Direct hit test via document.elementFromPoint
-    const directEl = (typeof document.elementFromPoint === "function" && x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight)
-      ? document.elementFromPoint(x, y)
-      : null;
+    const directEl = typeof document.elementFromPoint === "function" && x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight
+      ? document.elementFromPoint(x, y) : null;
     const directCandidate = directEl && !directEl.closest("#hermes-gaze-root")
-      ? (directEl.closest(selectors) || directEl)
-      : null;
-    if (directCandidate && !nodes.includes(directCandidate) && !directCandidate.closest("#hermes-gaze-root")) {
-      nodes.unshift(directCandidate);
-    }
+      ? directEl.closest(selectors) || directEl : null;
+    if (directCandidate && !nodes.includes(directCandidate)) nodes.unshift(directCandidate);
 
     const results = [];
+    const byElement = new Map();
+    const tableRows = (table) => Array.from(table.querySelectorAll("tr,[role='row']"));
+    const tableHeaders = (table) => Array.from(table.querySelectorAll("thead th, thead [role='columnheader'], [role='row'] [role='columnheader']"));
+    const containerFor = (el) => el.parentElement && el.parentElement.closest("table,[role='grid'],[data-card],article.card,section.panel,section,article");
+    const shortText = (el, max = 120) => (el && (el.innerText || el.textContent) || "").trim().replace(/\s+/g, " ").slice(0, max);
+    const contextLabel = (el) => {
+      const explicit = el.getAttribute("aria-label") || el.getAttribute("data-gaze-label");
+      if (explicit) return explicit.trim();
+      const labelledBy = el.getAttribute("aria-labelledby");
+      if (labelledBy) {
+        const labels = labelledBy.split(/\s+/).map((id) => document.getElementById(id)).filter(Boolean).map((node) => shortText(node));
+        if (labels.length) return labels.join(" ").slice(0, 100);
+      }
+      const heading = el.querySelector("h1,h2,h3,h4,h5,h6,[role='heading']");
+      return heading ? shortText(heading, 80) : (el.id || "");
+    };
+    const scopeId = (el) => buildSelector(el);
+    const addCandidate = (el, {scope, id, selector, rect, summary, parent} = {}) => {
+      if (!el || el.closest("#hermes-gaze-root")) return null;
+      const actualSelector = selector || buildSelector(el);
+      if (!actualSelector) return null;
+      const r = rect || el.getBoundingClientRect();
+      const tag = el.tagName.toLowerCase();
+      const label = getAccessibleLabel(el);
+      const role = el.getAttribute("role") || (tag === "th" ? "columnheader" : tag === "td" ? "cell" :
+        tag === "tr" ? "row" : tag === "table" ? "table" : tag === "a" ? "link" :
+        tag === "button" ? "button" : ["section", "article"].includes(tag) ? "panel" : tag);
+      const isContainer = ["table", "grid", "row", "column", "panel", "card", "section", "article", "ul", "ol"].includes(scope || role) ||
+        ["table", "section", "article", "ul", "ol"].includes(tag) || el.hasAttribute("data-card");
+      const isInteractive = ["button", "a", "input", "select", "textarea"].includes(tag) || role === "button";
+      const isDestructive = /delete|remove|purge|drop|destroy|pay|revoke/i.test(label + " " + (el.className || ""));
+      const candidate = {
+        id: id || actualSelector, tag, role, label, selector: actualSelector, scope: scope || role,
+        scope_ids: [], parent_container_id: parent ? scopeId(parent) : "",
+        rect_vp: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+        rect_doc: [Math.round(r.left + window.scrollX), Math.round(r.top + window.scrollY), Math.round(r.width), Math.round(r.height)],
+        is_container: isContainer, is_interactive: isInteractive, is_destructive: isDestructive,
+        is_direct_hit: Boolean(el === directCandidate), summary: summary || el.getAttribute("data-gaze-summary") || "",
+        consequence: el.getAttribute("data-consequence") || "", actions: [],
+      };
+      const existing = byElement.get(id || actualSelector);
+      if (existing) {
+        if (scope) existing.scope = scope;
+        if (summary) existing.summary = summary;
+        return existing;
+      }
+      byElement.set(id || actualSelector, candidate);
+      results.push(candidate);
+      return candidate;
+    };
+    const getCellContext = (cell) => {
+      const row = cell.closest("tr,[role='row']");
+      const table = cell.closest("table,[role='grid']");
+      if (!row || !table) return { row, table, header: null, value: shortText(cell), key: "" };
+      const cells = Array.from(row.querySelectorAll("th,td,[role='cell'],[role='gridcell'],[role='columnheader']"));
+      const col = Math.max(0, cells.indexOf(cell));
+      const headers = tableHeaders(table);
+      const header = headers[col] || null;
+      const rowKey = cells.find((item) => item !== cell && item.matches("th,[role='rowheader']")) ||
+        (cells[0] !== cell ? cells[0] : null);
+      return { row, table, header, value: shortText(cell), key: rowKey ? shortText(rowKey, 60) : "", col };
+    };
 
-    for (let i = 0; i < nodes.length; i++) {
-      const el = nodes[i];
+    for (const el of nodes) {
       if (el.closest("#hermes-gaze-root")) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 8 || r.height < 8) continue;
-
       const cx = Math.max(r.left, Math.min(x, r.right));
       const cy = Math.max(r.top, Math.min(y, r.bottom));
-      const dist = Math.hypot(x - cx, y - cy);
-      if (dist > rad) continue;
+      if (Math.hypot(x - cx, y - cy) > rad && el !== directCandidate) continue;
 
-      const tag = el.tagName.toLowerCase();
-      const isContainer = ["table", "section", "article", "ul", "ol"].includes(tag) || el.hasAttribute("data-card");
-      const role = el.getAttribute("role") || (
-        isContainer ? tag :
-        tag === "a" ? "link" :
-        tag === "th" ? "columnheader" :
-        tag === "td" ? "cell" :
-        tag === "input" || tag === "textarea" ? "textbox" :
-        tag === "button" ? "button" :
-        tag
-      );
-      const label = getAccessibleLabel(el);
-      const isDestructive = /delete|remove|purge|drop|destroy|pay|revoke/i.test(label + " " + (el.className || ""));
-      const isInteractive = !isContainer && (["button", "a", "input", "select", "textarea"].includes(tag) || el.getAttribute("role") === "button");
-
-      let summary = el.getAttribute("data-gaze-summary") || "";
-      if (tag === "table" && !summary) {
-        const rows = el.querySelectorAll("tbody tr").length;
-        const headers = Array.from(el.querySelectorAll("thead th")).map((th) => th.innerText.trim());
-        summary = `Table: ${headers.length} columns (${headers.join(", ")}), ${rows} rows`;
-      } else if (tag === "th" && !summary) {
-        const table = el.closest("table");
-        const tableLabel = table ? (table.getAttribute("data-gaze-label") || table.id || "table") : "table";
-        summary = `Column header "${label}" in ${tableLabel}`;
-      } else if (tag === "td" && !summary) {
-        const table = el.closest("table");
-        const tableLabel = table ? (table.getAttribute("data-gaze-label") || table.id || "table") : "table";
-        const colIdx = el.cellIndex;
-        const th = table && colIdx !== undefined ? table.querySelectorAll("thead th")[colIdx] : null;
-        const colName = th ? th.innerText.trim() : `col ${colIdx !== undefined ? colIdx + 1 : ""}`;
-        summary = `Table cell "${label}" (${colName}) in ${tableLabel}`;
+      const scopeCell = el.closest("th,td,[role='cell'],[role='gridcell'],[role='columnheader']");
+      const context = scopeCell ? getCellContext(scopeCell) : null;
+      const table = context && context.table || el.closest("table,[role='grid']") || (el.matches("table,[role='grid']") ? el : null);
+      const row = context && context.row || (el.matches("tr,[role='row']") ? el : null);
+      const cell = scopeCell || null;
+      const ancestorScopes = [];
+      for (let ancestor = el.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.matches("[data-card],article.card,section.panel,section,article")) ancestorScopes.push(ancestor);
       }
+      const card = ancestorScopes.find((ancestor) => ancestor.matches("[data-card],article.card"));
+      const panel = ancestorScopes.find((ancestor) => ancestor.matches("section.panel,section,article"));
+      const parent = containerFor(el);
+      let summary = "";
+      if (context) {
+        const tableName = contextLabel(table) || "table";
+        summary = `${context.key ? `${context.key}: ` : ""}${context.header ? shortText(context.header, 60) : `Column ${context.col + 1}`} = ${context.value} in ${tableName}`.slice(0, 180);
+      } else if (row) {
+        const cells = Array.from(row.querySelectorAll("th,td,[role='cell'],[role='gridcell'],[role='rowheader']"));
+        const headers = table ? tableHeaders(table) : [];
+        const values = cells.map((item, index) => `${headers[index] ? `${shortText(headers[index], 40)}: ` : ""}${shortText(item, 60)}`).filter(Boolean);
+        summary = `Row${values.length ? `: ${values.join("; ")}` : ""}`.slice(0, 180);
+      } else if (table) {
+        const headers = tableHeaders(table).map((header) => shortText(header, 50)).filter(Boolean);
+        summary = `Table${contextLabel(table) ? ` ${contextLabel(table)}` : ""}: ${tableRows(table).length} rows${headers.length ? `, columns ${headers.join(", ")}` : ""}`.slice(0, 180);
+      } else if (panel) summary = `Panel${contextLabel(panel) ? ` ${contextLabel(panel)}` : ""}: ${shortText(panel, 140)}`;
 
-      const isDirectHit = Boolean(
-        !isContainer &&
-        (el === directCandidate || (!directCandidate && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom))
-      );
-
-      results.push({
-        id: el.id || `gaze-cand-${i}`,
-        tag,
-        role,
-        label,
-        selector: buildSelector(el),
-        rect_vp: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
-        rect_doc: [
-          Math.round(r.left + window.scrollX),
-          Math.round(r.top + window.scrollY),
-          Math.round(r.width),
-          Math.round(r.height),
-        ],
-        is_container: isContainer,
-        is_interactive: isInteractive,
-        is_destructive: isDestructive,
-        is_direct_hit: isDirectHit,
-        summary,
-        consequence: el.getAttribute("data-consequence") || "",
+      const candidate = addCandidate(el, {
+        scope: context ? (el === scopeCell ? "cell" : (el.getAttribute("role") || el.tagName.toLowerCase())) : row ? "row" : el.matches("table,[role='grid']") ? "table" : el.matches("[data-card],article.card") ? "card" : panel ? "panel" : undefined,
+        summary, parent,
       });
+      if (!candidate) continue;
+
+      const scopes = [];
+      const pushScope = (scopeEl, scope, custom) => {
+        if (!scopeEl) return;
+        const item = addCandidate(scopeEl, custom || { scope, parent: containerFor(scopeEl) });
+        if (item && !scopes.some((entry) => entry.id === item.id)) scopes.push(item);
+      };
+      if (candidate.id !== (cell && scopeId(cell))) pushScope(el, candidate.scope);
+      if (cell) pushScope(cell, "cell", { scope: "cell", summary });
+      if (row) pushScope(row, "row");
+      if (context && context.header) {
+        const h = context.header;
+        const hr = h.getBoundingClientRect();
+        const colCells = tableRows(table).map((tr) => Array.from(tr.querySelectorAll("th,td,[role='cell'],[role='gridcell'],[role='columnheader']"))[context.col]).filter(Boolean);
+        if (colCells.length) {
+          const rects = colCells.map((item) => item.getBoundingClientRect());
+          const top = Math.min(...rects.map((item) => item.top));
+          const bottom = Math.max(...rects.map((item) => item.bottom));
+          const left = Math.min(...rects.map((item) => item.left));
+          const right = Math.max(...rects.map((item) => item.right));
+          pushScope(h, "column", {
+            scope: "column", id: `${scopeId(h)}::column:${context.col + 1}`, selector: scopeId(h),
+            rect: { left, top, width: right - left, height: bottom - top }, parent: table,
+            summary: `Column ${shortText(h, 60)} in ${contextLabel(table) || "table"}`,
+          });
+        } else if (hr.width) pushScope(h, "column");
+      }
+      if (table) pushScope(table, "table");
+      for (const ancestor of ancestorScopes) {
+        if (ancestor !== table) pushScope(ancestor, ancestor.matches("[data-card],article.card") ? "card" : "panel");
+      }
+      candidate.scope = cell && el === cell ? "cell" : candidate.scope;
+      candidate.scope_ids = scopes.map((item) => item.id);
+
+      const actionRoot = panel || table;
+      if (actionRoot) {
+        const controls = Array.from(document.querySelectorAll("button,a,[role='button'],input[type='button'],input[type='submit']"));
+        for (const control of controls) {
+          const controlsTarget = control.getAttribute("aria-controls");
+          const explicitlyAssociated = controlsTarget && table && controlsTarget.split(/\s+/).includes(table.id);
+          const consequence = control.getAttribute("data-consequence") || "";
+          const tableName = table && contextLabel(table);
+          const consequenceMatchesTable = Boolean(tableName && consequence.toLowerCase().includes(tableName.toLowerCase()));
+          if (control.closest("#hermes-gaze-root") || (table
+            ? !table.contains(control) && !explicitlyAssociated && !consequenceMatchesTable
+            : !actionRoot.contains(control))) continue;
+          const actionLabel = getAccessibleLabel(control);
+          const action = {
+            label: actionLabel, selector: buildSelector(control),
+            consequence: consequence || actionLabel,
+            is_destructive: /delete|remove|purge|drop|destroy|pay|revoke/i.test(actionLabel + " " + (control.className || "")),
+          };
+          if (action.selector && !candidate.actions.some((item) => item.selector === action.selector)) candidate.actions.push(action);
+        }
+      }
+    }
+
+    for (const candidate of results) {
+      if (!candidate.is_interactive) continue;
+      if (!candidate.actions.some((action) => action.selector === candidate.selector)) {
+        candidate.actions.push({
+          label: candidate.label, selector: candidate.selector,
+          consequence: candidate.consequence || candidate.label, is_destructive: candidate.is_destructive,
+        });
+      }
     }
     return results;
   }
 
   function extractTableData(selector) {
     const el = selector ? document.querySelector(selector) : null;
-    if (!el) return null; // honest miss — never silently extract an arbitrary table
-    const headers = Array.from(el.querySelectorAll("thead th, tr:first-child th")).map((th) => th.innerText.trim());
-    const rows = Array.from(el.querySelectorAll("tbody tr")).map((tr) =>
-      Array.from(tr.querySelectorAll("td")).map((td) => td.innerText.trim())
+    if (!el) return null;
+    const text = (node) => (node.innerText || node.textContent || "").trim().replace(/\s+/g, " ");
+    const headers = Array.from(el.querySelectorAll("thead th, thead [role='columnheader'], tr:first-child th")).map((th) => text(th));
+    const rows = Array.from(el.querySelectorAll("tbody tr,[role='rowgroup'] [role='row']")).map((tr) =>
+      Array.from(tr.querySelectorAll("td,[role='cell'],[role='gridcell']")).map((td) => text(td))
     );
     return { headers, rows };
   }
 
   function clearOverlays(source) {
     pinsLayer.innerHTML = "";
+    state.scopes = [];
+    state.selectedScopeId = null;
+    scopeNav.style.display = "none";
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
     state.lensActive = false;
@@ -1585,6 +1751,10 @@
     armInteraction,
     extractCandidatesNear,
     extractTableData,
+    renderScopeContext(info) {
+      _pendingUtterance = info.utterance || "";
+      renderScopeOptions(info);
+    },
     renderPins,
     renderSemanticLens,
     clearOverlays,
