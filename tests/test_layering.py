@@ -19,7 +19,12 @@ from pathlib import Path
 from typing import Iterator, List, Tuple
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-_SKIP_DIRS = {"tests", "benchmark", "docs", "skills", "__pycache__", ".git"}
+_SKIP_DIRS = {
+    "tests", "benchmark", "docs", "skills", "__pycache__", ".git",
+    # Virtualenvs hold foreign code (some non-UTF-8 test fixtures like joblib's);
+    # PM creates .venv on `hermes pm install`.
+    ".venv", "venv", "env", ".env", "ENV", ".hermes",
+}
 _PURE_DIRS = {"resolver", "tracker"}
 
 _ABS_SELF_IMPORT = re.compile(r"^\s*(?:import|from)\s+hermes_gaze\b")

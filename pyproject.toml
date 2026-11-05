@@ -12,7 +12,7 @@ dependencies = [
     "numpy>=1.26.0,<3.0.0",
     "parakeet-mlx>=0.2.0,<1.0.0; sys_platform == 'darwin'",
     "pyobjc-framework-CoreML>=13.0,<14.0; sys_platform == 'darwin'",
-    "huggingface_hub>=0.23.0,<1.0.0",
+    "huggingface_hub>=0.23.0,<2.0.0",
 ]
 
 [tool.pytest.ini_options]
