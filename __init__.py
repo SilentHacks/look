@@ -85,6 +85,12 @@ def register(ctx: Any) -> None:
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
 
+    # Pre-warm the CoreML/ANE STT runner on a daemon thread — the first load
+    # pays a one-time ~31s ANE compile; better here than on the first utterance.
+    from .voice import prewarm
+
+    prewarm()
+
     for name, schema, handler, emoji in ALL_TOOLS:
         ctx.register_tool(
             name=name,

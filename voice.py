@@ -107,6 +107,20 @@ def _get_coreml_runner() -> Any:
         return _COREML_RUNNER or None
 
 
+def prewarm() -> None:
+    """Kick the CoreML/ANE runner load on a daemon thread.
+
+    The first ParakeetCoreML load pays a one-time ANE compile (~31s on a fresh
+    machine). Doing it at plugin register means the first utterance is already
+    warm; a failed load just marks the runner unavailable exactly as it would
+    lazily. Only the primary backend is warmed — parakeet-mlx's 2.4 GB model
+    stays lazy since it's a fallback.
+    """
+    if sys.platform != "darwin":
+        return
+    threading.Thread(target=_get_coreml_runner, name="gaze-asr-prewarm", daemon=True).start()
+
+
 def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[Dict[str, object]]:
     """Group SentencePiece tokens (``▁`` = word boundary) into word dicts; uses token ``end`` when present."""
     # Subword tokens mark each word start with a leading space or the
