@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Northstar Cloud · Marketing & Compute Console</title>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --muted: #64748b;
+    --brand: #2563eb;
+    --danger: #dc2626;
+    --danger-bg: #fef2f2;
+    --danger-border: #fecaca;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    padding: 24px 36px 160px;
+    line-height: 1.5;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--surface);
+    padding: 14px 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    margin-bottom: 24px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .brand-logo {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .brand h1 { font-size: 16px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; }
+  .env-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+  }
+
+  /* Dense Toolbar (8px spacing) */
+  .toolbar-cluster {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  button {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #1e293b;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    transition: background 0.12s, border-color 0.12s;
+  }
+  button:hover { background: #f1f5f9; border-color: #94a3b8; }
+  button.danger {
+    background: var(--danger-bg);
+    border-color: var(--danger-border);
+    color: var(--danger);
+  }
+  button.danger:hover { background: #fee2e2; }
+  button.primary {
+    background: #2563eb;
+    border-color: #1d4ed8;
+    color: #ffffff;
+  }
+  button.primary:hover { background: #1d4ed8; }
+
+  .grid-layout {
+    display: grid;
+    grid-template-columns: 1.45fr 1fr;
+    gap: 22px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .panel-title { font-size: 14.5px; font-weight: 600; color: #0f172a; }
+  .panel-sub { font-size: 12px; color: var(--muted); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  th {
+    color: #475569;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border);
+  }
+  tbody tr:hover { background: #f8fafc; }
+
+  .cards-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .product-card {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 15px;
+    transition: border-color 0.15s;
+  }
+  .product-card:hover { border-color: #94a3b8; }
+  .product-card h3 {
+    font-size: 14px;
+    margin-bottom: 4px;
+    color: #0f172a;
+  }
+  .product-meta {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 11.5px;
+    color: #2563eb;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .product-card p {
+    font-size: 12.5px;
+    color: #475569;
+  }
+  #toast {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #0f172a;
+    color: #f8fafc;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(15, 23, 42, 0.2);
+    display: none;
+    z-index: 99999;
+  }
+</style>
+</head>
+<body>
+<div id="toast"></div>
+
+<header>
+  <div class="brand">
+    <div class="brand-logo">N</div>
+    <h1>Northstar Cloud Console</h1>
+    <span class="env-badge">us-east-prod</span>
+  </div>
+
+  <!-- Dense Toolbar with 8px spacing -->
+  <div class="toolbar-cluster">
+    <button id="btn-run-query" data-consequence="Executes active SQL query against Q4 Production warehouse (safe, ~1.2s)">Run Query</button>
+    <button id="btn-schedule" data-consequence="Opens cron schedule modal for recurring daily query runs">Schedule</button>
+    <button id="btn-purge-cache" class="danger" data-consequence="Clears 1.4 GB of cached SQL query results for this workspace (reversible, forces re-fetch on next load)">Purge Cache</button>
+    <span style="width:8px;"></span>
+    <button id="btn-export-csv" class="primary" data-consequence="Downloads campaign performance table immediately as raw .csv">Export CSV</button>
+    <button id="btn-generate-report" data-consequence="Opens executive PDF report builder & chart configuration modal">Generate Report</button>
+  </div>
+</header>
+
+<div class="grid-layout">
+  <section class="panel" id="panel-campaigns">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Q4 Acquisition Campaigns</div>
+        <div class="panel-sub">Live attribution metrics across paid and organic channels</div>
+      </div>
+      <span class="env-badge">5 Active</span>
+    </div>
+    <table id="campaigns-table" data-gaze-label="Campaign Performance Table" data-gaze-summary="Table: 6 columns (Campaign, Channel, Clicks, CTR, Spend, ROAS), 5 rows">
+      <thead>
+        <tr>
+          <th>Campaign</th>
+          <th>Channel</th>
+          <th>Clicks</th>
+          <th>CTR</th>
+          <th>Spend</th>
+          <th>ROAS</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Neuralink Launch</td>
+          <td>X Video</td>
+          <td>18,420</td>
+          <td>4.8%</td>
+          <td>$4,200</td>
+          <td>6.4x</td>
+        </tr>
+        <tr>
+          <td>Hermes DevTools</td>
+          <td>GitHub</td>
+          <td>9,110</td>
+          <td>3.9%</td>
+          <td>$1,850</td>
+          <td>5.1x</td>
+        </tr>
+        <tr>
+          <td>Magic Pointer Promo</td>
+          <td>YouTube</td>
+          <td>14,200</td>
+          <td>3.2%</td>
+          <td>$3,600</td>
+          <td>4.7x</td>
+        </tr>
+        <tr>
+          <td>Search Retarget</td>
+          <td>Google</td>
+          <td>6,300</td>
+          <td>2.1%</td>
+          <td>$3,100</td>
+          <td>2.3x</td>
+        </tr>
+        <tr>
+          <td>Enterprise Outbound</td>
+          <td>LinkedIn</td>
+          <td>2,890</td>
+          <td>1.6%</td>
+          <td>$4,900</td>
+          <td>1.8x</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel" id="panel-compare">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">Inference Cluster Tiers</div>
+        <div class="panel-sub">Active deployment endpoints</div>
+      </div>
+      <span class="env-badge">2 Clusters</span>
+    </div>
+    <div class="cards-col">
+      <article class="product-card card" id="card-hermes-pro" data-card="true" data-gaze-label="Hermes-4-70B-Pro" data-gaze-summary="Card: Hermes-4-70B-Pro · 128k ctx · 142 tok/s · $0.80/M tokens · Local/Cloud hybrid">
+        <h3>Hermes-4-70B-Pro</h3>
+        <div class="product-meta">142 tok/s · 128k Context · $0.80 / 1M tok</div>
+        <p>Full tool-calling &amp; browser agent accuracy (94.2% BFCL), native structured JSON output, and subagent delegation.</p>
+      </article>
+
+      <article class="product-card card" id="card-hermes-flash" data-card="true" data-gaze-label="Hermes-4-8B-Flash" data-gaze-summary="Card: Hermes-4-8B-Flash · 64k ctx · 410 tok/s · $0.10/M tokens · Runs 100% on MacBook M-series">
+        <h3>Hermes-4-8B-Flash (On-Device)</h3>
+        <div class="product-meta">410 tok/s · 64k Context · $0.10 / 1M tok</div>
+        <p>Ultra-low-latency local model optimized for real-time deictic re-ranking (&lt;120ms), Apple Silicon Metal acceleration.</p>
+      </article>
+    </div>
+  </section>
+</div>
+
+<script>
+  function showToast(msg) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.style.display = "block";
+    setTimeout(() => { t.style.display = "none"; }, 3200);
+  }
+  document.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      showToast(`Website Action Executed: ${btn.innerText} (#${btn.id})`);
+    });
+  });
+</script>
+<script src="/overlay.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,56 @@
+name: hermes-gaze
+version: "0.1.0"
+description: "Point with your eyes or cursor, command with your voice: multimodal deictic reference resolution ('what does this do?', 'export these') for Google Chrome and Hermes Agent."
+author: "Abid"
+kind: standalone
+license: MIT
+homepage: "https://github.com/Abid/hermes-gaze"
+requires_hermes: ">=0.22.0"
+platforms:
+  - macos
+  - linux
+tags:
+  - browser
+  - gaze
+  - voice
+  - multimodal
+  - accessibility
+  - chrome
+provides_tools:
+  - gaze_resolve
+  - gaze_choose
+  - gaze_highlight
+  - gaze_calibrate
+  - gaze_benchmark
+provides_hooks:
+  - pre_llm_call
+  - on_session_end
+config_schema:
+  mode:
+    type: str
+    default: "hover"
+    description: "Pointing source: 'hover' (exact cursor / Magic Pointer), 'simulated' (cursor + Gaussian noise for gaze testing), or 'webcam' (MediaPipe Face Landmarker)."
+  cdp_url:
+    type: str
+    default: "http://127.0.0.1:9222"
+    description: "Local Chrome DevTools Protocol HTTP/WebSocket endpoint."
+  sigma_px:
+    type: float
+    default: 120.0
+    description: "Spatial uncertainty radius (CSS pixels) used in 'simulated' or uncalibrated 'webcam' mode."
+  dwell_ms:
+    type: int
+    default: 450
+    description: "Dwell selection duration in milliseconds for Semantic Lens cards."
+  wiggle_trigger:
+    type: bool
+    default: true
+    description: "Summon the spotlight/HUD when the user quickly wiggles the cursor (Googlebook Magic Pointer style)."
+  hotkey:
+    type: str
+    default: "AltRight"
+    description: "In-browser push-to-talk / spotlight key code (e.g., 'AltRight', 'Backquote', 'F8')."
+  whisper_model:
+    type: str
+    default: "base.en"
+    description: "Local faster-whisper model name for deictic speech alignment."

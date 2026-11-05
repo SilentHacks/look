@@ -1,0 +1,21 @@
+[project]
+name = "hermes-gaze"
+version = "0.1.0"
+description = "Multimodal deictic reference resolution (pointer/gaze + speech + DOM) for Chrome and Hermes Agent"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = { text = "MIT" }
+dependencies = [
+    "websockets>=12.0,<16.0",
+]
+
+[project.optional-dependencies]
+voice = [
+    "faster-whisper>=1.0.0,<2.0.0",
+    "sounddevice>=0.4.6,<0.6.0",
+]
+webcam = [
+    "numpy>=1.26.0,<3.0.0",
+    "mediapipe>=0.10.9,<0.11.0",
+    "opencv-python-headless>=4.8.0,<5.0.0",
+]
