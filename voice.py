@@ -49,6 +49,11 @@ _PARAKEET_LOCK = threading.Lock()
 _COREML_RUNNER: Any = None  # ParakeetCoreML | False (load attempted and failed)
 _COREML_LOCK = threading.Lock()
 
+# Which backend served the most recent transcribe_audio_buffer call — the
+# overlay labels itself "local Whisper" otherwise, which lies whenever ANE
+# or MLX actually did the work.
+_LAST_BACKEND: Optional[str] = None
+
 # Base64 audio payloads from the overlay's transcribe intent are bounded before decode.
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
 
@@ -273,12 +278,18 @@ def transcribe_audio_buffer(
     if 0.002 < peak < 0.65:
         audio_np = np.clip(audio_np * (0.85 / peak), -1.0, 1.0).astype(np.float32)
 
+    global _LAST_BACKEND
     if backend in ("auto", "parakeet"):
-        result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0)) \
-            or _transcribe_parakeet(audio_np, sample_rate, float(audio_epoch or 0.0))
+        result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0))
         if result is not None:
+            _LAST_BACKEND = "parakeet-coreml-ane"
+            return result
+        result = _transcribe_parakeet(audio_np, sample_rate, float(audio_epoch or 0.0))
+        if result is not None:
+            _LAST_BACKEND = "parakeet-mlx"
             return result
 
+    _LAST_BACKEND = "whisper"
     model = get_whisper_model(model_name)
     segments, _info = model.transcribe(
         audio_np,

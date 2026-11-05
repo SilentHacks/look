@@ -255,7 +255,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             return
 
         if itype == "transcribe":
-            from .voice import transcribe_audio_buffer
+            from . import voice as _voice
 
             b64_data = str(intent.get("audio_base64") or "")
             if len(b64_data) > int(MAX_AUDIO_BYTES * 1.34):
@@ -265,11 +265,11 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             sample_rate = int(intent.get("sample_rate") or 16000)
             epoch_raw = intent.get("audio_epoch")
             audio_epoch = float(epoch_raw) if epoch_raw else None
-            text, words_out = transcribe_audio_buffer(
+            text, words_out = _voice.transcribe_audio_buffer(
                 audio_bytes, sample_rate=sample_rate, model_name=_whisper_model_name(),
                 audio_epoch=audio_epoch,
             )
-            reply({"ok": True, "text": text, "words": words_out})
+            reply({"ok": True, "text": text, "words": words_out, "backend": _voice._LAST_BACKEND})
             return
 
         if itype == "configure":

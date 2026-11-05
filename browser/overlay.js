@@ -893,7 +893,7 @@
         const spoken = String(msg.text).trim();
         hudInput.value = spoken;
         hudInput.dispatchEvent(new Event("input", { bubbles: true }));
-        lockLabel.textContent = `🗣️ Heard: "${spoken}"`;
+        lockLabel.textContent = `🗣️ Heard: "${spoken}"${msg.backend ? ` (${msg.backend})` : ""}`;
         emitResolve(spoken, msg.words);
       } else {
         lockLabel.textContent = msg.error
@@ -1111,7 +1111,7 @@
 
         hudMic.classList.remove("listening");
         hudMic.textContent = "⏳ Transcribing...";
-        lockLabel.textContent = "⏳ Transcribing audio with local Whisper (tiny.en)...";
+        lockLabel.textContent = "⏳ Transcribing audio locally…";
 
         const reader = new FileReader();
         reader.onload = () => {
@@ -1143,7 +1143,7 @@
 
     if (mediaRecorder && mediaRecorder.state === "recording") {
       hudMic.textContent = "⏳ Transcribing...";
-      lockLabel.textContent = "⏳ Transcribing audio with local Whisper (tiny.en)...";
+      lockLabel.textContent = "⏳ Transcribing audio locally…";
 
       const elapsed = recordingStartedAt ? performance.now() - recordingStartedAt : 500;
       const tailMs = Math.max(150, Math.min(420, 520 - elapsed));
