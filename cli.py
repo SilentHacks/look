@@ -46,8 +46,16 @@ def _handle_slash_command(raw_args: str) -> str:
             candidate_radius_px=380,
         )
         # configure() is store-only when disconnected — explicitly connect + inject here.
-        session.ensure_overlay()
-        return f"Launched Chrome with CDP (:9222) and injected Hermes Gaze HUD on {url}"
+        # Chrome's first run on a fresh profile can take >5s to expose /json —
+        # retry briefly instead of reporting success on a silent miss.
+        for _ in range(12):
+            if session.ensure_overlay():
+                return f"Launched Chrome with CDP (:9222) and injected Hermes Gaze HUD on {url}"
+            time.sleep(0.5)
+        return (
+            f"Chrome launched on {url} but the overlay failed to inject — "
+            "CDP :9222 unreachable or no page tab. Check `hermes gaze status` and Chrome."
+        )
 
     if sub == "mode" and len(argv) >= 2:
         mode = argv[1].lower()
