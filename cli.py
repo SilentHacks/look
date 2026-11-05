@@ -45,6 +45,8 @@ def _handle_slash_command(raw_args: str) -> str:
             hotkey=cfg.hotkey,
             candidate_radius_px=380,
         )
+        # configure() is store-only when disconnected — explicitly connect + inject here.
+        session.ensure_overlay()
         return f"Launched Chrome with CDP (:9222) and injected Hermes Gaze HUD on {url}"
 
     if sub == "mode" and len(argv) >= 2:
