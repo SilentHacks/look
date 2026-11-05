@@ -178,7 +178,7 @@ class TestHermesGazePlugin(unittest.TestCase):
         self.assertIn("<svg", svg)
 
     def test_speech_recognition_and_word_alignment(self) -> None:
-        from hermes_gaze.tracker.voice_listener import transcribe_audio_buffer
+        from hermes_gaze.voice import transcribe_audio_buffer
         import wave
 
         # Test with the synthesized speech file /tmp/test_speech.wav

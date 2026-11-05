@@ -27,7 +27,7 @@ config_schema:
   mode:
     type: str
     default: "hover"
-    description: "Pointing source: 'hover' (exact cursor / Magic Pointer), 'simulated' (cursor + Gaussian noise for gaze testing), or 'webcam' (MediaPipe Face Landmarker)."
+    description: "Pointing source: 'hover' (exact cursor / Magic Pointer) or 'simulated' (cursor + Gaussian noise for gaze testing)."
   cdp_url:
     type: str
     default: "http://127.0.0.1:9222"
@@ -35,7 +35,7 @@ config_schema:
   sigma_px:
     type: float
     default: 120.0
-    description: "Spatial uncertainty radius (CSS pixels) used in 'simulated' or uncalibrated 'webcam' mode."
+    description: "Spatial uncertainty radius (CSS pixels) used in 'simulated' mode."
   dwell_ms:
     type: int
     default: 450

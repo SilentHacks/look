@@ -6,11 +6,11 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from .benchmark.run_benchmark import build_synthetic_dashboard_candidates, format_benchmark_markdown, run_benchmark_suite
+from . import service
+from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
 from .browser.cdp_bridge import get_shared_session
-from .resolver.bayesian_fusion import resolve_candidates
+from .resolver.bayesian_fusion import LENS_MAX_CARDS
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
-from .tracker.simulated_gaze import FixationSample
 
 
 def _schema(name: str, description: str, properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -36,7 +36,7 @@ GAZE_RESOLVE_SCHEMA = _schema(
         },
         "mode": {
             "type": "string",
-            "enum": ["hover", "simulated", "webcam"],
+            "enum": ["hover", "simulated"],
             "description": "Optional pointing mode override ('hover' for exact cursor, 'simulated' for noisy gaze).",
         },
         "target_hint_x": {
@@ -59,7 +59,7 @@ GAZE_CHOOSE_SCHEMA = _schema(
         "candidate_index": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 6,
+            "maximum": LENS_MAX_CARDS,
             "description": "1-based index of the candidate card in the Semantic Lens (e.g. 1 for [1]).",
         },
         "execute": {
@@ -96,17 +96,17 @@ GAZE_HIGHLIGHT_SCHEMA = _schema(
 
 GAZE_CALIBRATE_SCHEMA = _schema(
     "gaze_calibrate",
-    "Configure or reset the pointing/gaze tracker mode ('hover', 'simulated', 'webcam'), spatial uncertainty sigma, "
+    "Configure or reset the pointing/gaze tracker mode ('hover', 'simulated'), spatial uncertainty sigma, "
     "and online drift recalibrator.",
     {
         "mode": {
             "type": "string",
-            "enum": ["hover", "simulated", "webcam"],
+            "enum": ["hover", "simulated"],
             "description": "Pointing mode to activate.",
         },
         "sigma_px": {
             "type": "number",
-            "description": "Spatial uncertainty standard deviation in CSS pixels (default 120.0 for simulated/webcam).",
+            "description": "Spatial uncertainty standard deviation in CSS pixels (default 120.0 for simulated).",
         },
         "reset_drift": {
             "type": "boolean",
@@ -131,177 +131,44 @@ GAZE_BENCHMARK_SCHEMA = _schema(
 
 
 def check_gaze_requirements() -> bool:
-    """Passive check (never installs packages)."""
+    """Passive check (never installs packages).
+
+    MUST stay constant-true: Hermes re-probes check_fn every turn and drops the
+    tool schema when it returns False, mutating the tool surface mid-conversation
+    and breaking prompt caching. Chrome health is reported in-band in payloads.
+    """
     return True
 
 
 def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
-    import os
-
-    if os.environ.get("HERMES_GAZE_INTERNAL") == "1":
-        return json.dumps({"ok": False, "error": "Internal explanation session - CDP disabled."})
-
-    bridge = get_shared_session()
-    raw_utterance = str(args.get("utterance") or "").strip()
-    record_voice = bool(args.get("record_voice", False))
-    mode = str(args.get("mode") or bridge.tracker.mode or "hover")
-    bridge.tracker.mode = mode
-
-    word_timestamps = args.get("word_timestamps")
-    transcription_meta = {}
-
-    if record_voice:
-        from .tracker.voice_listener import record_microphone, transcribe_audio_buffer
-
-        dur = float(args.get("duration_s", 2.6))
-        audio_pcm = record_microphone(duration_s=dur)
-        transcribed_text, word_ts = transcribe_audio_buffer(audio_pcm)
-        if transcribed_text:
-            raw_utterance = transcribed_text
-            word_timestamps = word_ts
-            transcription_meta = {
-                "transcribed_text": transcribed_text,
-                "word_timestamps": word_ts,
-                "recorded_duration_s": dur,
-            }
-
-    utterance = raw_utterance or "What is this?"
-
-    now = time.time()
+    session = get_shared_session()
     hint_x = args.get("target_hint_x")
     hint_y = args.get("target_hint_y")
     if hint_x is not None and hint_y is not None:
-        bridge.tracker.record_point(float(hint_x), float(hint_y), timestamp=now)
-
-    candidates = bridge.fetch_live_state_and_candidates(radius_px=380.0)
-    if not candidates:
-        candidates = build_synthetic_dashboard_candidates()
-
-    fixations = bridge.ring_buffer.snapshot(now)
-    if not fixations:
-        # Default fixation near center of first interactive toolbar cluster if none recorded yet
-        c0 = candidates[0]
-        cx, cy = c0.center_doc
-        fixations = [
-            FixationSample(
-                x_doc=cx,
-                y_doc=cy,
-                x_vp=cx,
-                y_vp=cy,
-                t_start=now - 0.25,
-                t_end=now,
-                duration_ms=250.0,
-                sigma_x=24.0 if mode == "hover" else bridge.tracker.sigma_px,
-                sigma_y=24.0 if mode == "hover" else bridge.tracker.sigma_px,
-                source=mode,
-            )
-        ]
-
-    res = resolve_candidates(candidates, fixations, utterance, t_arm=now, word_timestamps=word_timestamps)
-    payload = res.to_dict()
-    payload["chrome_connected"] = bridge.is_chrome_reachable()
-    payload["mode"] = mode
-    if transcription_meta:
-        payload["speech_recognition"] = transcription_meta
-
-    hud_html = None
-    if res.top and (res.top.candidate.is_container or res.top.candidate.role == "table"):
-        table_payload = None
-        if bridge.is_chrome_reachable():
-            sel = json.dumps(res.top.candidate.selector)
-            table_payload = bridge.eval_js(
-                f"window.__HERMES_GAZE_OVERLAY__.extractTableData({sel});",
-            )
-        if not table_payload:
-            table_payload = {
-                "headers": ["Campaign", "Channel", "Spend", "ROAS", "Conversions"],
-                "rows": [
-                    ["Q4 Enterprise Launch", "Paid Search", "$4,200", "6.4x", "312"],
-                    ["Developer Retargeting", "GitHub Sponsors", "$1,850", "5.1x", "198"],
-                    ["Cloud Summit Webinar", "LinkedIn Ads", "$6,400", "1.9x", "84"],
-                    ["Open-Source Community", "Organic / X", "$620", "11.2x", "445"],
-                ],
-            }
-        fmt = str(args.get("extract_format") or "csv")
-        extracted_str = extract_structured_data(table_payload, fmt=fmt)
-        svg_chart = render_svg_scatter(
-            table_payload.get("headers") or [],
-            table_payload.get("rows") or [],
-        )
-        payload["extracted_data"] = extracted_str
-        payload["svg_scatter"] = svg_chart
-        hud_html = (
-            f"<div><strong>Extracted {res.top.candidate.label} ({len(table_payload.get('rows') or [])} rows):</strong></div>"
-            f"<div style='margin-top:6px;'>{svg_chart}</div>"
-        )
-
-    bridge.render_resolution_in_browser(res, hud_html=hud_html)
+        # Record the hint BEFORE the pull so the resolver has at least one fixation.
+        session.tracker.record_point(float(hint_x), float(hint_y), timestamp=time.time())
+    payload = service.resolve_now(
+        session,
+        utterance=str(args.get("utterance") or "").strip(),
+        words=args.get("word_timestamps"),
+        mode=str(args.get("mode") or session.tracker.mode or "hover"),
+        record_voice=bool(args.get("record_voice", False)),
+        duration_s=float(args.get("duration_s", 2.6)),
+    )
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
 def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
-    bridge = get_shared_session()
-    raw_idx = args.get("candidate_index", 1)
-    idx = int(raw_idx) - 1
+    session = get_shared_session()
+    idx = int(args.get("candidate_index", 1))
     execute = bool(args.get("execute", True))
-
-    res = bridge.last_resolution
-    if res is None or not res.ranked:
-        return json.dumps({"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."})
-
-    if idx < 0 or idx >= len(res.ranked):
-        return json.dumps({"ok": False, "error": f"candidate_index {idx + 1} out of range (1..{len(res.ranked)})."})
-
-    chosen = res.ranked[idx]
-    latest_fix = bridge.ring_buffer.latest()
-    if latest_fix is not None:
-        tx, ty = chosen.candidate.center_doc
-        bridge.recalibrator.update(
-            est_x=latest_fix.x_doc,
-            est_y=latest_fix.y_doc,
-            true_x=tx,
-            true_y=ty,
-            sigma=latest_fix.sigma_x,
-            weight=0.25,
-        )
-
-    if bridge.is_chrome_reachable():
-        pin_js = json.dumps([chosen.to_dict()])
-        role_disp = chosen.candidate.role.capitalize()
-        msg = (
-            f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {chosen.candidate.label}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp})</span></div>"
-            f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{chosen.consequence_preview}</div>"
-            f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {chosen.candidate.selector}</div>"
-        )
-        click_stmt = (
-            f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
-            if execute
-            else ""
-        )
-        bridge.eval_js(
-            f"window.__HERMES_GAZE_OVERLAY__.renderPins({pin_js}, {json.dumps(msg)}); {click_stmt} true;",
-        )
-
-    return json.dumps(
-        {
-            "ok": True,
-            "selected_index": idx + 1,
-            "selected": chosen.to_dict(),
-            "executed": execute,
-            "recalibrator_bias_offset": list(bridge.recalibrator.offset),
-        },
-        indent=2,
-        ensure_ascii=False,
-    )
+    # Tool-initiated choose targets the active resolution; only the overlay sends an epoch id.
+    payload = session.choose(resolution_id=None, candidate_index=idx, execute=execute)
+    return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
 def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
-    import os
-
-    if os.environ.get("HERMES_GAZE_INTERNAL") == "1":
-        return json.dumps({"ok": False, "error": "Internal explanation session - CDP disabled."})
-
-    bridge = get_shared_session()
+    session = get_shared_session()
     selector = str(args.get("selector") or "")
     label = str(args.get("label") or selector)
     hud_message = str(args.get("hud_message") or "")
@@ -309,9 +176,9 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
 
     table_csv = ""
     svg_chart = ""
-    if bridge.is_chrome_reachable():
+    if session.is_chrome_reachable():
         if extract_table:
-            raw_table = bridge.eval_js(
+            raw_table = session.eval_js(
                 f"window.__HERMES_GAZE_OVERLAY__.extractTableData({json.dumps(selector)})",
             )
             if isinstance(raw_table, dict) and raw_table.get("rows"):
@@ -347,14 +214,14 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
           return true;
         }})()
         """
-        bridge.eval_js(js)
+        session.eval_js(js)
 
     return json.dumps(
         {
             "ok": True,
             "selector": selector,
             "label": label,
-            "chrome_connected": bridge.is_chrome_reachable(),
+            "chrome_connected": session.is_chrome_reachable(),
             "extracted_csv": table_csv,
             "rendered_svg_chart": bool(svg_chart),
         },
@@ -364,22 +231,21 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def handle_gaze_calibrate(args: Dict[str, Any], **kwargs: Any) -> str:
-    bridge = get_shared_session()
-    mode = str(args.get("mode") or bridge.tracker.mode or "hover")
-    sigma_px = float(args.get("sigma_px", bridge.tracker.sigma_px))
+    session = get_shared_session()
+    mode = str(args.get("mode") or session.tracker.mode or "hover")
+    sigma_px = float(args.get("sigma_px", session.tracker.sigma_px))
     if args.get("reset_drift"):
-        bridge.recalibrator.reset()
+        session.recalibrator.reset()
 
-    bridge.tracker.mode = mode
-    bridge.tracker.sigma_px = sigma_px
-    chrome_ok = bridge.inject_overlay(mode=mode, sigma_px=sigma_px)
+    # session.configure stores the values locally AND pushes them to the live overlay.
+    chrome_ok = session.configure(mode=mode, sigma_px=sigma_px)
 
     return json.dumps(
         {
             "ok": True,
             "mode": mode,
             "sigma_px": sigma_px,
-            "drift_offset": list(bridge.recalibrator.offset),
+            "drift_offset": list(session.recalibrator.offset),
             "chrome_connected": chrome_ok,
         },
         indent=2,

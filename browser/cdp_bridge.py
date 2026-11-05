@@ -571,6 +571,13 @@ class GazeSession:
                     )
                 else:
                     msg = hud_html or "No matching target."
+                if resolution.intent_class == "read_only":
+                    # The overlay emits an `explain` intent for read_only + pin_immediate and
+                    # writes the reply into this element inside the pin HUD.
+                    msg += (
+                        '<div id="gaze-explanation-text" style="margin-top:6px;color:#cbd5e1;font-size:12px;line-height:1.4;">'
+                        "⏳ Asking Hermes...</div>"
+                    )
                 js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
             try:
                 self.eval_js(js)
@@ -652,10 +659,10 @@ def launch_chrome_with_cdp(url: str, port: int = 9222, profile_dir: Optional[Pat
     except ImportError:
         def plugin_data_dir(name: str) -> Path:
             return Path.home() / ".cache" / name
-    from ..tracker.voice_listener import get_shared_voice_server
+    from ..server import get_shared_server
 
-    # Ensure background voice/demo server is active
-    server = get_shared_voice_server()
+    # Ensure background demo session server is active
+    server = get_shared_server()
     server.start()
 
     # Use HTTP server origin if url is file URI or default
