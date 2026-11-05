@@ -16,7 +16,8 @@ Bayesian spatial-semantic resolution.
 | `tools.py` | Tool schemas (`gaze_resolve`, `gaze_choose`, `gaze_highlight`, `gaze_calibrate`, `gaze_benchmark`) + thin handlers that delegate to `service.py`. |
 | `service.py` | The session-facing layer: `resolve_now` (resolution + browser render), `handle_intent` (dispatches `resolve`/`choose`/`explain`/`transcribe`/`configure` binding intents), `explain_element`, `set_runtime`. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
-| `voice.py` | `transcribe_audio_buffer` (lazy faster-whisper), `record_microphone`, `MAX_AUDIO_BYTES`. |
+| `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process, ~65ms) → `parakeet-mlx` (~180ms) → `faster-whisper` (the only backend on Linux). `record_microphone`, `MAX_AUDIO_BYTES`. |
+| `asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `browser/cdp_bridge.py` | `CdpSession` (one persistent websocket per pinned tab on a dedicated worker-loop thread, `Runtime.addBinding("__hermesGazeIntent")`, `eval_js`, `set_intent_handler`) and `GazeSession` (ring buffer + tracker + recalibrator + resolution epoch + `ingest` + `choose` + `configure`). `overlay.js` sits beside it. |
@@ -60,6 +61,14 @@ Bayesian spatial-semantic resolution.
   every turn; returning `False` when Chrome is down would mutate the tool surface
   mid-conversation and break the cached prompt prefix (see Hermes's per-conversation
   prompt-caching invariant). Chrome health is reported in-band (`chrome_connected`).
+- **`MLMultiArray` conversions live only in `asr/coreml_model.py`.** Two CoreML
+  traps already bit once: input arrays must be tagged with the real
+  `MLMultiArrayDataType*` constants — a hand-coded wrong code makes CoreML read
+  the buffer at half width (the fp32-as-fp16 NaN bug) — and outputs must be
+  read via `getBytesWithHandler` + `strides`, never `dataPointer` + `shape`:
+  `dataType` need not match storage dtype, and dynamic outputs under-report
+  `shape`/`count` (Encoder claims 188 frames, stores 192). `strides[0]*shape[0]`
+  is the true element count.
 - **No fabricated fallbacks.** When candidates or fixations are missing, return
   `{"ok": false, "error": ...}` — never inject synthetic dashboard candidates or a
   fake center fixation. A wrong confident answer is worse than an honest failure.
@@ -75,7 +84,9 @@ Bayesian spatial-semantic resolution.
 ## Commands
 
 ```bash
-python3 -m unittest                              # whole suite (stdlib; no Chrome needed)
+python3 -m unittest discover -s tests -t .       # whole suite (bare `-m unittest` also
+                                                  # tries importing browser/resolver as
+                                                  # top-level pkgs and errors — pre-existing)
 python3 -m unittest tests.test_service_intents   # one module
 python3 -m py_compile tests/*.py service.py tools.py
 node --check browser/overlay.js                  # JS syntax check

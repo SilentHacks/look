@@ -1,9 +1,24 @@
 """Local speech recognition helpers for hermes-gaze.
 
-faster-whisper local model (tiny.en / base.en) with word-level timestamps plus
-sounddevice microphone capture from the default OS audio input. Optional
-dependencies (numpy, faster-whisper, sounddevice) are imported lazily inside
-each function so importing this module never requires them.
+Three transcription backends behind one contract (``transcribe_audio_buffer``
+— ``(text, [{word, start, end}])`` with audio-relative times shifted by
+``audio_epoch``):
+
+- Parakeet TDT on CoreML/ANE **in-process** via ``asr.parakeet_coreml``
+  (macOS only, ~65-75ms for a 3s clip). coremltools ships no cp314 wheels, so
+  ``asr.coreml_model`` drives ``.mlmodelc`` models through pyobjc instead.
+  SentencePiece tokens with start times are grouped on ``▁`` boundaries into
+  words.
+- ``parakeet-mlx`` Parakeet TDT 0.6B on Apple-silicon MLX (macOS only,
+  ~180ms for a 3s clip) — in-process middle tier when the CoreML runner
+  cannot load (missing pyobjc, first-run model download failure).
+- ``faster-whisper`` (tiny.en / base.en) — fallback on Linux or when both
+  Parakeet paths fail to load.
+
+Plus sounddevice microphone capture from the default OS audio input. Optional
+dependencies (numpy, faster-whisper, parakeet-mlx, pyobjc, sounddevice) are
+imported lazily inside each function so importing this module never requires
+them.
 """
 
 from __future__ import annotations
@@ -11,6 +26,8 @@ from __future__ import annotations
 import io
 import logging
 import os
+import sys
+import tempfile
 import threading
 import wave
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,6 +37,17 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "base.en"
 _WHISPER_MODELS: Dict[str, Any] = {}  # per-name cache — config may switch models mid-session
 _MODEL_LOCK = threading.Lock()
+
+# English-only Parakeet TDT 0.6B v2 on MLX — best English WER of the
+# parakeet family; v3 trades a little English accuracy for 24 languages.
+_PARAKEET_MODEL_REPO = "mlx-community/parakeet-tdt-0.6b-v2"
+_PARAKEET_MODEL: Any = None  # model | False (load attempted and failed)
+_PARAKEET_LOCK = threading.Lock()
+
+# CoreML/ANE runner — in-process via asr.parakeet_coreml (pyobjc). Same TDT
+# 0.6B v2 checkpoints as the MLX backend, converted for the Neural Engine.
+_COREML_RUNNER: Any = None  # ParakeetCoreML | False (load attempted and failed)
+_COREML_LOCK = threading.Lock()
 
 # Base64 audio payloads from the overlay's transcribe intent are bounded before decode.
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
@@ -38,8 +66,133 @@ def get_whisper_model(model_name: str = _DEFAULT_MODEL) -> Any:
         return model
 
 
+def _get_parakeet_model() -> Any:
+    """Lazy singleton for the parakeet-mlx model; None when unavailable."""
+    global _PARAKEET_MODEL
+    if sys.platform != "darwin":
+        return None
+    with _PARAKEET_LOCK:
+        if _PARAKEET_MODEL is None:
+            try:
+                from parakeet_mlx import from_pretrained
+
+                logger.info("Loading parakeet-mlx model '%s'...", _PARAKEET_MODEL_REPO)
+                _PARAKEET_MODEL = from_pretrained(_PARAKEET_MODEL_REPO)
+            except Exception as exc:
+                logger.warning("parakeet-mlx unavailable (%s); using faster-whisper", exc)
+                _PARAKEET_MODEL = False
+        return _PARAKEET_MODEL or None
+
+
+def _get_coreml_runner() -> Any:
+    """Lazy singleton for the in-process CoreML/ANE runner; None when unavailable."""
+    global _COREML_RUNNER
+    if sys.platform != "darwin":
+        return None
+    with _COREML_LOCK:
+        if _COREML_RUNNER is None:
+            try:
+                from .asr.parakeet_coreml import ParakeetCoreML
+
+                logger.info("Loading Parakeet TDT on CoreML/ANE...")
+                _COREML_RUNNER = ParakeetCoreML(variant="v2", compute_units="ane")
+            except Exception as exc:
+                logger.warning("CoreML parakeet unavailable (%s); using parakeet-mlx", exc)
+                _COREML_RUNNER = False
+        return _COREML_RUNNER or None
+
+
+def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[Dict[str, object]]:
+    """Group SentencePiece tokens (``▁`` = word boundary) into word dicts; uses token ``end`` when present."""
+    # Subword tokens mark each word start with a leading space or the
+    # SentencePiece ▁ marker (parakeet-mlx does the former). When a model
+    # already emits word-level tokens there are no markers and every token
+    # stays its own word.
+    has_boundary = any(
+        (getattr(t, "text", "") or "")[:1] in (" ", "▁") for t in tokens)
+    groups: List[List[Any]] = []
+    for tok in tokens:
+        text = getattr(tok, "text", "") or ""
+        if not text.strip():
+            continue
+        if not has_boundary or text[:1] in (" ", "▁") or not groups:
+            groups.append([])
+        groups[-1].append(tok)
+    words: List[Dict[str, object]] = []
+    for i, group in enumerate(groups):
+        text = "".join(t.text for t in group).replace("▁", " ").strip()
+        if not text:
+            continue
+        last_end = getattr(group[-1], "end", None)
+        end = float(last_end) if last_end is not None else (
+            float(groups[i + 1][0].start) if i + 1 < len(groups) else end_s)
+        words.append({"word": text, "start": float(group[0].start) + epoch_off,
+                      "end": end + epoch_off})
+    return words
+
+
+def _transcribe_coreml(audio_np: Any, sample_rate: int, epoch_off: float) -> Optional[Tuple[str, List[Dict[str, object]]]]:
+    """CoreML/ANE path: feed the float32 array straight to the in-process runner."""
+    runner = _get_coreml_runner()
+    if runner is None:
+        return None
+    try:
+        res = runner.transcribe_array(audio_np)
+    except Exception as exc:
+        logger.warning("coreml parakeet transcription failed (%s); using parakeet-mlx", exc)
+        return None
+    tokens = list(getattr(res, "tokens", None) or [])
+    segs = getattr(res, "segments", None) or []
+    end_s = float(segs[-1].end) if segs else (tokens[-1].start + 0.3 if tokens else 0.0)
+    return (res.text or "").strip(), _tokens_to_words(tokens, end_s, epoch_off)
+
+
+def _transcribe_parakeet(audio_np: Any, sample_rate: int, epoch_off: float) -> Optional[Tuple[str, List[Dict[str, object]]]]:
+    """parakeet-mlx path: write PCM to a temp WAV (the model only takes file paths)."""
+    import numpy as np
+
+    model = _get_parakeet_model()
+    if model is None:
+        return None
+    pcm16 = (np.clip(audio_np, -1.0, 1.0) * 32767.0).astype(np.int16)
+    tmp = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp = f.name
+        with wave.open(tmp, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(pcm16.tobytes())
+        res = model.transcribe(tmp)
+    except Exception as exc:
+        logger.warning("parakeet-mlx transcription failed (%s); using faster-whisper", exc)
+        return None
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    tokens = [t for s in (getattr(res, "sentences", None) or []) for t in getattr(s, "tokens", [])]
+    end_s = float(tokens[-1].end) if tokens and getattr(tokens[-1], "end", None) is not None else (
+        float(tokens[-1].start) + 0.3 if tokens else 0.0)
+    return (res.text or "").strip(), _tokens_to_words(tokens, end_s, epoch_off)
+
+
+def _looks_like_container(raw_bytes: bytes) -> bool:
+    """Sniff known media-container magics — anything else is treated as raw s16le PCM."""
+    if raw_bytes[:4] in (b"OggS", b"fLaC", b"ID3", b"\x1a\x45\xdf\xa3"):  # ogg, flac, mp3, ebml/webm
+        return True
+    if len(raw_bytes) > 8 and raw_bytes[4:8] == b"ftyp":  # mp4/m4a
+        return True
+    if raw_bytes[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):  # mp3 frame sync
+        return True
+    return False
+
+
 def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
-    """Decode any audio container (WebM, Opus, WAV, MP3) to 16kHz mono float32 numpy array."""
+    """Decode any audio container (WebM, Opus, WAV, MP3) or raw s16le PCM to 16kHz mono float32."""
     import numpy as np
     import shutil
     import subprocess
@@ -47,11 +200,27 @@ def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
     if not raw_bytes:
         return np.zeros(0, dtype=np.float32)
 
+    # Fast path: plain PCM WAV at the target rate parses in-process — no
+    # ffmpeg spawn (~15-25ms). Other containers still route through ffmpeg.
+    is_riff = raw_bytes.startswith(b"RIFF") and b"WAVE" in raw_bytes[:16]
+    if is_riff:
+        try:
+            with wave.open(io.BytesIO(raw_bytes), "rb") as wf:
+                if wf.getframerate() == sample_rate:
+                    channels = wf.getnchannels()
+                    raw_frames = wf.readframes(wf.getnframes())
+                    audio_np = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
+                    if channels > 1:
+                        audio_np = audio_np.reshape(-1, channels).mean(axis=1)
+                    return audio_np
+        except Exception as exc:
+            logger.warning("WAV parsing error: %s, falling back to ffmpeg", exc)
+
     ffmpeg_bin = (
         shutil.which("ffmpeg")
         or ("/opt/homebrew/bin/ffmpeg" if os.path.isfile("/opt/homebrew/bin/ffmpeg") else "/usr/local/bin/ffmpeg")
     )
-    if os.path.isfile(ffmpeg_bin):
+    if (is_riff or _looks_like_container(raw_bytes)) and os.path.isfile(ffmpeg_bin):
         try:
             cmd = [
                 ffmpeg_bin,
@@ -67,21 +236,10 @@ def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
             if len(proc.stdout) > 0:
                 return np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
         except Exception as exc:
-            logger.warning("ffmpeg decode error: %s, falling back to wav/pcm parsing", exc)
+            logger.warning("ffmpeg decode error: %s, falling back to raw PCM", exc)
 
-    # Fallback to WAV parsing
-    if raw_bytes.startswith(b"RIFF") and b"WAVE" in raw_bytes[:16]:
-        try:
-            with wave.open(io.BytesIO(raw_bytes), "rb") as wf:
-                channels = wf.getnchannels()
-                raw_frames = wf.readframes(wf.getnframes())
-                audio_np = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
-                if channels > 1:
-                    audio_np = audio_np.reshape(-1, channels).mean(axis=1)
-                return audio_np
-        except Exception as exc:
-            logger.warning("WAV parsing error: %s, falling back to raw PCM", exc)
-
+    # Raw s16le PCM — what record_microphone produces. No container magic means
+    # skipping the ffmpeg spawn entirely.
     return np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
 
@@ -90,12 +248,17 @@ def transcribe_audio_buffer(
     sample_rate: int = 16000,
     model_name: str = _DEFAULT_MODEL,
     audio_epoch: Optional[float] = None,
+    backend: str = "auto",
 ) -> Tuple[str, List[Dict[str, object]]]:
     """Transcribe WebM, WAV, or PCM bytes into text with word-level timestamps.
 
     ``audio_epoch`` is the wall-clock time (time.time()) when recording began; when
-    given, the audio-relative whisper word times are shifted to wall-clock epochs so
-    the temporal aligner can weight them against real fixations."""
+    given, the audio-relative word times are shifted to wall-clock epochs so
+    the temporal aligner can weight them against real fixations.
+
+    ``backend``: ``"auto"`` (CoreML Parakeet on macOS when available, else
+    faster-whisper), ``"parakeet"`` (try CoreML first, same fallback), or
+    ``"whisper"`` (force the faster-whisper path)."""
     import numpy as np
 
     audio_np = decode_audio_to_float32(audio_bytes, sample_rate=sample_rate)
@@ -106,9 +269,15 @@ def transcribe_audio_buffer(
     if peak < 1e-5:
         return "", []
 
-    # Normalize quiet microphone input so Whisper reliably detects normal/soft speech
+    # Normalize quiet microphone input so the ASR reliably detects normal/soft speech
     if 0.002 < peak < 0.65:
         audio_np = np.clip(audio_np * (0.85 / peak), -1.0, 1.0).astype(np.float32)
+
+    if backend in ("auto", "parakeet"):
+        result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0)) \
+            or _transcribe_parakeet(audio_np, sample_rate, float(audio_epoch or 0.0))
+        if result is not None:
+            return result
 
     model = get_whisper_model(model_name)
     segments, _info = model.transcribe(

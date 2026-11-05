@@ -41,3 +41,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# PM-generated workspace lock, regenerated on install
+uv.lock
