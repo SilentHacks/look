@@ -1,7 +1,7 @@
 """Unified FixationRingBuffer and simulated/hover pointer tracker (stdlib-only).
 
 Supports two Stage 1 modes without requiring a webcam:
-- ``hover`` (Magic Pointer mode): Low spatial uncertainty (sigma = 18 px) for snappy mouse + voice.
+- ``hover`` (Magic Pointer mode): Low spatial uncertainty (sigma = 24 px) for snappy mouse + voice.
 - ``simulated`` (Noisy Gaze mode): Configurable Gaussian noise (default sigma = 120 px) + One-Euro
   smoothing and I-VT fixation grouping to test and benchmark the Bayesian reference resolver and
   Semantic Lens under realistic webcam eye-tracking uncertainty.
@@ -16,6 +16,8 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from typing import Deque, List, Optional, Tuple
+
+HOVER_SIGMA_PX = 24.0  # Canonical hover ("Magic Pointer") pointing uncertainty.
 
 
 @dataclass
@@ -160,7 +162,7 @@ class SimulatedPointerTracker:
         else:
             filt_x = x_vp - bias_offset[0]
             filt_y = y_vp - bias_offset[1]
-            sigma = 24.0
+            sigma = HOVER_SIGMA_PX
 
         sample = FixationSample(
             x_doc=filt_x + scroll_x,

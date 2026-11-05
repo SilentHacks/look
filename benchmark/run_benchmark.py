@@ -1,10 +1,10 @@
 """Quantitative accuracy benchmark for hermes-gaze across noise levels (sigma = 80, 130, 180 px).
 
-Evaluates 4 resolution methods on a realistic dense toolbar + table + cards layout:
+Evaluates resolution methods on a realistic dense toolbar + table + cards layout:
 1. Raw Gaze Point Hit-Test (elementFromPoint)
 2. Spatial Box-Integral + DOM Actionable Prior
-3. Temporal Eye-Voice Alignment + Lexical/LLM Fusion
-4. Full System (+ Semantic Lens on Ambiguity)
+3. Temporal Eye-Voice Alignment + Lexical/LLM Fusion (top-1) and its top-3 coverage
+4. Full System (top-3 coverage x modeled Semantic Lens pick rate)
 """
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ from typing import Dict, List, Tuple
 
 from ..resolver.bayesian_fusion import CandidateElement, gaussian_box_integral, resolve_candidates
 from ..tracker.simulated_gaze import FixationSample
+
+# Modeled probability the user correctly picks the intended card in the Lens — an assumption, not a measurement.
+LENS_PICK_SUCCESS = 0.97
 
 
 def build_synthetic_dashboard_candidates() -> List[CandidateElement]:
@@ -130,15 +133,16 @@ def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str,
     results: Dict[str, Dict[int, float]] = {
         "raw_hit_test": {},
         "spatial_box_only": {},
-        "temporal_semantic_fusion": {},
-        "full_with_semantic_lens": {},
+        "fusion_top1": {},
+        "top3_coverage": {},
+        "full_with_lens": {},
     }
 
     for sigma in sigmas:
         hits_raw = 0
         hits_spatial = 0
         hits_fusion = 0
-        hits_lens = 0
+        hits_top3 = 0
 
         for i in range(trials_per_sigma):
             target_id, utterance = scenarios[i % len(scenarios)]
@@ -198,17 +202,16 @@ def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str,
             if res.top and res.top.candidate.id == target_id:
                 hits_fusion += 1
 
-            # 4. Full System (+ Semantic Lens top-3 disambiguation with 260px card separation)
+            # 4. Top-3 coverage: did the target make the Semantic Lens card set at all?
             top3_ids = [sc.candidate.id for sc in res.ranked[:3]]
-            if res.top and res.top.candidate.id == target_id:
-                hits_lens += 1
-            elif target_id in top3_ids and rng.random() < 0.97:
-                hits_lens += 1
+            if target_id in top3_ids:
+                hits_top3 += 1
 
         results["raw_hit_test"][sigma] = round(100.0 * hits_raw / trials_per_sigma, 1)
         results["spatial_box_only"][sigma] = round(100.0 * hits_spatial / trials_per_sigma, 1)
-        results["temporal_semantic_fusion"][sigma] = round(100.0 * hits_fusion / trials_per_sigma, 1)
-        results["full_with_semantic_lens"][sigma] = round(100.0 * hits_lens / trials_per_sigma, 1)
+        results["fusion_top1"][sigma] = round(100.0 * hits_fusion / trials_per_sigma, 1)
+        results["top3_coverage"][sigma] = round(100.0 * hits_top3 / trials_per_sigma, 1)
+        results["full_with_lens"][sigma] = round(results["top3_coverage"][sigma] * LENS_PICK_SUCCESS, 1)
 
     return results
 
@@ -220,8 +223,9 @@ def format_benchmark_markdown(results: Dict[str, Dict[int, float]]) -> str:
         "|---|---|---|---|",
         f"| **1. Raw Gaze Point Hit-Test (`elementFromPoint`)** | {r['raw_hit_test'][80]}% | {r['raw_hit_test'][130]}% | {r['raw_hit_test'][180]}% |",
         f"| **2. Spatial Box-Integral + DOM Prior** | {r['spatial_box_only'][80]}% | {r['spatial_box_only'][130]}% | {r['spatial_box_only'][180]}% |",
-        f"| **3. Temporal Alignment + Bayesian Semantic Fusion** | {r['temporal_semantic_fusion'][80]}% | {r['temporal_semantic_fusion'][130]}% | {r['temporal_semantic_fusion'][180]}% |",
-        f"| **4. Full System (+ Semantic Lens on Ambiguity)** | **{r['full_with_semantic_lens'][80]}%** | **{r['full_with_semantic_lens'][130]}%** | **{r['full_with_semantic_lens'][180]}%** |",
+        f"| **3. Temporal Alignment + Bayesian Semantic Fusion (top-1)** | {r['fusion_top1'][80]}% | {r['fusion_top1'][130]}% | {r['fusion_top1'][180]}% |",
+        f"| **4. Fusion Top-3 Coverage** | {r['top3_coverage'][80]}% | {r['top3_coverage'][130]}% | {r['top3_coverage'][180]}% |",
+        f"| **5. Full System (top-3 coverage × 0.97 modeled pick)** | **{r['full_with_lens'][80]}%** | **{r['full_with_lens'][130]}%** | **{r['full_with_lens'][180]}%** |",
     ]
     return "\n".join(lines)
 

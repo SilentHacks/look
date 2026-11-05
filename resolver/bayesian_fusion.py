@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple
 
 from ..tracker.simulated_gaze import FixationSample
 from .temporal_aligner import DeicticAnchor, align_fixations_to_utterance
@@ -49,6 +49,46 @@ _LEAF_DATA_ROLES = frozenset({
     "columnheader", "cell", "th", "td", "term", "definition", "heading", "h1", "h2", "h3", "abbr", "label",
 })
 
+# --- Semantic / prior scoring weights (log-space boosts applied in _lexical_and_role_score) ---
+W_LEXICAL_OVERLAP = 1.35          # Per-token label/summary/selector/role overlap boost.
+BONUS_CONTAINER_MATCH = 2.6       # Plural/data-verb utterance and candidate is a data container.
+BONUS_CONTAINER_EXPORT = 2.2      # Container wanted; interactive affordance mentions export/download/report.
+BONUS_INTERACTIVE_MATCH = 2.2     # Atomic action verb and candidate is a non-container interactive element.
+PENALTY_CONTAINER_ACTION = -2.2   # Atomic action verb but candidate is a container (wrong granularity).
+PENALTY_WANTS_CONTAINER = -0.8    # Container wanted but candidate is neither container nor export affordance.
+BONUS_LEAF_READONLY = 1.8         # Read-only intent and candidate is a leaf data role (th/td/header).
+BONUS_READONLY_INTERACTIVE = 1.2  # Read-only intent on an interactive leaf ("what does this button do").
+PENALTY_CONTAINER_READONLY = -2.2 # Read-only intent but candidate is a container (too coarse).
+BONUS_INTERACTIVE_DEFAULT = 0.6   # Default prior toward interactive elements.
+PENALTY_CONTAINER_DEFAULT = -0.8  # Default prior away from containers when no granularity cue exists.
+BONUS_READONLY_PRESS = 1.5        # Read-only phrasing that still names a pressable ("press this button").
+BONUS_DIRECT_HIT = 3.5            # JS elementFromPoint landed exactly on this element (parity with old JS resolver).
+
+# --- Decision policy thresholds ---
+EXECUTE_MIN_PROB = 0.76       # Min top-1 probability to auto-execute a reversible action.
+EXECUTE_MIN_MARGIN = 0.26     # Min top1-top2 probability margin to auto-execute.
+LLM_RERANK_MAX_PROB = 0.88    # Invoke the LLM re-ranker when top-1 probability is below this.
+LLM_RERANK_MAX_MARGIN = 0.45  # Invoke the LLM re-ranker when top1-top2 margin is below this.
+LLM_RERANK_TOP_K = 5          # How many top candidates the LLM re-ranker sees.
+
+# --- Semantic Lens & spatial scoring geometry ---
+LENS_MAX_CARDS = 4      # Max candidate cards rendered in the Semantic Lens overlay.
+BOX_MARGIN_PX = 6.0     # Forgiving pixel padding around each candidate bounding box.
+AREA_EXPONENT = 0.40    # Sub-linear area normalization so large containers aren't over-penalized.
+AREA_FLOOR = 1200.0     # Added to box area before normalization; softens tiny-vs-huge box contrast.
+MIN_SIGMA_PX = 12.0     # Lower bound on pointing sigma so tiny sigmas can't explode the integral.
+
+IntentClass = Literal["read_only", "reversible_action", "destructive_action"]
+Decision = Literal["pin_immediate", "execute_safe", "open_semantic_lens", "confirm_destructive"]
+
+
+def _coerce_rect4(value: Any, default: Sequence[float]) -> Tuple[float, float, float, float]:
+    """Coerce a wire ``[x, y, w, h]`` list into a fixed 4-tuple (pad with 0, truncate extras)."""
+    vals = [float(v) for v in (value or default)][:4]
+    while len(vals) < 4:
+        vals.append(0.0)
+    return (vals[0], vals[1], vals[2], vals[3])
+
 
 @dataclass
 class CandidateElement:
@@ -64,11 +104,33 @@ class CandidateElement:
     is_container: bool = False
     is_interactive: bool = True
     is_destructive: bool = False
+    is_direct_hit: bool = False
     summary: str = ""
     consequence: str = ""
     backend_node_id: Optional[int] = None
     parent_container_id: Optional[str] = None
     attributes: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_wire(cls, raw: dict) -> "CandidateElement":
+        """Tolerantly parse the JS candidate dict (``extractCandidatesNear``) into a CandidateElement."""
+        rect_vp = _coerce_rect4(raw.get("rect_vp"), (0.0, 0.0, 40.0, 24.0))
+        rect_doc = _coerce_rect4(raw.get("rect_doc"), rect_vp)
+        return cls(
+            id=str(raw.get("id") or "cand"),
+            tag=str(raw.get("tag") or "div"),
+            role=str(raw.get("role") or "button"),
+            label=str(raw.get("label") or ""),
+            selector=str(raw.get("selector") or ""),
+            rect_doc=rect_doc,
+            rect_vp=rect_vp,
+            is_container=bool(raw.get("is_container", False)),
+            is_interactive=bool(raw.get("is_interactive", True)),
+            is_destructive=bool(raw.get("is_destructive", False)),
+            is_direct_hit=bool(raw.get("is_direct_hit", False)),
+            summary=str(raw.get("summary") or ""),
+            consequence=str(raw.get("consequence") or ""),
+        )
 
     @property
     def center_doc(self) -> Tuple[float, float]:
@@ -106,8 +168,8 @@ class ScoredCandidate:
 @dataclass
 class ResolutionResult:
     utterance: str
-    intent_class: str  # "read_only" | "reversible_action" | "destructive_action"
-    decision: str      # "pin_immediate" | "execute_safe" | "open_semantic_lens" | "confirm_destructive"
+    intent_class: IntentClass
+    decision: Decision
     ranked: List[ScoredCandidate]
     multi_referents: List[ScoredCandidate] = field(default_factory=list)
     anchor_timestamp: float = 0.0
@@ -140,9 +202,9 @@ def gaussian_box_integral(
     mu_y: float,
     sigma_x: float,
     sigma_y: float,
-    margin_px: float = 6.0,
-    area_exponent: float = 0.40,
-    area_floor: float = 1200.0,
+    margin_px: float = BOX_MARGIN_PX,
+    area_exponent: float = AREA_EXPONENT,
+    area_floor: float = AREA_FLOOR,
 ) -> float:
     """Integrate 2D Gaussian N((mu_x, mu_y), diag(sigma_x^2, sigma_y^2)) over padded bounding box."""
     x, y, w, h = rect
@@ -150,15 +212,15 @@ def gaussian_box_integral(
     x2 = x + w + margin_px
     y1 = y - margin_px
     y2 = y + h + margin_px
-    sx = max(sigma_x, 12.0) * math.sqrt(2.0)
-    sy = max(sigma_y, 12.0) * math.sqrt(2.0)
+    sx = max(sigma_x, MIN_SIGMA_PX) * math.sqrt(2.0)
+    sy = max(sigma_y, MIN_SIGMA_PX) * math.sqrt(2.0)
     px = 0.5 * abs(math.erf((x2 - mu_x) / sx) - math.erf((x1 - mu_x) / sx))
     py = 0.5 * abs(math.erf((y2 - mu_y) / sy) - math.erf((y1 - mu_y) / sy))
     area_norm = (max(w * h, 1.0) + area_floor) ** area_exponent
     return max((px * py) / area_norm, 1e-12)
 
 
-def classify_utterance_intent(utterance: str) -> str:
+def classify_utterance_intent(utterance: str) -> IntentClass:
     low = (utterance or "").strip().lower()
     if any(pat in low for pat in _READONLY_PATTERNS) or low.endswith("?"):
         return "read_only"
@@ -168,7 +230,7 @@ def classify_utterance_intent(utterance: str) -> str:
     return "reversible_action"
 
 
-def default_consequence_preview(cand: CandidateElement, intent_class: str) -> str:
+def default_consequence_preview(cand: CandidateElement, intent_class: IntentClass) -> str:
     if cand.consequence:
         return cand.consequence
     label = cand.label or cand.selector
@@ -196,7 +258,7 @@ def _lexical_and_role_score(
     cand: CandidateElement,
     utterance: str,
     anchor: DeicticAnchor,
-    intent_class: str,
+    intent_class: IntentClass,
 ) -> Tuple[float, float]:
     """Return (semantic_log_score, prior_log_score) in 0 ms before any LLM call."""
     low = (utterance or "").lower()
@@ -205,7 +267,9 @@ def _lexical_and_role_score(
     cand_tokens = set(re.findall(r"[a-z0-9]+", cand_text))
 
     overlap = len((utt_tokens & cand_tokens) - {"this", "that", "these", "those", "the", "and", "what", "if"})
-    sem_score = overlap * 1.35
+    sem_score = overlap * W_LEXICAL_OVERLAP
+    if cand.is_direct_hit:
+        sem_score += BONUS_DIRECT_HIT
 
     role_low = (cand.role or cand.tag).lower()
     is_interactive = cand.is_interactive or (role_low in _INTERACTIVE_ROLES)
@@ -219,32 +283,32 @@ def _lexical_and_role_score(
     prior_score = 0.0
     if wants_container:
         if is_container and role_low in ("table", "grid", "list", "ul", "section", "card"):
-            sem_score += 2.6
+            sem_score += BONUS_CONTAINER_MATCH
         elif is_interactive and any(k in cand_text for k in ("export", "csv", "download", "report")):
-            sem_score += 2.2
+            sem_score += BONUS_CONTAINER_EXPORT
         else:
-            prior_score -= 0.8
+            prior_score += PENALTY_WANTS_CONTAINER
     elif wants_atomic_action:
         if is_interactive and not is_container:
-            sem_score += 2.2
+            sem_score += BONUS_INTERACTIVE_MATCH
         elif is_container:
-            sem_score -= 2.2
+            sem_score += PENALTY_CONTAINER_ACTION
     else:
         if intent_class == "read_only":
             if is_leaf_data:
-                prior_score += 1.8
+                prior_score += BONUS_LEAF_READONLY
             elif is_interactive and not is_container:
-                prior_score += 1.2
+                prior_score += BONUS_READONLY_INTERACTIVE
             elif is_container:
-                prior_score -= 2.2
+                prior_score += PENALTY_CONTAINER_READONLY
         else:
             if is_interactive:
-                prior_score += 0.6
+                prior_score += BONUS_INTERACTIVE_DEFAULT
             elif is_container:
-                prior_score -= 0.8
+                prior_score += PENALTY_CONTAINER_DEFAULT
 
     if intent_class == "read_only" and is_interactive and bool(utt_tokens & {"press", "click", "button"}):
-        sem_score += 1.5
+        sem_score += BONUS_READONLY_PRESS
 
     return sem_score, prior_score
 
@@ -254,7 +318,7 @@ def _score_for_single_anchor(
     weighted_fixations: Sequence[Tuple[FixationSample, float]],
     utterance: str,
     anchor: DeicticAnchor,
-    intent_class: str,
+    intent_class: IntentClass,
 ) -> List[ScoredCandidate]:
     if not candidates:
         return []
@@ -328,9 +392,12 @@ def resolve_candidates(
     if (
         llm_client is not None
         and len(primary_ranked) >= 2
-        and (primary_ranked[0].probability < 0.88 or (primary_ranked[0].probability - primary_ranked[1].probability) < 0.45)
+        and (
+            primary_ranked[0].probability < LLM_RERANK_MAX_PROB
+            or (primary_ranked[0].probability - primary_ranked[1].probability) < LLM_RERANK_MAX_MARGIN
+        )
     ):
-        _try_llm_rerank(primary_ranked[:5], utterance, llm_client)
+        _try_llm_rerank(primary_ranked[:LLM_RERANK_TOP_K], utterance, llm_client)
 
     top = primary_ranked[0] if primary_ranked else None
     margin = (primary_ranked[0].probability - primary_ranked[1].probability) if len(primary_ranked) >= 2 else (top.probability if top else 0.0)
@@ -340,13 +407,14 @@ def resolve_candidates(
         or (top is not None and (top.candidate.is_destructive or any(k in top.candidate.label.lower() for k in ("delete", "purge", "remove", "pay", "revoke"))))
     )
 
+    decision: Decision
     if top is None:
         decision = "pin_immediate"
     elif intent_class == "read_only":
         decision = "pin_immediate"
     elif is_destructive:
         decision = "confirm_destructive"
-    elif top.probability >= 0.76 and margin >= 0.26:
+    elif top.probability >= EXECUTE_MIN_PROB and margin >= EXECUTE_MIN_MARGIN:
         decision = "execute_safe"
     else:
         decision = "open_semantic_lens"
