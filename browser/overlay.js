@@ -25,8 +25,12 @@
   const state = {
     mode: (prevState && prevState.mode) || "hover",
     sigmaPx: (prevState && prevState.sigmaPx) || 120,
-    dwellMs: 450,
-    wiggleTrigger: true,
+    hoverSigmaPx: (prevState && prevState.hoverSigmaPx) || 24,
+    dwellMs: (prevState && prevState.dwellMs) || 450,
+    wiggleTrigger: prevState && prevState.wiggleTrigger !== undefined ? prevState.wiggleTrigger : true,
+    candidateRadiusPx: (prevState && prevState.candidateRadiusPx) || 380,
+    hotkey: (prevState && prevState.hotkey) || "Backquote",
+    resolutionId: 0,
     tucked: false,
     armed: false, // When true, lockedX / lockedY stay frozen while user interacts with HUD
     armedAt: 0,
@@ -436,7 +440,9 @@
   spotlight.className = "spotlight";
   const spotlightTag = document.createElement("div");
   spotlightTag.className = "spotlight-tag";
-  spotlightTag.textContent = "☤ Gaze σ=18px";
+  spotlightTag.textContent = state.mode === "hover"
+    ? `☤ Pointer σ=${state.hoverSigmaPx}px`
+    : `☤ Gaze Cone σ=${state.sigmaPx}px`;
   spotlight.appendChild(spotlightTag);
   shadow.appendChild(spotlight);
 
@@ -461,7 +467,7 @@
         <span class="plugin-pill" id="hg-tuck-summary">PLUGIN HUD</span>
       </div>
       <div class="hud-controls">
-        <button class="ctrl-btn" id="hg-mode-btn" title="Switch between Precise Pointer (σ=18px) and Simulated Noisy Eye Gaze (σ=130px)">🎯 Hover (σ=18px)</button>
+        <button class="ctrl-btn" id="hg-mode-btn" title="Switch between Precise Pointer (σ=${state.hoverSigmaPx}px) and Simulated Noisy Eye Gaze (σ=${state.sigmaPx}px)">🎯 Hover (σ=${state.hoverSigmaPx}px)</button>
         <button class="ctrl-btn" id="hg-clear-btn" title="Clear pins & lens overlays (Esc)">Clear</button>
         <button class="ctrl-btn" id="hg-tuck-btn" title="Tuck or expand the plugin HUD">_ Tuck</button>
       </div>
@@ -584,7 +590,7 @@
   // --- Mode Switcher (Hover vs Simulated Noisy Gaze) ---
   function syncModeUI() {
     if (state.mode === "hover") {
-      modeBtn.textContent = "🎯 Hover (σ=18px)";
+      modeBtn.textContent = `🎯 Hover (σ=${state.hoverSigmaPx}px)`;
       modeBtn.classList.remove("active");
     } else {
       modeBtn.textContent = `👁️ Gaze Sim (σ=${state.sigmaPx}px)`;
@@ -598,6 +604,7 @@
   modeBtn.addEventListener("click", () => {
     state.mode = state.mode === "hover" ? "simulated" : "hover";
     syncModeUI();
+    _emit({ type: "configure", mode: state.mode });
   });
 
   clearBtn.addEventListener("click", () => {
@@ -640,9 +647,10 @@
     spotlight.style.height = `${r}px`;
     spotlight.style.left = `${x}px`;
     spotlight.style.top = `${y}px`;
+    const sigmaLabel = state.mode === "hover" ? state.hoverSigmaPx : state.sigmaPx;
     spotlightTag.textContent = state.armed
-      ? `🔒 Locked (${state.mode === "hover" ? "σ=18px" : "σ=" + state.sigmaPx + "px"})`
-      : `☤ ${state.mode === "hover" ? "Pointer σ=18px" : "Gaze Cone σ=" + state.sigmaPx + "px"}`;
+      ? `🔒 Locked (σ=${sigmaLabel}px)`
+      : `☤ ${state.mode === "hover" ? "Pointer" : "Gaze Cone"} σ=${sigmaLabel}px`;
   }
 
   function updateLiveInspector(x, y) {
@@ -689,7 +697,7 @@
       x_doc: activeX + window.scrollX,
       y_doc: activeY + window.scrollY,
       t: Date.now() / 1000,
-      sigma: state.mode === "hover" ? 22 : state.sigmaPx,
+      sigma: state.mode === "hover" ? state.hoverSigmaPx : state.sigmaPx,
     });
     const cutoff = (Date.now() / 1000) - 10.0;
     while (state.ringBuffer.length > 250 || (state.ringBuffer.length > 1 && state.ringBuffer[0].t < cutoff)) {
@@ -738,23 +746,157 @@
     }
   }
 
-  // --- In-Browser 2D Gaussian Box Integral & Deictic Resolution Engine ---
-  function erf(x) {
-    const sign = x >= 0 ? 1 : -1;
-    x = Math.abs(x);
-    const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
-    const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
-    const t = 1.0 / (1.0 + p * x);
-    const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
-    return sign * y;
+  // --- Resolver Intent Channel (the Python session resolves, explains, transcribes & clicks) ---
+  let _intentSeq = 0;
+  let _lastSentResolveId = 0;
+  let _pendingUtterance = "";
+  let _pendingExplainFallback = "";
+  const _transcribeTimers = new Map();
+
+  function _emit(intent) {
+    intent.id = ++_intentSeq;
+    if (typeof window.__hermesGazeIntent !== "function") {
+      showHudMessage('<div style="color:#f87171;">⚠️ Resolver offline (session not connected).</div>');
+      return false;
+    }
+    window.__hermesGazeIntent(JSON.stringify(intent));
+    return true;
   }
 
-  function gaussianBoxIntegral(rx, ry, rw, rh, gx, gy, sigma) {
-    const s = Math.max(sigma, 8.0) * Math.SQRT2;
-    const px = 0.5 * (erf((rx + rw - gx) / s) - erf((rx - gx) / s));
-    const py = 0.5 * (erf((ry + rh - gy) / s) - erf((ry - gy) / s));
-    const areaNorm = Math.pow(Math.max(rw * rh, 1.0) + 1200.0, 0.40);
-    return Math.max((px * py) / areaNorm, 1e-12);
+  function emitResolve(utterance, words) {
+    const text = (utterance || "").trim();
+    if (!text) return false;
+    const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
+    const px = locked ? state.lockedX : state.pointerX;
+    const py = locked ? state.lockedY : state.pointerY;
+    const intent = {
+      type: "resolve",
+      utterance: text,
+      pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
+      fixations: state.ringBuffer.slice(-25),
+      candidates: extractCandidatesNear(px, py, state.candidateRadiusPx || 380),
+    };
+    if (words) {
+      intent.words = words;
+    }
+    if (!_emit(intent)) return false;
+    _lastSentResolveId = intent.id;
+    _pendingUtterance = text;
+    return true;
+  }
+
+  function emitChoose(idx, modality) {
+    return _emit({
+      type: "choose",
+      resolution_id: state.resolutionId || 0,
+      candidate_index: idx + 1,
+      modality: modality || "click",
+      execute: true,
+    });
+  }
+
+  function emitTranscribe(audioBase64, mimeType) {
+    const intent = {
+      type: "transcribe",
+      audio_base64: audioBase64,
+      mime_type: mimeType || "audio/webm",
+      sample_rate: 16000,
+    };
+    if (!_emit(intent)) {
+      resetMicUiIdle("⚠️ Resolver offline (session not connected).");
+      return false;
+    }
+    const timerId = setTimeout(() => {
+      _transcribeTimers.delete(intent.id);
+      resetMicUiIdle("❌ Transcription timed out — resolver did not respond.");
+    }, 12000);
+    _transcribeTimers.set(intent.id, timerId);
+    return true;
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[ch]));
+  }
+
+  function onIntentResult(msg) {
+    if (typeof msg === "string") {
+      try {
+        msg = JSON.parse(msg);
+      } catch (_) {
+        return;
+      }
+    }
+    if (!msg || typeof msg !== "object") return;
+
+    if (msg.type === "transcribe") {
+      const pendingTimer = _transcribeTimers.get(msg.id);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        _transcribeTimers.delete(msg.id);
+      }
+      if (!isListening) {
+        resetMicUiIdle();
+      }
+      if (msg.ok && msg.text && String(msg.text).trim()) {
+        const spoken = String(msg.text).trim();
+        hudInput.value = spoken;
+        hudInput.dispatchEvent(new Event("input", { bubbles: true }));
+        lockLabel.textContent = `🗣️ Heard: "${spoken}"`;
+        emitResolve(spoken, msg.words);
+      } else {
+        lockLabel.textContent = msg.error
+          ? `❌ ${msg.error}`
+          : "⚠️ No speech detected in audio. Please speak clearly while holding Spacebar.";
+      }
+      return;
+    }
+
+    if (msg.type === "resolve") {
+      if (msg.id < _lastSentResolveId) return; // stale response — last resolve wins
+      if (!msg.ok) {
+        showHudMessage(`<div style="color:#f87171;">⚠️ ${escapeHtml(msg.error || "Resolver error.")}</div>`);
+        return;
+      }
+      if (msg.needs_explain && msg.top) {
+        _pendingExplainFallback = msg.top.summary || "";
+        _emit({
+          type: "explain",
+          utterance: _pendingUtterance,
+          label: msg.top.label || "",
+          role: msg.top.role || "",
+          summary: msg.top.summary || "",
+        });
+      }
+      return;
+    }
+
+    if (msg.type === "explain") {
+      const expEl = shadow.querySelector("#gaze-explanation-text");
+      if (expEl) {
+        if (msg.ok && msg.explanation) {
+          expEl.innerHTML = `<span style="color:#f8fafc;">${escapeHtml(msg.explanation)}</span>`;
+        } else {
+          const fallback = _pendingExplainFallback || msg.error || "Explanation unavailable.";
+          expEl.innerHTML = `<span style="color:#cbd5e1;">${escapeHtml(fallback)}</span>`;
+        }
+      }
+      return;
+    }
+
+    if (msg.type === "choose") {
+      if (!msg.ok) {
+        showHudMessage(`<div style="color:#f87171;">⚠️ ${escapeHtml(msg.error || "Selection failed.")}</div>`);
+      }
+      return;
+    }
+
+    // "configure" acks and unknown types are no-ops
   }
 
   function formatRoleDisplayName(role) {
@@ -786,183 +928,6 @@
       default:
         return r ? r.charAt(0).toUpperCase() + r.slice(1) : "Element";
     }
-  }
-
-  function resolveLocallyInBrowser(utterance) {
-    const text = (utterance || "").trim();
-    if (!text) return;
-    const lower = text.toLowerCase();
-
-    const activeX = state.armed && state.lockedX !== null ? state.lockedX : state.pointerX;
-    const activeY = state.armed && state.lockedY !== null ? state.lockedY : state.pointerY;
-    const sigma = state.mode === "hover" ? 22 : state.sigmaPx;
-
-    const candidates = extractCandidatesNear(activeX, activeY, Math.max(sigma * 2.6, 260));
-    if (!candidates.length) {
-      showHudMessage("No candidate elements found near the pointed location.");
-      return;
-    }
-
-    const isReadOnly = /(what|why|how|which|where|who|explain|describe|tell me|show me|inspect|info|happens if|does this)/.test(lower);
-    const isPluralOrData = /(these|those|results|rows|table|export|chart|plot|spend|roas)/.test(lower);
-
-    const scored = candidates.map((c) => {
-      const [rx, ry, rw, rh] = c.rect_vp;
-      const boxMass = gaussianBoxIntegral(rx, ry, rw, rh, activeX, activeY, sigma);
-      const spatialLog = Math.log(boxMass);
-
-      let semScore = 0.0;
-      if (isPluralOrData && (c.is_container || c.role === "table")) {
-        semScore += 4.8;
-      } else if (!isPluralOrData && c.is_interactive && !c.is_container) {
-        semScore += 3.5;
-      } else if (!isPluralOrData && !c.is_container) {
-        // Atomic leaf informational elements like th, td, abbr
-        semScore += 3.2;
-      } else if (!isPluralOrData && c.is_container) {
-        semScore -= 5.0;
-      }
-      if (c.is_direct_hit) {
-        semScore += 3.5;
-      }
-      // Lexical overlap boost
-      const labelWords = (c.label + " " + c.id).toLowerCase().split(/\W+/);
-      for (const w of labelWords) {
-        if (w.length > 2 && lower.includes(w)) semScore += 2.0;
-      }
-
-      const logPost = spatialLog + semScore;
-      const roleName = formatRoleDisplayName(c.role || c.tag);
-      let desc = c.consequence || c.summary;
-      if (!desc) {
-        if (c.role === "columnheader" || c.tag === "th") {
-          desc = `Column header "${c.label}" in table`;
-        } else if (c.role === "cell" || c.tag === "td") {
-          desc = `Table cell "${c.label}"`;
-        } else if (c.is_interactive) {
-          desc = `Actionable ${roleName.toLowerCase()} element`;
-        } else {
-          desc = `Informational ${roleName.toLowerCase()}`;
-        }
-      }
-
-      return {
-        ...c,
-        spatial_score: Number(spatialLog.toFixed(4)),
-        semantic_score: Number(semScore.toFixed(4)),
-        log_post: logPost,
-        consequence_preview: desc,
-      };
-    });
-
-    scored.sort((a, b) => b.log_post - a.log_post);
-    const maxLog = scored[0].log_post;
-    const exps = scored.map((s) => Math.exp(Math.max(s.log_post - maxLog, -30)));
-    const sumExp = exps.reduce((a, b) => a + b, 0) || 1;
-    scored.forEach((s, i) => {
-      s.probability = Number((exps[i] / sumExp).toFixed(4));
-    });
-
-    const top = scored[0];
-    const second = scored[1];
-    const margin = second ? top.probability - second.probability : 1.0;
-
-    if (isPluralOrData && (top.is_container || top.role === "table")) {
-      const tableData = extractTableData(top.selector);
-      const svg = renderMiniSvgScatter(tableData);
-      renderPins(
-        [top],
-        `<div style="font-size:13.5px;"><strong style="color:#38bdf8;">📊 Promoted to Container: ${top.label}</strong></div>` +
-        `<div style="color:#cbd5e1;font-size:12px;margin-top:3px;">Extracted ${tableData ? tableData.rows.length : 0} rows × ${tableData ? tableData.headers.length : 0} cols</div>` +
-        (svg || "") +
-        `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;">` +
-        `<span>Target: ${top.selector}</span><span>Confidence: ${Math.round(top.probability * 100)}%</span>` +
-        `</div>`
-      );
-      return;
-    }
-
-    if (isReadOnly) {
-      const roleDisplayName = formatRoleDisplayName(top.role || top.tag);
-      const fallbackDesc = top.summary || top.consequence || top.consequence_preview || `Informational ${roleDisplayName.toLowerCase()}`;
-      const interactiveNote = top.is_interactive
-        ? `<div style="margin-top:5px;font-size:11.5px;color:#94a3b8;">Type: Interactive ${roleDisplayName.toLowerCase()} (requires click or action verb to trigger).</div>`
-        : "";
-
-      renderPins(
-        [top],
-        `<div style="font-size:13.5px;"><strong style="color:#38bdf8;">🔍 Inspecting: ${top.label}</strong> <span style="color:#94a3b8;font-size:11.5px;font-weight:500;">(${roleDisplayName})</span></div>` +
-        `<div id="gaze-explanation-text" style="margin-top:6px;color:#f8fafc;font-size:12.5px;line-height:1.45;">` +
-        `<span style="color:#38bdf8;font-style:italic;">⏳ Asking Hermes...</span>` +
-        `</div>` +
-        interactiveNote +
-        `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,SFMono-Regular,monospace;">` +
-        `<span>Target: ${top.selector}</span><span>Confidence: ${Math.round(top.probability * 100)}%</span>` +
-        `</div>`
-      );
-
-      // Asynchronously ask Hermes for the semantic explanation
-      fetch("http://127.0.0.1:9111/api/explain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          utterance: text,
-          label: top.label,
-          role: roleDisplayName,
-          summary: top.summary || top.consequence || "",
-        }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && data.ok && data.explanation) {
-            const expEl = shadow.querySelector("#gaze-explanation-text");
-            if (expEl) {
-              expEl.innerHTML = `<span style="color:#f8fafc;">${data.explanation}</span>`;
-            }
-          }
-        })
-        .catch(() => {
-          const expEl = shadow.querySelector("#gaze-explanation-text");
-          if (expEl) {
-            expEl.innerHTML = `<span style="color:#cbd5e1;">${fallbackDesc}</span>`;
-          }
-        });
-
-      return;
-    }
-
-    if (margin < 0.35 || top.is_destructive || state.mode === "simulated") {
-      const reason = top.is_destructive
-        ? "⚠️ High-Consequence Target — Confirm in Semantic Lens"
-        : "🔍 Ambiguous Gaze Cone — Pick Target in Semantic Lens (Hover 450ms, Press 1-3, or Click)";
-      renderSemanticLens(scored.slice(0, 3), reason);
-      return;
-    }
-
-    // High-confidence safe action
-    selectLensCandidateFromList(scored, 0, "auto-confident");
-  }
-
-  function renderMiniSvgScatter(tableData) {
-    if (!tableData || !tableData.rows || !tableData.rows.length) return "";
-    const pts = tableData.rows.map((r) => {
-      const name = r[0] || "Row";
-      const spend = parseFloat(String(r[4] || "0").replace(/[^0-9.]/g, "")) || 0;
-      const roas = parseFloat(String(r[5] || "0").replace(/[^0-9.]/g, "")) || 0;
-      return { name, spend, roas };
-    });
-    const maxSpend = Math.max(...pts.map((p) => p.spend), 1);
-    const maxRoas = Math.max(...pts.map((p) => p.roas), 1);
-    const circles = pts.map((p) => {
-      const cx = (42 + (p.spend / maxSpend) * 320).toFixed(1);
-      const cy = (108 - (p.roas / maxRoas) * 84).toFixed(1);
-      return `<circle cx="${cx}" cy="${cy}" r="5" fill="#38bdf8" stroke="#09090b" stroke-width="1.5"/>` +
-             `<text x="${Number(cx) + 7}" y="${Number(cy) + 3}" fill="#e2e8f0" font-size="9.5" font-family="monospace">${p.name.slice(0, 14)}</text>`;
-    }).join("");
-    return `<svg viewBox="0 0 420 128" width="100%" height="128" style="background:#09090b;border:1px solid rgba(99,102,241,0.35);border-radius:6px;margin-top:6px;">` +
-           `<line x1="38" y1="16" x2="38" y2="110" stroke="#334155"/><line x1="38" y1="110" x2="395" y2="110" stroke="#334155"/>` +
-           `<text x="215" y="124" fill="#94a3b8" font-size="9.5" text-anchor="middle">Spend ($) vs ROAS (x)</text>` +
-           circles + `</svg>`;
   }
 
   const DEFAULT_PLACEHOLDER = "Point & speak or ask: 'What happens if I press this?'...";
@@ -1081,7 +1046,7 @@
         }
       };
 
-      recorder.onstop = async () => {
+      recorder.onstop = () => {
         const chunks = audioChunks.slice();
         audioChunks = [];
         const recordedBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
@@ -1095,36 +1060,17 @@
         hudMic.textContent = "⏳ Transcribing...";
         lockLabel.textContent = "⏳ Transcribing audio with local Whisper (tiny.en)...";
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-        try {
-          const resp = await fetch("http://127.0.0.1:9111/api/transcribe", {
-            method: "POST",
-            headers: { "Content-Type": recordedBlob.type || "audio/webm" },
-            body: recordedBlob,
-            signal: controller.signal,
-          });
-          const data = await resp.json();
-          resetMicUiIdle();
-
-          if (data && data.ok && data.text && data.text.trim()) {
-            const spoken = data.text.trim();
-            hudInput.value = spoken;
-            hudInput.dispatchEvent(new Event("input", { bubbles: true }));
-            lockLabel.textContent = `🗣️ Heard: "${spoken}"`;
-            resolveLocallyInBrowser(spoken);
-          } else if (data && data.error) {
-            lockLabel.textContent = `❌ ${data.error}`;
-          } else {
-            lockLabel.textContent = "⚠️ No speech detected in audio. Please speak clearly while holding Spacebar.";
-          }
-        } catch (err) {
-          const msg = err && err.name === "AbortError" ? "Transcription request timed out" : (err.message || err);
-          resetMicUiIdle(`❌ Whisper API error: ${msg}`);
-        } finally {
-          clearTimeout(timeoutId);
-        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result || "");
+          const commaIdx = dataUrl.indexOf(",");
+          const audioBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+          emitTranscribe(audioBase64, recorder.mimeType || "audio/webm");
+        };
+        reader.onerror = () => {
+          resetMicUiIdle("❌ Could not encode recorded audio for transcription.");
+        };
+        reader.readAsDataURL(recordedBlob);
       };
 
       recorder.start(80);
@@ -1182,19 +1128,19 @@
     chip.addEventListener("click", () => {
       const prompt = chip.getAttribute("data-prompt") || "";
       hudInput.value = prompt;
-      resolveLocallyInBrowser(prompt);
+      emitResolve(prompt);
     });
   });
 
   hudSend.addEventListener("click", () => {
-    resolveLocallyInBrowser(hudInput.value);
+    emitResolve(hudInput.value);
   });
 
   hudInput.addEventListener("keydown", (e) => {
     e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
-      resolveLocallyInBrowser(hudInput.value);
+      emitResolve(hudInput.value);
     } else if (e.key === "Escape") {
       clearOverlays("inputEscape");
     }
@@ -1224,10 +1170,10 @@
       }
       return;
     }
-    if (e.code === "Backquote" || (e.altKey && e.code === "Space")) {
+    if (e.code === (state.hotkey || "Backquote")) {
       e.preventDefault();
       setTargetLocked(!state.armed, "hotkey");
-    } else if (state.lensActive && ["Digit1", "Digit2", "Digit3", "Digit4"].includes(e.code)) {
+    } else if (state.lensActive && /^Digit[1-9]$/.test(e.code)) {
       const idx = parseInt(e.code.replace("Digit", ""), 10) - 1;
       if (idx >= 0 && idx < state.lensCandidates.length) {
         e.preventDefault();
@@ -1434,12 +1380,13 @@
     }
   }
 
-  function renderSemanticLens(candidates, promptMessage) {
+  function renderSemanticLens(candidates, promptMessage, resolutionId) {
     pinsLayer.innerHTML = "";
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
     state.lensActive = true;
-    state.lensCandidates = (candidates || []).slice(0, 4);
+    state.lensCandidates = candidates || [];
+    state.resolutionId = resolutionId || 0;
 
     if (promptMessage) {
       showHudMessage(`<div style="color:#38bdf8;font-weight:600;">${promptMessage}</div>`);
@@ -1486,6 +1433,7 @@
         </div>
         <div class="lens-title">${cand.label || cand.selector}</div>
         <div class="lens-desc">↳ ${cand.consequence_preview || cand.consequence || "Execute action"}</div>
+        <div class="lens-desc" style="margin-top:5px;font-size:10px;color:#64748b;">Dwell ${state.dwellMs}ms · Key ${idx + 1} · Click</div>
         <div class="dwell-bar" id="dwell-${idx}"></div>
       `;
 
@@ -1522,26 +1470,12 @@
     });
   }
 
-  function selectLensCandidateFromList(list, idx, modality) {
-    const chosen = list[idx];
-    if (!chosen) return;
-    const roleDisplayName = formatRoleDisplayName(chosen.role || chosen.tag);
-    renderPins(
-      [chosen],
-      `<div style="font-size:13.5px;"><strong style="color:#34d399;">✓ Executed: ${chosen.label}</strong> <span style="color:#94a3b8;font-size:11.5px;">(${roleDisplayName} via ${modality})</span></div>` +
-      `<div style="margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;">${chosen.consequence_preview || chosen.summary || ""}</div>` +
-      `<div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;">` +
-      `<span>Target: ${chosen.selector}</span><span>Modality: ${modality}</span>` +
-      `</div>`
-    );
-    const el = document.querySelector(chosen.selector);
-    if (el && typeof el.click === "function") {
-      el.click();
-    }
-  }
-
   function selectLensCandidate(idx, modality) {
-    selectLensCandidateFromList(state.lensCandidates, idx, modality);
+    if (!state.lensActive) return;
+    if (idx < 0 || idx >= state.lensCandidates.length) return;
+    if (emitChoose(idx, modality)) {
+      state.lensActive = false; // Python re-renders; don't fire duplicate chooses while it responds
+    }
   }
 
   function destroy() {
@@ -1549,6 +1483,10 @@
       clearTimeout(stopDelayTimer);
       stopDelayTimer = null;
     }
+    for (const timerId of _transcribeTimers.values()) {
+      clearTimeout(timerId);
+    }
+    _transcribeTimers.clear();
     isListening = false;
     spaceHeld = false;
     if (mediaRecorder && mediaRecorder.state === "recording") {
@@ -1592,7 +1530,7 @@
     renderPins,
     renderSemanticLens,
     clearOverlays,
-    resolveLocallyInBrowser,
+    onIntentResult,
     showHudMessage(htmlText) {
       showHudMessage(htmlText);
     },
