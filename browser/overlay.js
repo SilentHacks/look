@@ -61,7 +61,7 @@
   const uiFrame = document.createElement("iframe");
   uiFrame.setAttribute("sandbox", "");
   uiFrame.setAttribute("aria-label", "Hermes Gaze private controls");
-  uiFrame.style.cssText = "position:fixed;right:16px;bottom:16px;width:min(438px,calc(100vw - 32px));max-height:calc(100vh - 32px);height:1px;border:0;pointer-events:auto;background:transparent;color-scheme:normal";
+  uiFrame.style.cssText = "position:fixed;z-index:1;right:16px;bottom:16px;width:min(438px,calc(100vw - 32px));max-height:calc(100vh - 32px);height:1px;border:0;pointer-events:auto;background:transparent;color-scheme:normal";
   visualShadow.appendChild(uiFrame);
   let uiRevision = 0;
   let uiEvent = null;
