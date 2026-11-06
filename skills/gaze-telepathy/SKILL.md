@@ -14,9 +14,11 @@ Current packets use `<browser_context>` instead.
 
 Use the `Resolution: N` number and short `@` handles in the CURRENT context. Handles are snapshot identities, not selectors. Never reuse an old resolution after a new one arrives.
 
-The pointer is highlighted automatically when fresh hover evidence activates.
-To show a different scope, use `gaze_highlight(handles=["@..."], resolution_id=N)`.
-For a comparison, include both handles. Omit `hud_message` during streaming.
+The pointer is highlighted automatically when fresh hover evidence activates;
+the answer's scope is selected automatically after the answer, without a tool turn.
+Use `gaze_highlight(handles=["@..."], resolution_id=N)` for an explicit highlight
+request or to change scope before answering. For a comparison, include both handles.
+Omit `hud_message` during streaming.
 Deferred tools are available through `tool_describe`, then `tool_call`.
 - `gaze_click(handle="@...", resolution_id=N)` activates a current control, not a data container. For "export this table", the subject is the table but the action handle is the separate Export control. Never claim execution unless the tool reports `executed: true`.
 - If a target changed, detached or expired, obtain fresh evidence with `gaze_resolve(utterance=...)`; do not guess a selector or retry a mutation whose outcome is unknown.

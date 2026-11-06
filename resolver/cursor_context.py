@@ -15,10 +15,9 @@ EVIDENCE_RULES = (
     "Don't mention packet details, @handles, epochs or tool names unless the user asks about them. "
 )
 TOOL_RULES = (
-    "Only pointed handles are auto-highlighted. Before a different-scope answer, REQUIRED: gaze_highlight "
-    "with chosen handles and current resolution_id. "
-    "For deferred gaze tools, first tool_describe(names=['gaze_highlight','gaze_click']), then tool_call. "
-    "Omit hud_message while streaming. "
+    "Answer scope is highlighted automatically after the answer. Use gaze_highlight only for an explicit "
+    "highlight request or to change scope before answering; use current handles and resolution_id. "
+    "For deferred action tools, first tool_describe(names=['gaze_click']), then tool_call. "
     "Hover actions MUST use gaze_click, never generic browser/JS/terminal tools; simulated actions use gaze_choose. "
     "Only a trusted Chrome click can confirm risky actions; a question is not permission."
 )
@@ -191,6 +190,12 @@ def cursor_result(capture, utterance, words=None, now=None):
                 return add(text)
         add(prefix + "[omitted: context budget]")
         return False
+    def add_urls(item):
+        # URLs are indivisible evidence: omit overlong links rather than invent a clipped destination.
+        for url in item.get("urls", [])[:3]:
+            if isinstance(url, str) and len(url) <= 600 and re.match(r"^https?://[^\s]+$", url):
+                add(f"URL {item.get('id')}: {url}")
+
 
     add("Page: " + str(capture.get("page_title") or "")[:100])
 
@@ -237,6 +242,21 @@ def cursor_result(capture, utterance, words=None, now=None):
             add(f"pointed cell value {str(cell.get('value', ''))[:120]}; "
                 f"header {str(cell.get('header', ''))[:80]}; row {cell.get('row')}; "
                 f"column {cell.get('column')}; table {cell.get('block')}")
+    # Pointed facts and destinations precede peers, even on link-heavy pages.
+    for target in selected:
+        add_urls(target)
+        for block in blocks:
+            if block.get("kind") == "group":
+                for member in block.get("members", [])[:64]:
+                    if member.get("id") == target.get("group_item_id"):
+                        add(f"pointed item {member.get('id')}: {str(member.get('text', ''))[:300]}")
+                        add_urls(member)
+            elif block.get("kind") == "table":
+                for row in block.get("rows", [])[:64]:
+                    if row.get("id") == target.get("cell", {}).get("row_handle"):
+                        add_urls(row)
+            else:
+                add_urls(block)
     groups = []
     pointed_items = {target.get("group_item_id") for target in selected}
     for block in blocks:
@@ -266,12 +286,15 @@ def cursor_result(capture, utterance, words=None, now=None):
                                        min(1200, max(0, remaining() - 200) // max(1, members_left)),
                                        limits=(300, 160, 100, 70, 48, 32, 16, 8, 0)))
             members_left -= 1
+            if member.get("id") not in pointed_items:
+                add_urls(member)
         add(f"{group.get('id')} omitted items: {max(0, total - written)}; "
             f"offscreen items: {group.get('offscreen_items', 0)}")
     for block, _, rows in tables:
         for row in rows[:max(0, 12 - kept[block["id"]])]:
             kept[block["id"]] += bool(add_values(f"row {row.get('index')} {row.get('id', '')}: ",
                                                 row.get("cells", []), 1800))
+            add_urls(row)
         add(f"omitted rows: {max(0, int(block.get('total_rows', 0)) - kept[block['id']])}")
         if block.get("omitted_columns"):
             add(f"omitted columns per row: {block['omitted_columns']}; pointed column is described separately")

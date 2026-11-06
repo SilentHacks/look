@@ -27,6 +27,50 @@ def capture():
 
 
 class TestCursorContext(unittest.TestCase):
+    def test_deal_urls_remain_fenced_and_pointed_facts_win_link_budget(self):
+        data = capture()
+        target = data["targets"][1]
+        target.update(role="span", label="£25", block_ids=["@deals"], group_item_id="@deal",
+                      urls=["https://deals.invalid/pointed?x=1&y=2"])
+        members = [{"id": "@deal", "text": "Pointed offer £25 delivered", "in_view": True,
+                    "urls": ["https://merchant.invalid/pointed"]}]
+        members += [{"id": f"@peer{i}", "text": "Peer offer " + "x" * 300, "in_view": True,
+                     "urls": [f"https://deals.invalid/{i}/" + "x" * 500]} for i in range(15)]
+        data["blocks"] = [{"id": "@deals", "kind": "group", "members": members, "total_items": 16}]
+        packet = cursor_result(data, "Investigate this deal")["context"]
+        page = packet.split("<page_data>\n")[1].split("\n</page_data>")[0]
+        self.assertIn("https://deals.invalid/pointed?x=1&amp;y=2", page)
+        self.assertIn("https://merchant.invalid/pointed", page)
+        self.assertIn("Pointed offer £25 delivered", page)
+        self.assertIn("https://deals.invalid/0/", page)
+        self.assertLessEqual(len(packet), MAX_CONTEXT)
+
+    def test_answer_scope_rejects_forged_handles_and_late_selection(self):
+        session = GazeSession(cdp_http_url="http://127.0.0.1:1")
+        self.addCleanup(session.close)
+        payload = cursor_result(capture(), "Explain this row")
+        payload.update(snapshot_id="saved", handles={"@row": {"kind": "tr"}})
+        payload["context"] = build_context(["row @row: Alpha £25"], "Explain this row", "Alpha")
+        with mock.patch.object(session, "eval_js_once", return_value={"ok": True}) as browser:
+            session.store_hover_snapshot(payload)
+            saved = session.last_hover_snapshot
+            client = mock.Mock()
+            client.complete_structured.return_value.parsed = {"handles": ["@forged"]}
+            self.assertFalse(service.highlight_answer_scope(session, saved, "Alpha costs £25", client)["ok"])
+            self.assertEqual(browser.call_count, 1)  # activation only
+            client.complete_structured.return_value.parsed = {"handles": ["@row"]}
+            self.assertTrue(service.highlight_answer_scope(session, saved, "Alpha costs £25", client)["ok"])
+            saved["actions_allowed"] = False
+            self.assertTrue(service.highlight_answer_scope(session, saved, "Alpha costs £25", client)["ok"])
+            self.assertFalse(session.actions.click("@row", session.resolution_id)["ok"])
+            def late(**kwargs):
+                session.clear_hover_snapshot()
+                return mock.Mock(parsed={"handles": ["@row"]})
+            client.complete_structured.side_effect = late
+            before = browser.call_count
+            self.assertFalse(service.highlight_answer_scope(session, saved, "Alpha costs £25", client)["ok"])
+            self.assertEqual(browser.call_count, before)
+
     def test_timestamp_order_not_future_nearest_and_typed_age(self):
         data = capture()
         words = [{"word": "this", "start": 11.9}, {"word": "this", "start": 12.1}]

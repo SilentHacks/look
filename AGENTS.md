@@ -92,16 +92,26 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Queued voice snapshots activate only in the matching session/text pre-hook.
   Explain checks the saved snapshot before and after the call; hook context is
   returned verbatim, including the current epoch.
-  Fresh hover evidence highlights its available pointer handles automatically;
-  the model calls `gaze_highlight` only to change scope. Followups without a fresh
-  capture stream normally but attach nothing and preserve the epoch and pending
-  confirmations. Live identity/fingerprint and single-use approval checks still apply.
+  Fresh hover evidence highlights its available pointer handles automatically.
+  After an answer, one bounded `ctx.llm` call selects the evidenced answer scope;
+  saved snapshot identity, current epoch and captured handles are checked again
+  before highlighting. No protocol markers enter the answer or transcript.
+  `gaze_highlight` remains for explicit/manual scope changes. Followups without
+  fresh evidence attach nothing and preserve the epoch and pending confirmations.
+  Live identity/fingerprint and single-use approval checks still apply. Read-only
+  one-shot turns may highlight but cannot click or confirm actions.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
   associated labels. Capture history/evidence at recording stop, before ASR.
+  Evidence URLs are resolved HTTP(S) destinations only, at most three per item
+  and 600 characters each, inside the untrusted fence. Pointed facts/URLs precede
+  peer URLs in the shared 6000-character packet; links never bypass field/label exclusions.
 - **No selector rematching for history or actions.** Short `@` handles refer to
   captured DOM identities/column members. Highlight/click require the current
   epoch; changed, detached or expired targets fail honestly.
+  Highlight geometry follows those same nodes while selected, clipped to the
+  viewport and scrolling ancestors; no animation-frame layout work runs without
+  a live selection.
 - **Confirmation is not a model tool.** Python classifies live risk and form
   submits. Only the nonce-checked binding from a trusted primary mouse click can
   consume its fingerprint-bound, single-use approval. Model/page text is plain

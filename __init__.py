@@ -101,12 +101,28 @@ def register(ctx: Any) -> None:
 
     turns = VoiceTurns(ctx, session)
     service.set_voice_turns(turns)
+    answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
 
     def pre_llm_call(**kwargs: Any) -> Any:
         with turns.lock:
             if turns.binding and turns.binding["session_id"] == kwargs.get("session_id"):
-                return turns.pre(**kwargs)
-        return _on_pre_llm_call(**kwargs)
+                result = turns.pre(**kwargs)
+            else:
+                result = _on_pre_llm_call(**kwargs)
+            snapshot = session.last_hover_snapshot
+            if result and snapshot and result.get("context") == snapshot.get("context"):
+                key = (kwargs.get("session_id", ""), kwargs.get("turn_id", ""))
+                answer_snapshots[key] = snapshot
+                while len(answer_snapshots) > 128:
+                    answer_snapshots.pop(next(iter(answer_snapshots)))
+            return result
+
+    def post_llm_call(**kwargs: Any) -> None:
+        turns.post(**kwargs)
+        with turns.lock:
+            snapshot = answer_snapshots.pop((kwargs.get("session_id", ""), kwargs.get("turn_id", "")), None)
+        if snapshot:
+            service.highlight_answer_scope(session, snapshot, kwargs.get("assistant_response", ""))
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
         if raw_args.strip() in ("connect", "disconnect"):
@@ -117,7 +133,7 @@ def register(ctx: Any) -> None:
 
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("on_stream_delta", turns.delta)
-    ctx.register_hook("post_llm_call", turns.post)
+    ctx.register_hook("post_llm_call", post_llm_call)
     ctx.register_hook("on_session_end", turns.end)
     ctx.register_command(
         "gaze",

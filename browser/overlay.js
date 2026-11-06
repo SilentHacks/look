@@ -589,6 +589,28 @@
       return "[redacted]";
     return (el.getAttribute("aria-label") || el.getAttribute("title") || safeText(el, max, excluded)).slice(0, max);
   }
+  function safeLinks(el) {
+    const links = [];
+    const candidates = [el.closest("a[href]"), ...el.querySelectorAll("a[href]")];
+    for (const link of candidates.slice(0, 120)) {
+      if (!link || links.length >= 3) continue;
+      let excluded = false;
+      for (let node = link; node; node = node.parentElement) {
+        if (sensitive(node) || node.matches("input,textarea,select,[contenteditable],#hermes-gaze-root") ||
+            node.matches("label") && node.htmlFor && sensitive(document.getElementById(node.htmlFor))) {
+          excluded = true;
+          break;
+        }
+      }
+      if (excluded || !rendered(link)) continue;
+      try {
+        const url = new URL(link.getAttribute("href"), document.baseURI || location.href);
+        if (["http:", "https:"].includes(url.protocol) && url.href.length <= 600 && !links.includes(url.href))
+          links.push(url.href);
+      } catch (_) {}
+    }
+    return links;
+  }
   function cursorId(el) {
     if (!cursorIds.has(el)) cursorIds.set(el, `@${++cursorSerial}`);
     return cursorIds.get(el);
@@ -621,6 +643,7 @@
         !visible ? { reason: "target not rendered" } : {}),
       tag: el.tagName.toLowerCase(), role: (el.getAttribute("role") || el.tagName.toLowerCase()).slice(0, 40),
       label: hidden ? "[redacted]" : visible ? safeLabel(el, 100) : "",
+      ...(!hidden && visible ? { urls: safeLinks(el) } : {}),
       selector: hidden ? "" : buildSelector(el).slice(0, 350),
       rect_vp: [r.left, r.top, r.width, r.height],
       rect_doc: [r.left + scrollX, r.top + scrollY, r.width, r.height], block_ids: [] };
@@ -708,7 +731,7 @@
             if (!group.facts.has(node)) {
               const metadata = cursorMetadata(node);
               group.facts.set(node, { id: handle(node), role: metadata.role, label: ownHeading(node) || metadata.label,
-                text: safeText(node, 300), rect_vp: metadata.rect_vp, in_view: inView(node) });
+                text: safeText(node, 300), urls: metadata.urls, rect_vp: metadata.rect_vp, in_view: inView(node) });
             }
             return group.facts.get(node);
           });
@@ -800,7 +823,8 @@
         for (const i of indices) if (i >= 0 && block.rows.length < 64 && !block._seen.has(i)) {
           block._seen.add(i);
           const node = block._rows[i];
-          block.rows.push({ id: handle(node), index: i + 1, cells: block._cells(node).map(c => safeText(c, 70)) });
+          block.rows.push({ id: handle(node), index: i + 1, urls: safeLinks(node),
+            cells: block._cells(node).map(c => safeText(c, 70)) });
         }
       }
       const group = !table && captureGroup(el);
@@ -817,7 +841,7 @@
         target.block_ids.push(bid);
         if (!blocks.has(bid)) blocks.set(bid, { id: bid, kind: parent.tagName.toLowerCase(),
           label: ownHeading(parent, capturedTables) || safeLabel(parent, 80, capturedTables),
-          text: safeText(parent, 650, capturedTables), text_limit: 650 });
+          text: safeText(parent, 650, capturedTables), urls: safeLinks(parent), text_limit: 650 });
       }
     }
     capture.targets.reverse();
@@ -878,6 +902,8 @@
     const candidates = [];
     for (const handle of handles) {
       const entry = snapshotEntry(snapshotId, resolutionId, handle);
+      if (!inspectSnapshot(snapshotId, resolutionId, handle).ok)
+        return { ok: false, error: "Snapshot target unavailable or changed" };
       const nodes = entry?.members || (entry?.node ? [entry.node] : []);
       if (!nodes.length || entry?.table && !entry.table.isConnected ||
           nodes.some(node => !node.isConnected || sensitive(node) ||
@@ -887,7 +913,7 @@
         const r = node.getBoundingClientRect();
         if (r.width > 0 && r.height > 0) candidates.push({
           label: snapshots.get(snapshotId) && (entry.kind === "column" ? "Column" : safeLabel(node)),
-          rect_vp: [r.left, r.top, r.width, r.height] });
+          node, snapshotId, resolutionId, rect_vp: [r.left, r.top, r.width, r.height] });
       }
     }
     if (!candidates.length) return { ok: false, error: "No visible target geometry" };
@@ -1127,7 +1153,7 @@
     const evidence = state.mode === "hover" ? captured || captureCursorContext() : null;
     if (evidence) {
       const current = evidence.targets.find(target => target.id === evidence.history.at(-1)?.id);
-      if (current?.available) renderPins([current]);
+      if (current?.available) renderPins([{ ...current, node: cursorRefs.get(current.id), snapshotId: evidence.snapshot_id }]);
     }
     const intent = {
       type: state.mode === "hover" ? "submit" : "resolve",
@@ -1246,7 +1272,7 @@
         tuckSummary.textContent = "HERMES SESSION";
       } else if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
-        if (Array.isArray(msg.ranked)) renderPins(msg.ranked);
+        if (msg.mode !== "hover" && Array.isArray(msg.ranked)) renderPins(msg.ranked);
         showPlainMessage(`${msg.message || "Read-only one-shot fallback — no conversation or actions."}\n${msg.explanation || msg.text || msg.answer || ""}`);
       }
       return;
@@ -1832,6 +1858,7 @@
   }
 
   function clearOverlays(source) {
+    stopTrackingPins();
     pinsLayer.innerHTML = "";
     state.scopes = [];
     state.selectedScopeId = null;
@@ -1859,13 +1886,58 @@
     hudReply.innerHTML = htmlText;
   }
 
+  let livePins = [];
+  let pinFrame = null;
+  function stopTrackingPins() {
+    if (pinFrame !== null) cancelAnimationFrame(pinFrame);
+    pinFrame = null;
+    livePins = [];
+  }
+  function refreshPins() {
+    pinFrame = null;
+    livePins = livePins.filter(({ candidate, box }) => {
+      const { node, snapshotId, resolutionId } = candidate;
+      if (destroyed || !node.isConnected || snapshots.get(snapshotId)?.pageUrl !== location.href ||
+          resolutionId && (activeSnapshot?.id !== snapshotId || activeSnapshot.resolutionId !== resolutionId)) {
+        box.remove();
+        return false;
+      }
+      const rect = node.getBoundingClientRect();
+      let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+      let right = Math.min(window.innerWidth, rect.left + rect.width);
+      let bottom = Math.min(window.innerHeight, rect.top + rect.height);
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        const clipX = /auto|scroll|hidden|clip/.test(style.overflowX);
+        const clipY = /auto|scroll|hidden|clip/.test(style.overflowY);
+        if (!clipX && !clipY) continue;
+        const r = parent.getBoundingClientRect();
+        if (clipX) { left = Math.max(left, r.left); right = Math.min(right, r.left + r.width); }
+        if (clipY) { top = Math.max(top, r.top); bottom = Math.min(bottom, r.top + r.height); }
+      }
+      box.style.display = right > left && bottom > top && rendered(node) && !sensitive(node) ? "" : "none";
+      box.style.left = `${left}px`;
+      box.style.top = `${top}px`;
+      box.style.width = `${Math.max(0, right - left)}px`;
+      box.style.height = `${Math.max(0, bottom - top)}px`;
+      return true;
+    });
+    if (livePins.length) pinFrame = requestAnimationFrame(refreshPins);
+  }
+
   function renderPins(candidates, messageHtml) {
+    stopTrackingPins();
     pinsLayer.innerHTML = "";
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
     state.lensActive = false;
 
     (candidates || []).forEach((cand, idx) => {
+      if (!cand.node && activeSnapshot) {
+        const entry = snapshotEntry(activeSnapshot.id, activeSnapshot.resolutionId, cand.id);
+        if (entry?.node) cand = { ...cand, node: entry.node, snapshotId: activeSnapshot.id,
+          resolutionId: activeSnapshot.resolutionId };
+      }
       if (!Array.isArray(cand.rect_vp) || cand.rect_vp.length !== 4 || !cand.rect_vp.every(Number.isFinite)) return;
       const [x, y, w, h] = cand.rect_vp;
       const box = document.createElement("div");
@@ -1881,7 +1953,9 @@
       badge.textContent = `[${idx + 1}] ${cand.label.slice(0, 26)}${probPct}`;
       box.appendChild(badge);
       pinsLayer.appendChild(box);
+      if (cand.node) livePins.push({ candidate: cand, box });
     });
+    if (livePins.length) refreshPins();
 
     if (messageHtml) {
       showHudMessage(messageHtml);
@@ -1889,6 +1963,7 @@
   }
 
   function renderSemanticLens(candidates, promptMessage, resolutionId) {
+    stopTrackingPins();
     pinsLayer.innerHTML = "";
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
@@ -1988,6 +2063,7 @@
 
   function destroy() {
     destroyed = true;
+    stopTrackingPins();
     activeSnapshot = null;
     snapshots.clear();
     clearActionConfirmation();

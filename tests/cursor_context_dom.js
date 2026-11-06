@@ -30,6 +30,7 @@ function element(tag, children = [], attrs = {}) {
       return selector.split(',').some(s => {
         s = s.trim();
         if (s === 'input' || s === 'textarea' || s === 'select' || s === 'script' || s === 'style' || s === 'label') return tag === s;
+        if (s === 'a[href]') return tag === 'a' && Object.hasOwn(attrs, 'href');
         if (s === 'input[type="password"]') return tag === 'input' && attrs.type === 'password';
         if (s === '[contenteditable]') return Object.hasOwn(attrs, 'contenteditable');
         if (s.startsWith('.')) return (attrs.class || '').split(/\s+/).includes(s.slice(1));
@@ -95,7 +96,7 @@ const shadow = element('div');
 const hudReply = element('div');
 const lockLabel = element('div');
 const tuckSummary = element('div');
-const context = vm.createContext({ document, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
+const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
   window: { addEventListener() {}, innerWidth: 1200, innerHeight: 800 },
   getComputedStyle: node => ({ display: node.style.display || 'block' }),
   location: { href: 'https://demo.invalid/' },
@@ -112,6 +113,70 @@ const api = context.collect;
 assert.equal(api.safeText(section), 'Visible content');
 assert.equal(api.safeText(payment), '[redacted]');
 assert.ok(!api.safeLabel(label).includes('secret-label-attribute'));
+
+test('deal links resolve absolutely without schemes, sensitive labels or unbounded link lists', () => {
+  const pointed = element('span', [text('£25 deal')]);
+  const link = element('a', [pointed], { href: '/deals/pointed?x=1&y=2' });
+  const secret = element('label', [element('a', [text('secret')], { href: '/SECRET' })], { for: 'password' });
+  const card = element('article', [link, secret,
+    element('a', [text('bad')], { href: 'javascript:alert(1)' }),
+    element('a', [text('mail')], { href: 'mailto:owner@example.com' }),
+    element('a', [text('peer')], { href: 'https://merchant.invalid/product' })]);
+  api.rememberHit(pointed, 2);
+  const evidence = api.captureCursorContext();
+  const target = evidence.targets.find(t => t.id === evidence.history.at(-1).id);
+  assert.deepEqual(Array.from(target.urls), ['https://demo.invalid/deals/pointed?x=1&y=2']);
+  const block = evidence.blocks.find(b => b.kind === 'article');
+  assert.deepEqual(Array.from(block.urls), ['https://demo.invalid/deals/pointed?x=1&y=2', 'https://merchant.invalid/product']);
+  assert.ok(!JSON.stringify(evidence).includes('/SECRET'));
+  assert.ok(!JSON.stringify(evidence).includes('javascript:'));
+});
+
+test('live pins track layout and clipped scrolling, stop on detach and do no idle work', () => {
+  const pinsLayer = element('div'), node = element('span', [text('deal')]);
+  const parent = element('div', [node]);
+  parent.rect = { left: 0, top: 50, width: 200, height: 100 };
+  parent.style.overflowY = 'auto';
+  node.rect = { left: 10, top: 70, width: 100, height: 20 };
+  let frame, reads = 0;
+  const rect = node.getBoundingClientRect;
+  node.getBoundingClientRect = () => { reads++; return rect.call(node); };
+  const ctx = vm.createContext({
+    document, pinsLayer, svgLeaders: element('div'), lensLayer: element('div'), state: {},
+    window: { innerWidth: 1200, innerHeight: 800 }, location: { href: 'https://demo.invalid/' },
+    snapshots: new Map([['s', { pageUrl: 'https://demo.invalid/' }]]),
+    activeSnapshot: { id: 's', resolutionId: 1 }, destroyed: false,
+    getComputedStyle: n => n.style, rendered: n => n.isConnected, sensitive: () => false,
+    requestAnimationFrame: fn => { frame = fn; return 1; },
+    cancelAnimationFrame: () => { frame = null; },
+  });
+  const from = source.indexOf('  let livePins =');
+  const to = source.indexOf('  function renderSemanticLens', from);
+  vm.runInContext(source.slice(from, to), ctx);
+  assert.equal(reads, 0);
+  ctx.renderPins([{ label: 'deal', node, snapshotId: 's', resolutionId: 1, rect_vp: [10, 70, 100, 20] }]);
+  const box = pinsLayer.children[0];
+  assert.equal(box.style.top, '70px');
+  node.rect.top = 140;
+  frame();
+  assert.equal(box.style.top, '140px');
+  assert.equal(box.style.height, '10px');
+  node.rect.top = 160;
+  frame();
+  assert.equal(box.style.display, 'none');
+  node.rect.top = 90;
+  frame();
+  assert.equal(box.style.display, '');
+  node.isConnected = false;
+  const tick = frame;
+  frame = null;
+  tick();
+  assert.equal(box.isConnected, false);
+  assert.equal(frame, null);
+  const stoppedReads = reads;
+  ctx.stopTrackingPins();
+  assert.equal(reads, stoppedReads);
+});
 api.rememberHit(password, 1);
 let capture = api.captureCursorContext();
 assert.equal(capture.targets[0].available, false);

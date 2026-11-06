@@ -40,7 +40,7 @@ class SnapshotActions:
                             else f"browser {method} returned no result")
         return result
 
-    def _current(self, resolution_id: int, handles: list[str]) -> tuple[dict[str, Any] | None, str]:
+    def _current(self, resolution_id: int, handles: list[str], *, highlighting: bool = False) -> tuple[dict[str, Any] | None, str]:
         with self.session._lock:
             snapshot = self.session.last_hover_snapshot
             if type(resolution_id) is not int or resolution_id != self.session.resolution_id:
@@ -49,7 +49,7 @@ class SnapshotActions:
                 return None, "No successful cursor snapshot"
             if snapshot.get("resolution_id") != resolution_id or not snapshot.get("browser_active"):
                 return None, "snapshot is not active in Chrome"
-            if snapshot.get("actions_allowed") is False:
+            if snapshot.get("actions_allowed") is False and not highlighting:
                 return None, "Actions are unavailable for this read-only turn"
             known = snapshot.get("handles")
             if not isinstance(known, dict) or any(not isinstance(h, str) or h not in known for h in handles):
@@ -70,11 +70,11 @@ class SnapshotActions:
         with self._lock:
             if not isinstance(handles, list) or not handles:
                 return _failure("handles must be a nonempty list")
-            snapshot, error = self._current(resolution_id, handles)
+            snapshot, error = self._current(resolution_id, handles, highlighting=True)
             if error:
                 return _failure(error)
             result = self._browser("highlightSnapshot", snapshot["snapshot_id"], resolution_id, handles, str(hud_message))
-            _, error = self._current(resolution_id, handles)
+            _, error = self._current(resolution_id, handles, highlighting=True)
             if error:
                 return _failure(error)
             if not result.get("ok"):
