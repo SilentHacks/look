@@ -129,9 +129,10 @@ def _render_scope(session: GazeSession, info: Dict[str, Any]) -> None:
     message += f"<div>{html.escape(str(selected.get('summary') or ''))}</div>"
     if info.get("needs_explain"):
         message += f'<div id="gaze-explanation-text" data-rid="{session.resolution_id}">Asking Hermes…</div>'
-    session.eval_js(
-        f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([selected])}, {json.dumps(message)});true"
-    )
+    owner = session.last_resolution_input
+    session.cdp.eval_js_once(
+        f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([selected])}, {json.dumps(message)})",
+        target=owner.get("browser_target"), document=owner.get("browser_document"), route=owner.get("browser_route"))
 
 def resolve_now(
     session: GazeSession,
@@ -167,6 +168,8 @@ def resolve_now(
             audio_pcm = record_microphone(duration_s=duration_s)
             if mode == "hover":
                 pushed = {"cursor_context": session.fetch_cursor_context()}
+            else:
+                _, pushed = session.fetch_live_state_and_candidates()
             transcribed_text, word_ts = transcribe_audio_buffer(
                 audio_pcm, model_name=_whisper_model_name(), audio_epoch=audio_epoch
             )
@@ -203,10 +206,13 @@ def resolve_now(
             rid = payload["resolution_id"]
             message = (f'Cursor evidence<div id="gaze-explanation-text" data-rid="{rid}">Asking Hermes…</div>'
                        if payload["ok"] else html.escape(payload["error"]))
-            session.eval_js(
-                f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])}, {json.dumps(message)});"
-                f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});true"
-            )
+            try:
+                session.cdp.eval_js_once(
+                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])}, {json.dumps(message)});"
+                    f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});return true}})()",
+                    target=payload.get("browser_target"), document=payload.get("browser_document"))
+            except Exception:
+                logger.debug("Cursor source is no longer foreground", exc_info=True)
         _append_record(session, {"type": "cursor_context", "context": payload["context"],
                                  "utterance": utterance, "pointed": payload["pointed"],
                                  "resolution_id": payload["resolution_id"]})
@@ -215,53 +221,36 @@ def resolve_now(
         return payload
     now = time.time()
 
-    if pushed is not None:
-        session.ingest(pushed.get("fixations") or [])
-        pointer = pushed.get("pointer")
-        # A null pointer is honest "no pointer yet" — never record it as a fixation.
-        if isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
-            session.tracker.record_point(
-                float(pointer["x_vp"]),
-                float(pointer["y_vp"]),
-                scroll_x=float(pointer.get("scroll_x", 0.0)),
-                scroll_y=float(pointer.get("scroll_y", 0.0)),
-                timestamp=now,
-                bias_offset=session.recalibrator.offset,
-            )
-        candidates = [
-            CandidateElement.from_wire(raw)
-            for raw in pushed.get("candidates") or []
-            if isinstance(raw, dict)
-        ]
-        session.last_candidate_wire = list(pushed.get("candidates") or [])
-        session.last_resolution_input = {"pointer": pointer, "fixations": pushed.get("fixations") or [],
-                                         "candidates": pushed.get("candidates") or [], "words": word_timestamps or [],
-                                         "utterance": utterance, "page_url": pushed.get("page_url")}
-        with session._lock:
-            session.last_candidates = candidates
+    if pushed is None:
+        candidates, resolution_input = session.fetch_live_state_and_candidates(
+            radius_px=getattr(session, "_candidate_radius_px", 380.0))
     else:
-        candidates = session.fetch_live_state_and_candidates(
-            radius_px=getattr(session, "_candidate_radius_px", 380.0)
-        )
-        session.last_candidate_wire = [vars(candidate).copy() for candidate in candidates]
-
+        resolution_input = dict(pushed)
+        candidates = [CandidateElement.from_wire(raw) for raw in pushed.get("candidates") or []
+                      if isinstance(raw, dict)]
+    resolution_input.update(words=word_timestamps or [], utterance=utterance)
+    fixations = session.ingest(resolution_input.get("fixations") or [])
+    pointer = resolution_input.get("pointer")
+    if isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
+        fixations.append(session.tracker.record_point(
+            float(pointer["x_vp"]), float(pointer["y_vp"]),
+            scroll_x=float(pointer.get("scroll_x", 0.0)), scroll_y=float(pointer.get("scroll_y", 0.0)),
+            timestamp=now, bias_offset=session.recalibrator.offset))
     if not candidates:
         return {"ok": False, "error": "No DOM candidates extracted — is the overlay injected into the Chrome tab?"}
-    fixations = session.ring_buffer.snapshot(now)
-    if pushed is None:
-        session.last_resolution_input.update({"words": word_timestamps or [], "utterance": utterance})
     if not fixations:
         return {"ok": False, "error": "No pointer/gaze fixations recorded yet."}
-    page_url = session.last_resolution_input.get("page_url")
-    if page_url != session.scope_page_url:
-        session.scope_selection.clear()
-        session.scope_page_url = page_url
+    page_url = resolution_input.get("page_url")
 
     res = resolve_candidates(
         candidates, fixations, utterance, t_arm=now, word_timestamps=word_timestamps,
         llm_client=llm if llm is not None else _LLM,
     )
     payload = res.to_dict()
+    payload["ok"] = res.top is not None
+    owner = {key: resolution_input.get(key)
+             for key in ("browser_target", "browser_document", "browser_route")}
+    payload.update(owner)
 
     hud_html = None
     if res.top and (res.top.candidate.is_container or res.top.candidate.role == "table"):
@@ -269,9 +258,9 @@ def resolve_now(
         if session.is_chrome_reachable():
             sel = json.dumps(res.top.candidate.selector)
             try:
-                table_payload = session.eval_js(
-                    f"window.__HERMES_GAZE_OVERLAY__.extractTableData({sel});",
-                )
+                table_payload = session.cdp.eval_js_once(
+                    f"window.__HERMES_GAZE_OVERLAY__.extractTableData({sel})",
+                    target=owner["browser_target"], document=owner["browser_document"], route=owner["browser_route"])
             except Exception as exc:
                 logger.debug("extractTableData eval failed: %s", exc)
         if table_payload:
@@ -284,24 +273,31 @@ def resolve_now(
                 f"<div style='margin-top:6px;'>{svg_chart}</div>"
             )
 
-    session.render_resolution_in_browser(res, hud_html=hud_html)
-    payload["resolution_id"] = session.resolution_id
-    payload["chrome_connected"] = session.is_chrome_reachable()
-    payload["mode"] = mode
-    payload["page_url"] = page_url
-    payload.update(_scope_payload(session, payload.get("ranked") or []))
-    if payload["scope_anchor_id"] in session.scope_selection:
-        _render_scope(session, {**payload, "needs_explain": res.intent_class == "read_only"})
+    with session.actions._lock:
+        if page_url != session.scope_page_url:
+            session.scope_selection.clear()
+            session.scope_page_url = page_url
+        session.last_candidates = candidates
+        rid = session.render_resolution_in_browser(res, hud_html=hud_html, evidence=resolution_input)
+        payload.update(resolution_id=rid, chrome_connected=session.is_chrome_reachable(), mode=mode, page_url=page_url)
+        payload.update(_scope_payload(session, payload.get("ranked") or []))
+        if payload["scope_anchor_id"] in session.scope_selection:
+            _render_scope(session, {**payload, "needs_explain": res.intent_class == "read_only"})
     if session.is_chrome_reachable():
         view = {key: payload[key] for key in ("scopes", "selected_scope_id", "resolution_id", "utterance")}
-        session.eval_js(f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(view)});true")
+        try:
+            session.cdp.eval_js_once(
+                f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(view)})",
+                target=owner["browser_target"], document=owner["browser_document"], route=owner["browser_route"])
+        except Exception:
+            logger.debug("Resolution source is no longer foreground", exc_info=True)
     try:
         _append_record(session, {"type": "resolution", "wall_time": time.time(),
-                                 "resolution_id": session.resolution_id, "mode": mode,
+                                 "resolution_id": rid, "mode": mode,
                                  "page_url": payload["page_url"], "utterance": utterance,
-                                 "words": word_timestamps or [], "pointer": session.last_resolution_input.get("pointer", {}),
-                                 "fixations": session.last_resolution_input.get("fixations", []),
-                                 "candidates": session.last_resolution_input.get("candidates", []),
+                                 "words": word_timestamps or [], "pointer": resolution_input.get("pointer", {}),
+                                 "fixations": resolution_input.get("fixations", []),
+                                 "candidates": resolution_input.get("candidates", []),
                                  "result": payload})
     except Exception as exc:
         payload["ok"] = False
@@ -415,6 +411,15 @@ def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "needs_explain": False, "session_connected": False}
 
 
+def _intent_evidence(intent: dict) -> dict:
+    pushed = {key: intent.get(key) for key in
+              ("pointer", "fixations", "candidates", "page_url", "cursor_context")}
+    owner = {key: intent.get("_" + key) for key in ("browser_target", "browser_document", "browser_route")}
+    pushed.update(owner)
+    if isinstance(pushed["cursor_context"], dict):
+        pushed["cursor_context"].update(owner)
+    return pushed
+
 def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None]) -> None:
     """Dispatch one overlay -> Python intent (Runtime.addBinding) to the right handler."""
     session = get_shared_session()
@@ -450,7 +455,14 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             owner = f"{target}:{document}"
             if itype == "record_start":
-                result = session.microphone.start(owner, lambda: session.cdp.foreground(target, document))
+                route = intent.get("_browser_route")
+                def cancelled(error):
+                    if _VOICE_TURNS is not None:
+                        _VOICE_TURNS.capture_status("idle")
+                    reply({"type": "record_cancel", "ok": False, "error": error})
+                result = session.microphone.start(
+                    owner, lambda: session.cdp.foreground(target, document, route),
+                    on_cancel=cancelled)
                 if _VOICE_TURNS is not None:
                     _VOICE_TURNS.capture_status("recording" if result.get("ok") else "failed")
                 reply(result)
@@ -463,18 +475,17 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 audio, epoch = session.microphone.stop(owner)
                 if _VOICE_TURNS is not None:
                     _VOICE_TURNS.capture_status("idle")
-                capture = intent.get("cursor_context")
-                if not isinstance(capture, dict):
+                pushed = _intent_evidence(intent)
+                mode = str(intent.get("mode") or session.tracker.mode)
+                if mode == "hover" and not isinstance(pushed["cursor_context"], dict):
                     reply({"ok": False, "error": "Recording has no cursor capture"})
                     return
-                capture["browser_target"] = target
-                capture["browser_document"] = document
                 # Reserve capture order before ASR, including a visible transcription state.
                 reservation = None
                 turns = _VOICE_TURNS
                 if turns is not None and turns.connected:
                     initial = resolve_now(session, utterance="Captured question", words=None,
-                                          pushed={"cursor_context": capture}, activate=False)
+                                          mode=mode, pushed=pushed, activate=False)
                     reservation = turns.capture(initial, transcribing=True,
                                                 item_id=str(intent.get("item_id") or ""))
                     if not reservation["ok"]:
@@ -488,7 +499,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                             text, words = _voice.transcribe_audio_buffer(
                                 audio, model_name=_whisper_model_name(), audio_epoch=epoch)
                         snapshot = resolve_now(session, utterance=text, words=words,
-                                               pushed={"cursor_context": capture}, activate=False)
+                                               mode=mode, pushed=pushed, activate=False)
                         if reservation:
                             result = turns.transcribed(reservation["request_id"], text, snapshot)
                         else:
@@ -504,13 +515,8 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                     finish_recording()
             return
         if itype == "submit":
-            capture = intent.get("cursor_context")
-            if isinstance(capture, dict) and intent.get("_browser_target"):
-                capture["browser_target"] = intent["_browser_target"]
-                capture["browser_document"] = intent.get("_browser_document")
             snapshot = resolve_now(session, utterance=str(intent.get("utterance") or ""),
-                                   words=intent.get("words"),
-                                   pushed={"cursor_context": intent.get("cursor_context")}, activate=False)
+                                   words=intent.get("words"), pushed=_intent_evidence(intent), activate=False)
             reply(submit_snapshot(snapshot))
             return
         if itype == "confirm_action":
@@ -521,9 +527,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                                           intent.get("resolution_id"), intent["approved"]))
             return
         if itype == "resolve":
-            pushed = {"pointer": intent.get("pointer"), "fixations": intent.get("fixations"),
-                      "candidates": intent.get("candidates"), "page_url": intent.get("page_url"),
-                      "cursor_context": intent.get("cursor_context")}
+            pushed = _intent_evidence(intent)
             res = resolve_now(session, utterance=str(intent.get("utterance") or ""),
                               words=intent.get("words"), pushed=pushed)
             if res.get("ok") is False:

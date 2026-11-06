@@ -30,7 +30,7 @@ _PURE_DIRS = {"resolver", "tracker"}
 _ABS_SELF_IMPORT = re.compile(r"^\s*(?:import|from)\s+hermes_gaze\b")
 _IMPORT_STMT = re.compile(r"^\s*(?:from\s+([.\w]+)\s+)?import\s+(.+)")
 _BANNED_MODULE = re.compile(
-    r"^\.{0,2}(?:websockets|urllib|subprocess|socket|http\.server|server|service|browser)(?:\.|$)"
+    r"^\.{0,2}(?:websockets|urllib(?!\.parse$)|subprocess|socket|http\.server|server|service|browser)(?:\.|$)"
 )
 _REMOVED_SYMBOLS = re.compile(
     r"get_shared_bridge|CDPBridge|voice_listener|HERMES_GAZE_INTERNAL|_ensure_package_importable"

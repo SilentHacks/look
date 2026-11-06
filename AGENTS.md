@@ -22,9 +22,10 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
-| `browser/companion.py` | Discovers supported tabs, follows foreground focus, routes snapshot mutations to their source tab and retains the latest session event across document replacement. |
-| `browser/overlay.js` | DOM evidence collector and terminal: closure-held snapshot identities, column members, geometry, native-mic talk controls, trusted-click confirmation card and plain-text session streaming. |
-| `microphone.py` | Single-owner bounded native capture. Device opens on talk, closes on release, cancellation, lost tab/document focus or disconnect. |
+| `browser/companion.py` | Discovers supported tabs, follows foreground focus, routes evidence/mutations/replies to their captured tab and document. Background replies wait in Python. |
+| `browser/overlay.js` | DOM collector, exact snapshot identities and live highlight geometry; detached private control tree mirrored through CDP. |
+| `browser/panel.js` | Private renderer in a script-disabled, opaque-origin sandbox iframe. Trusted UI events return only through its CDP context, never page messaging. |
+| `microphone.py` | Single-owner native capture; closes on release, cancellation, focus/document/route loss, device error, disconnect or the native 30-second deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`. Same purity rule. |
@@ -48,12 +49,21 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   new HTTP endpoints, no `Runtime.evaluate` polling for decisions. The binding keeps a
   single ordered channel that works on file:// and any origin without CORS. Replies
   are callback-style (`reply({...})` → `api.onIntentResult`) — intents return nothing.
-  Every intent carries `nonce`, pushed to the overlay via `api.setIntentNonce` after
-  each (re)injection; `handle_intent` rejects intents without the session's
-  `session._intent_nonce`. Overlay code and its binding live in the named
-  `hermes-gaze` CDP isolated world, never the website's JavaScript world. The
-  transport accepts only that main-frame context and stamps tab/document ownership.
-  Microphone buttons and talk keys additionally require trusted input events.
+  Service intents carry `nonce`, pushed via `api.setIntentNonce` after each
+  (re)injection. The nonce remains in the main-frame isolated-world closure, never
+  the DOM or UI frame. The transport accepts service intents only from that exact
+  context and stamps tab/document/route ownership. Private renderer traffic is
+  accepted only from its separately owned CDP context and cannot call service
+  handlers directly. It contains no nonce. Ask, keyboard submission, microphone
+  controls and confirmation require trusted UI input before crossing this bridge.
+- **Closed shadow DOM alone is not a privacy boundary.** Earlier page listeners can
+  read typed keys and `getSelection()` can expose selected shadow text. Private UI
+  lives in an opaque-origin, script-disabled sandbox iframe, initialized only by
+  CDP; no `postMessage`, origin HTTP endpoint, extension, or page script runs there.
+  Its main-world control tree is detached, not website DOM. Only non-private
+  highlight geometry enters the website's closed shadow tree. The host uses the
+  top layer; tampered visibility/transforms reject UI input. Sites can still remove
+  or hide the host (denial of service), not read its private content or mint input.
 - **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
   `audio_epoch` (the first native input buffer's ADC wall-clock epoch for Chrome,
   `time.time()` before `record_microphone` on the tool path) and shifts each word.
@@ -64,9 +74,9 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   SECOND copy of the package (the split-brain singleton bug this refactor removed).
   `tests/test_layering.py` fails on any `import hermes_gaze` / `from hermes_gaze`
   outside `tests/`.
-- **`resolver/` and `tracker/` stay pure.** No `websockets`, `urllib`, `subprocess`,
-  `http.server`, `socket`, or imports of `browser`/`service`/`server`. Purity is what
-  makes the resolver unit-testable without Chrome and safe to call on any thread.
+- **`resolver/` and `tracker/` stay pure.** No `websockets`, `urllib.request`,
+  `http.server`, `subprocess`, `socket`, or imports of `browser`/`service`/`server`.
+  The pure stdlib `urllib.parse` is allowed for URL sanitization.
 - **`check_gaze_requirements` stays constant-`True`.** Hermes re-evaluates `check_fn`
   every turn; returning `False` when Chrome is down would mutate the tool surface
   mid-conversation and break the cached prompt prefix (see Hermes's per-conversation
@@ -86,6 +96,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   `FixationSample`, subtracts the recalibrator bias, and dedupes on a
   `(t_end, x_doc, y_doc)` watermark. Bypassing it re-introduces double-counted
   fixations and un-corrected drift.
+  It also returns that capture's normalized samples for local scoring; never score
+  a tab against the machine-wide ring's samples from other documents.
 - **Resolution epoch guards `choose`.** Every resolution bumps
   `session.resolution_id`; a `choose` intent carrying a mismatched `resolution_id`
   gets `"stale resolution"`. Never accept a choose without the epoch check — a stale
@@ -106,10 +118,12 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Live identity/fingerprint and single-use approval checks still apply.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
-  associated labels. Capture history/evidence at recording stop, before ASR.
-  Evidence URLs are resolved HTTP(S) destinations only, at most three per item
-  and 600 characters each, inside the untrusted fence. Pointed facts/URLs precede
-  peer URLs in the shared 6000-character packet; links never bypass field/label exclusions.
+  associated labels. Freeze mode-appropriate evidence at recording stop, before
+  ASR: cursor identities in hover, candidates/pointer/fixations in simulated mode.
+  Evidence URLs are HTTP(S), at most three per item and 600 characters each.
+  Strip credentials, all query parameters and fragments before wire serialization
+  and again before model serialization; never guess which query values are secrets.
+  Pointed facts/URLs precede peer URLs in the shared 6000-character fenced packet.
 - **No selector rematching for history or actions.** Short `@` handles refer to
   captured DOM identities/column members. Highlight/click require the current
   epoch; changed, detached or expired targets fail honestly.
@@ -142,13 +156,16 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   and conversation inside one fenced 6000-character packet; never slice packets.
   Reserve pointed facts and bounded per-cell row facts from both saved items before
   optional headers, conversation and surroundings can exhaust the shared budget.
-- **Focus changes do not retarget evidence or discard answers.** Each captured
-  snapshot retains its source Chrome target and unique CDP execution context;
-  mutations use `uniqueContextId` (numeric context IDs can be reused), require
-  foreground focus and still check captured identities/epoch. In-page route events
-  alone do not invalidate identities: live detached/fingerprint checks do.
-  `pagehide` revokes browser snapshots but not answer streaming. The companion
-  caches the latest full inbox event in Python and restores it after full navigation.
+- **Focus changes do not retarget evidence or discard answers.** Freeze source tab,
+  unique CDP document context and route generation before scoring/ASR. Carry evidence
+  locally into activation; never use mutable current-resolution state as ownership.
+  Mutations require that owner and foreground focus. Browser-owned route events
+  revoke actions and confirmations even if the URL returns; read-only highlight
+  geometry remains usable. `pagehide` revokes snapshots, not answer streaming.
+  The companion caches the full inbox in Python and delivers only to the focused
+  tab's detached renderer and protected iframe, including recall after navigation.
+  No answer content or unread text enters the page DOM or background renderers.
+  Non-inbox replies still wait for their captured source document to be foreground.
   Inbox events (`type: inbox`, `version: 1`) replace UI state by increasing `revision`:
   connection/capture state/paused/selected item plus items with capture order, target/source,
   unread and expired action state, and request conversations with question, text,
@@ -159,9 +176,12 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   highlight; it cannot transfer that highlight to the newly focused tab.
 - **Microphone capture stays outside website origins.** Native `sounddevice`
   owns the device only during talk; no browser grant, `getUserMedia`, pre-warmed
-  input stream or audio bytes in the page. Lost focus cancels rather than submitting
-  partial speech; the native watchdog checks every 100ms. Space remains the talk key
-  (`TALK_KEY` in the overlay). Wait for Listening before speaking.
+  input stream or audio bytes in the page. Focus/document/route loss, device error
+  and a hard 30-second native deadline cancel and discard, never submit partial
+  speech. The watchdog checks every 100ms. A hostile site can suppress Space keyup:
+  capture may continue until that deadline; no Input Monitoring permission is
+  requested. The UI shows the cap and receives native cancellation notification.
+  Wait for Listening before speaking.
 - **Recording is development-only.** `record_trials` defaults false; never write
   audio. Preserving an accepted injection takes precedence over recorder errors.
 

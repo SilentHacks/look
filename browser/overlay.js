@@ -7,16 +7,9 @@
   const prevApi = window.__HERMES_GAZE_OVERLAY__;
   const prevState = prevApi && prevApi.state ? prevApi.state : null;
   const prevInputVal = prevApi && typeof prevApi.getInputValue === "function" ? prevApi.getInputValue() : "";
-  let prevReplyText = "";
-  let prevReplyDisplay = "none";
+  const prevReplyText = prevApi?.getReplyText?.() || "";
+  const prevReplyDisplay = prevReplyText ? "block" : "none";
   const existingRoot = document.getElementById("hermes-gaze-root");
-  if (existingRoot && existingRoot.shadowRoot) {
-    const rEl = existingRoot.shadowRoot.querySelector("#hg-reply");
-    if (rEl && rEl.textContent && rEl.style.display !== "none") {
-      prevReplyText = rEl.textContent;
-      prevReplyDisplay = rEl.style.display;
-    }
-  }
   if (prevApi && typeof prevApi.destroy === "function") {
     try {
       prevApi.destroy();
@@ -54,12 +47,83 @@
     hoveredCandidate: null,
   };
 
-  // Host element with Closed Shadow DOM so page styles never leak in or out
+  // Only geometry lives in the website DOM. Private UI nodes stay detached here
+  // and are rendered by CDP in a script-disabled, opaque-origin iframe.
   const host = document.createElement("div");
   host.id = "hermes-gaze-root";
-  host.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
+  host.setAttribute("popover", "manual");
+  host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;pointer-events:none!important;background:transparent!important";
+  const hostStyle = host.style.cssText;
   document.documentElement.appendChild(host);
-  const shadow = host.attachShadow({ mode: "open" });
+  host.showPopover();
+  const visualShadow = host.attachShadow({ mode: "closed" });
+  const shadow = document.implementation.createHTMLDocument("").createElement("div");
+  const uiFrame = document.createElement("iframe");
+  uiFrame.setAttribute("sandbox", "");
+  uiFrame.setAttribute("aria-label", "Hermes Gaze private controls");
+  uiFrame.style.cssText = "position:fixed;z-index:1;right:16px;bottom:16px;width:min(438px,calc(100vw - 32px));max-height:calc(100vh - 32px);height:1px;border:0;pointer-events:auto;background:transparent;color-scheme:normal";
+  visualShadow.appendChild(uiFrame);
+  let uiRevision = 0;
+  let uiEvent = null;
+  let uiSerial = 0;
+  const uiNodes = new Map();
+  function trustedUi(event) { return event.isTrusted || event === uiEvent; }
+  function takeUiSnapshot() {
+    for (const node of shadow.querySelectorAll("*")) {
+      if (!node.dataset.hgUi) {
+        node.dataset.hgUi = String(++uiSerial);
+        uiNodes.set(node.dataset.hgUi, node);
+      }
+    }
+    for (const [id, node] of uiNodes) if (!shadow.contains(node)) uiNodes.delete(id);
+    return { revision: ++uiRevision, html: shadow.innerHTML, value: hudInput.value,
+      viewportHeight: Math.max(1, window.innerHeight - 32), hotkey: state.hotkey, lensActive: state.lensActive };
+  }
+  const uiObserver = new MutationObserver(() => {
+    if (_intentNonce && !destroyed)
+      window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
+  });
+  uiObserver.observe(shadow, { childList: true, subtree: true, characterData: true, attributes: true,
+    attributeFilter: ["style", "class", "aria-expanded", "placeholder"] });
+  function fitUiFrame(height) {
+    uiFrame.style.height = `${Math.max(1, Math.min(height, window.innerHeight - 32))}px`;
+    const r = uiFrame.getBoundingClientRect();
+    if (r.left < 16 || r.right > window.innerWidth - 16) {
+      uiFrame.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - r.width - 16))}px`;
+      uiFrame.style.right = "auto";
+    }
+    if (r.top < 16 || r.bottom > window.innerHeight - 16) {
+      uiFrame.style.top = `${Math.max(16, Math.min(r.top, window.innerHeight - r.height - 16))}px`;
+      uiFrame.style.bottom = "auto";
+    }
+  }
+  function onUiResize() {
+    fitUiFrame(uiFrame.getBoundingClientRect().height);
+    if (_intentNonce && !destroyed)
+      window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
+  }
+  window.addEventListener("resize", onUiResize);
+  function onUiEvent(message) {
+    if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+    const surface = getComputedStyle(host);
+    if (host.style.cssText !== hostStyle || !host.matches(":popover-open") ||
+        surface.visibility !== "visible" || surface.opacity !== "1" ||
+        surface.transform !== "none" || surface.filter !== "none" ||
+        surface.clipPath !== "none" || surface.maskImage !== "none" ||
+        surface.scale !== "none" || surface.rotate !== "none" || surface.translate !== "none") return;
+    const node = uiNodes.get(message.target);
+    if (!node || !shadow.contains(node)) return;
+    hudInput.value = String(message.value || "");
+    if (message.event === "input") return;
+    const EventType = message.event.startsWith("key") ? KeyboardEvent : message.pointerType ? PointerEvent : MouseEvent;
+    const frame = uiFrame.getBoundingClientRect();
+    uiEvent = new EventType(message.event, { ...message, clientX: frame.left + (message.clientX || 0),
+      clientY: frame.top + (message.clientY || 0),
+      bubbles: !["mouseenter", "mouseleave"].includes(message.event), cancelable: true });
+    if (message.event === "mousemove" && isDragging) onWindowMouseMove(uiEvent);
+    if (message.event === "mouseup") onWindowMouseUp();
+    try { node.dispatchEvent(uiEvent); } finally { uiEvent = null; }
+  }
 
 
   const style = document.createElement("style");
@@ -240,6 +304,10 @@
     }
   `;
   shadow.appendChild(style);
+  visualShadow.appendChild(style.cloneNode(true));
+  const uiStyle = document.createElement("style");
+  uiStyle.textContent = ".hud-shell{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;max-height:var(--hg-max-height)!important;box-sizing:border-box}.lens-layer{position:relative!important;inset:auto!important}.lens-card{position:relative!important;inset:auto!important;width:auto!important;margin-bottom:8px}";
+  shadow.appendChild(uiStyle);
 
   const spotlight = document.createElement("div");
   spotlight.className = "spotlight";
@@ -249,14 +317,14 @@
     ? `☤ Pointer σ=${state.hoverSigmaPx}px`
     : `☤ Gaze Cone σ=${state.sigmaPx}px`;
   spotlight.appendChild(spotlightTag);
-  shadow.appendChild(spotlight);
+  visualShadow.appendChild(spotlight);
 
   const pinsLayer = document.createElement("div");
-  shadow.appendChild(pinsLayer);
+  visualShadow.appendChild(pinsLayer);
 
   const svgLeaders = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svgLeaders.setAttribute("style", "position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;");
-  shadow.appendChild(svgLeaders);
+  visualShadow.appendChild(svgLeaders);
 
   const lensLayer = document.createElement("div");
   lensLayer.className = "lens-layer";
@@ -338,31 +406,31 @@
   dragbar.addEventListener("mousedown", (e) => {
     if (e.target.closest("button")) return;
     isDragging = true;
-    const rect = hud.getBoundingClientRect();
+    const rect = uiFrame.getBoundingClientRect();
     dragOffsetX = e.clientX - rect.left;
     dragOffsetY = e.clientY - rect.top;
-    hud.style.left = `${rect.left}px`;
-    hud.style.top = `${rect.top}px`;
-    hud.style.right = "auto";
-    hud.style.bottom = "auto";
+    uiFrame.style.left = `${rect.left}px`;
+    uiFrame.style.top = `${rect.top}px`;
+    uiFrame.style.right = "auto";
+    uiFrame.style.bottom = "auto";
     e.preventDefault();
   });
 
   let cursorOverHud = false;
   function onWindowMouseMove(e) {
     if (isDragging) {
-      const rect = hud.getBoundingClientRect();
+      const rect = uiFrame.getBoundingClientRect();
       const maxX = window.innerWidth - rect.width - 8;
       const maxY = window.innerHeight - rect.height - 8;
       const nx = Math.max(8, Math.min(maxX, e.clientX - dragOffsetX));
       const ny = Math.max(8, Math.min(maxY, e.clientY - dragOffsetY));
-      hud.style.left = `${nx}px`;
-      hud.style.top = `${ny}px`;
+      uiFrame.style.left = `${nx}px`;
+      uiFrame.style.top = `${ny}px`;
       return;
     }
 
     // Ignore mouse movements inside our own HUD so moving to the HUD doesn't shift the pointer!
-    const hudRect = hud.getBoundingClientRect();
+    const hudRect = uiFrame.getBoundingClientRect();
     const insideHud = (
       e.clientX >= hudRect.left &&
       e.clientX <= hudRect.right &&
@@ -601,6 +669,10 @@
       if (excluded || !rendered(link)) continue;
       try {
         const url = new URL(link.getAttribute("href"), document.baseURI || location.href);
+        url.username = "";
+        url.password = "";
+        url.search = "";
+        url.hash = "";
         if (["http:", "https:"].includes(url.protocol) && url.href.length <= 600 && !links.includes(url.href))
           links.push(url.href);
       } catch (_) {}
@@ -850,6 +922,8 @@
       if (r.width && r.height) { handle(el); capture.controls.push(cursorMetadata(el)); }
     }
     capture.omitted_controls = Math.max(0, controls.length - capture.controls.length);
+    identities.actionUrl = location.href;
+    identities.actionRevoked = false;
     snapshots.set(snapshotId, identities);
     while (snapshots.size > 32) {
       const oldest = snapshots.keys().next().value;
@@ -875,7 +949,10 @@
         activeSnapshot.resolutionId !== resolutionId) return null;
     return snapshots.get(snapshotId)?.get(handle) || null;
   }
-  function inspectSnapshot(snapshotId, resolutionId, handle) {
+  function inspectSnapshot(snapshotId, resolutionId, handle, readOnly = false) {
+    const saved = snapshots.get(snapshotId);
+    if (!readOnly && (saved?.actionRevoked || saved?.actionUrl !== location.href))
+      return { ok: false, error: "Page route changed since capture" };
     const entry = snapshotEntry(snapshotId, resolutionId, handle);
     if (entry?.members) {
       if (!entry.table.isConnected || entry.members.some(node => !node.isConnected || sensitive(node) ||
@@ -897,7 +974,7 @@
     const candidates = [];
     for (const handle of handles) {
       const entry = snapshotEntry(snapshotId, resolutionId, handle);
-      if (!inspectSnapshot(snapshotId, resolutionId, handle).ok)
+      if (!inspectSnapshot(snapshotId, resolutionId, handle, true).ok)
         return { ok: false, error: "Snapshot target unavailable or changed" };
       const nodes = entry?.members || (entry?.node ? [entry.node] : []);
       if (!nodes.length || entry?.table && !entry.table.isConnected ||
@@ -957,7 +1034,7 @@
       button.className = "ctrl-btn";
       button.textContent = approved ? "Confirm action" : "Cancel";
       button.addEventListener("click", event => {
-        if (!event.isTrusted || event.button !== 0 || event.detail < 1 ||
+        if (!trustedUi(event) || event.button !== 0 || event.detail < 1 ||
             event.pointerType && event.pointerType !== "mouse" ||
             confirmation !== pending || !activeSnapshot ||
             activeSnapshot.resolutionId !== pending.resolutionId) return;
@@ -1016,6 +1093,13 @@
   }
   function onSessionEvent(event) {
     if (!destroyed && event?.type === "inbox") renderInbox(event);
+  }
+  function revokeActionAuthority() {
+    for (const saved of snapshots.values()) saved.actionRevoked = true;
+    clearActionConfirmation();
+    state.lensActive = false;
+    lensLayer.innerHTML = "";
+    cancelListening();
   }
   function onNavigation() {
     activeSnapshot = null;
@@ -1169,7 +1253,7 @@
     const intent = {
       type: state.mode === "hover" ? "submit" : "resolve",
       utterance: text,
-      page_url: location.href,
+      page_url: location.origin + location.pathname,
       pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
       fixations: state.ringBuffer.slice(-25),
       ...(state.mode === "hover" ? { cursor_context: evidence } :
@@ -1226,12 +1310,22 @@
       } else if (isListening) {
         hudMic.textContent = "Stop";
         hudInput.placeholder = "Listening…";
-        lockLabel.textContent = `Listening · release Space to send (${msg.ready_ms}ms startup)`;
+        lockLabel.textContent = `Listening · release Space to send · cancels after 30s (${msg.ready_ms}ms startup)`;
       }
+      return;
+    }
+    if (msg.type === "record_cancel") {
+      isListening = false;
+      spaceHeld = false;
+      resetMicUiIdle(msg.error || "Recording cancelled.");
       return;
     }
     if (msg.type === "record_stop") {
       if (!isListening) resetMicUiIdle(msg.ok ? "queued" : msg.error || "Recording failed.");
+      if (msg.delivery === "one_shot") {
+        renderScopeOptions(msg);
+        showPlainMessage(`${msg.message || "Read-only one-shot fallback"}\n${msg.explanation || ""}`);
+      } else if (!msg.ok) showPlainMessage(msg.error || "Recording failed.");
       return;
     }
     if (msg.type === "confirm_action") {
@@ -1372,8 +1466,14 @@
     isListening = false;
     resetMicUiIdle("Transcribing audio locally…");
     // Freeze evidence at release, before transcription and before routing can change it.
-    _emit({ type: "record_stop", cursor_context: captureCursorContext(),
-      item_id: inbox?.selected_item_id || "" });
+    const locked = state.armed && state.lockedX !== null;
+    const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
+    _emit({ type: "record_stop", mode: state.mode, item_id: inbox?.selected_item_id || "",
+      ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : {
+        page_url: location.origin + location.pathname,
+        pointer: { x_vp: x, y_vp: y, scroll_x: scrollX, scroll_y: scrollY },
+        fixations: state.ringBuffer.slice(-25),
+        candidates: extractCandidatesNear(x, y, state.candidateRadiusPx || 380) }) });
   }
 
   function cancelListening() {
@@ -1385,7 +1485,7 @@
   }
 
   hudMic.addEventListener("click", (e) => {
-    if (!e.isTrusted) return;
+    if (!trustedUi(e)) return;
     e.currentTarget.blur();
     if (isListening) stopListening();
     else startListening();
@@ -1393,18 +1493,21 @@
 
   // --- Wire Chips & Input ---
   hud.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", () => {
+    chip.addEventListener("click", (e) => {
+      if (!trustedUi(e)) return;
       const prompt = chip.getAttribute("data-prompt") || "";
       hudInput.value = prompt;
       emitResolve(prompt);
     });
   });
 
-  hudSend.addEventListener("click", () => {
+  hudSend.addEventListener("click", (e) => {
+    if (!trustedUi(e)) return;
     emitResolve(hudInput.value);
   });
 
   hudInput.addEventListener("keydown", (e) => {
+    if (!trustedUi(e)) return;
     e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
@@ -1428,7 +1531,7 @@
   }
 
   function onWindowKeyDown(e) {
-    if (!e.isTrusted || document.visibilityState !== "visible") return;
+    if (!trustedUi(e) || document.visibilityState !== "visible") return;
     if (isEditableTarget(e)) return;
     if (e.code === TALK_KEY && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
@@ -1454,7 +1557,7 @@
   }
 
   function onWindowKeyUp(e) {
-    if (e.isTrusted && e.code === TALK_KEY && spaceHeld) {
+    if (trustedUi(e) && e.code === TALK_KEY && spaceHeld) {
       e.preventDefault();
       e.stopPropagation();
       spaceHeld = false;
@@ -1468,6 +1571,8 @@
 
   window.addEventListener("keydown", onWindowKeyDown, { capture: true });
   window.addEventListener("keyup", onWindowKeyUp, { capture: true });
+  shadow.addEventListener("keydown", onWindowKeyDown);
+  shadow.addEventListener("keyup", onWindowKeyUp);
   window.addEventListener("blur", onWindowBlur);
   document.addEventListener("visibilitychange", onWindowBlur);
 
@@ -1895,6 +2000,8 @@
 
   function destroy() {
     destroyed = true;
+    uiObserver.disconnect();
+    window.removeEventListener("resize", onUiResize);
     stopTrackingPins();
     activeSnapshot = null;
     snapshots.clear();
@@ -1919,6 +2026,11 @@
 
   const api = {
     state,
+    uiFrame,
+    takeUiSnapshot,
+    fitUiFrame,
+    onUiEvent,
+    getReplyText: () => hudReply.textContent,
     Configure(opts) {
       Object.assign(state, opts || {});
       syncModeUI();
@@ -1954,6 +2066,7 @@
     renderSemanticLens,
     clearOverlays,
     onIntentResult,
+    revokeActionAuthority,
     showHudMessage(htmlText) {
       showHudMessage(htmlText);
     },

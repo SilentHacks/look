@@ -5,8 +5,22 @@ import html
 import json
 import math
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 from .temporal_aligner import ALL_DEICTICS, extract_deictic_anchors
+
+def safe_url(value):
+    """Retain a destination, never URL credentials, query capabilities or fragments."""
+    if not isinstance(value, str) or re.search(r"[\s\\\x00-\x1f\x7f]", value):
+        return ""
+    try:
+        url = urlsplit(value)
+        if url.scheme not in ("http", "https") or not url.hostname:
+            return ""
+        clean = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
+        return clean if len(clean) <= 600 else ""
+    except ValueError:
+        return ""
 
 MAX_CONTEXT = 6000
 EVIDENCE_RULES = (
@@ -191,9 +205,10 @@ def cursor_result(capture, utterance, words=None, now=None):
         add(prefix + "[omitted: context budget]")
         return False
     def add_urls(item):
-        # URLs are indivisible evidence: omit overlong links rather than invent a clipped destination.
-        for url in item.get("urls", [])[:3]:
-            if isinstance(url, str) and len(url) <= 600 and re.match(r"^https?://[^\s]+$", url):
+        # Reapply privacy before model serialization, including non-browser callers.
+        for value in item.get("urls", [])[:3]:
+            url = safe_url(value)
+            if url:
                 add(f"URL {item.get('id')}: {url}")
 
 

@@ -8,6 +8,8 @@ from .voice import MAX_AUDIO_BYTES
 
 
 class Microphone:
+    MAX_RECORDING_SECONDS = 30.
+
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._stream = None
@@ -17,7 +19,7 @@ class Microphone:
         self._error = ""
         self._generation = 0
 
-    def start(self, owner: str, foreground, sample_rate: int = 16000) -> dict:
+    def start(self, owner: str, foreground, sample_rate: int = 16000, on_cancel=None) -> dict:
         import sounddevice as sd
 
         with self._lock:
@@ -54,20 +56,24 @@ class Microphone:
             generation = self._generation
 
         def watch():
-            # ponytail: focus checked every 100ms; native OS key capture only if this proves too slow.
+            # A page can suppress keyup. The native deadline does not depend on page events.
             while True:
                 time.sleep(.1)
                 with self._lock:
                     if self._stream is None or self._generation != generation:
                         return
                 try:
-                    live = foreground()
+                    live = (time.monotonic() - started < self.MAX_RECORDING_SECONDS
+                            and not self._error and foreground())
                 except Exception:
                     live = False
                 if not live:
                     with self._lock:
-                        if self._generation == generation:
-                            self.cancel(owner)
+                        if self._generation != generation:
+                            return
+                        self.cancel(owner)
+                    if on_cancel:
+                        on_cancel("Recording cancelled: focus/page changed, device failed, or 30s limit reached.")
                     return
 
         threading.Thread(target=watch, name="hermes-gaze-mic", daemon=True).start()

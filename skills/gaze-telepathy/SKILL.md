@@ -17,8 +17,9 @@ Use the `Resolution: N` number and short `@` handles in the CURRENT context. Han
 The pointer is highlighted automatically when fresh hover evidence activates;
 the answer's scope is selected automatically after the answer, without a tool turn.
 Scope changes require the captured source tab to be foreground and its document
-still live. A tab switch never retargets the highlight; full navigation clears
-old pins without discarding the answer. Same-document routes retain live nodes.
+still live. A tab switch never retargets the highlight or reply; replacement
+documents inherit neither. Same-document routes retain read-only nodes but revoke
+action authority and confirmations; obtain fresh evidence before acting.
 Use `gaze_highlight(handles=["@..."], resolution_id=N)` for an explicit highlight
 request or to change scope before answering. For a comparison, include both handles.
 Omit `hud_message` during streaming.
@@ -28,9 +29,10 @@ Deferred tools are available through `tool_describe`, then `tool_call`.
 
 ## Voice and followups
 
-Run `/gaze` (or `/gaze connect`) in the intended Hermes TUI/desktop session to start the Chrome companion. Hold Space in Chrome, wait for “Listening”, speak, and release. Native capture opens only during talk; microphone permission belongs to Hermes, not website origins. Switching tabs while recording cancels that recording. Evidence freezes at recording stop, before transcription. Each question enters the browsing inbox immediately; one Hermes conversation answers in capture order. Questions carry unique item/request labels; answer the question, not the label.
+Run `/gaze` (or `/gaze connect`) in the intended Hermes TUI/desktop session to start the Chrome companion. Hold Space in Chrome, wait for “Listening”, speak, and release. Native capture opens only during talk; microphone permission belongs to Hermes, not website origins. Losing focus or changing document/route cancels recording. A native 30-second cap cancels and discards capture even if a site suppresses keyup. Evidence freezes at recording stop, before transcription. Each question enters the browsing inbox immediately; one Hermes conversation answers in capture order. Questions carry unique item/request labels; answer the question, not the label.
 
 Open an item to read its conversation or explicitly follow up on it. Choose “New question at pointer” to capture another target. Follow-ups wait in the same queue. Saved evidence is reattached within the shared 6000-character budget; “the last one” is the preceding captured item, not the last answer to finish. The inbox survives tab changes and navigation, but not plugin restart. New answers mark unread without changing the selected item or speaking aloud. Failures preserve partial text and pause the queue; Retry retries the failed request, Skip discards it, Resume continues waiting work.
+Inbox content renders only in the focused tab's script-disabled, opaque-origin private frame, including explicit recall of other items. Background tabs receive no answer updates; item evidence and action ownership never move with focus.
 
 Inbox research and recalled evidence are read-only. Never refresh the current cursor to replace a saved item, click, or confirm on its behalf. Actions require returning and freshly pointing via the manual snapshot tools; captured identities and fingerprint-bound approval still apply. Send one normal Hermes message before the first Chrome question: the plugin cannot initialize a lazy host agent.
 

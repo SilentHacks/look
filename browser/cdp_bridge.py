@@ -2,7 +2,7 @@
 
 Companion discovery follows foreground Chrome pages. Each page has one persistent
 websocket and worker loop; the overlay and nonce-checked intent binding live in
-the named CDP isolated world. Python retains answer display state across pages.
+the named CDP isolated world. Python retains replies only for their source document.
 Reads may reconnect; mutations use ``eval_js_once`` and never replay.
 """
 
@@ -23,6 +23,7 @@ import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections import deque
 from ..resolver.cursor_context import stamp_resolution
 
 try:
@@ -121,11 +122,16 @@ class CdpSession:
         self._pending: Dict[int, asyncio.Future] = {}
         self._msg_id = 0
         self._target_id: Optional[str] = None
+        self._main_frame_id: Optional[str] = None
         self._context_id: Optional[int] = None
         self._context_unique_id: Optional[str] = None
+        self._ui_context_id: Optional[int] = None
+        self._ui_context_unique_id: Optional[str] = None
+        self._route_id = 0
         self._contexts: Dict[int, str] = {}
         self._ready = False
         self.tab: Optional[Dict[str, Any]] = None
+        self._reply_queue = deque()
         self.session_event: Optional[Dict[str, Any]] = None
         self._intent_handler: Optional[Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]] = None
         self._handler_pool = concurrent.futures.ThreadPoolExecutor(
@@ -167,11 +173,15 @@ class CdpSession:
             raise RuntimeError("CDP worker thread failed to start")
 
     def _submit(self, coro: Any, timeout: float) -> Any:
-        self._ensure_thread()
-        loop = self._loop
-        if loop is None or not loop.is_running():
-            raise ConnectionError("CDP worker loop is not running")
-        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            self._ensure_thread()
+            loop = self._loop
+            if loop is None or not loop.is_running():
+                raise ConnectionError("CDP worker loop is not running")
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception:
+            coro.close()
+            raise
         try:
             return fut.result(timeout)
         except concurrent.futures.TimeoutError:
@@ -268,15 +278,71 @@ class CdpSession:
             "} return true; })()"
         )
         await self._eval_coro(expr, timeout=5.0)
-        if self.session_event is not None:
-            await self._eval_coro(
-                "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent("
-                + json.dumps(self.session_event) + ");true", timeout=5.0)
 
+    async def _init_ui(self) -> None:
+        remote = await self._send_cmd("Runtime.evaluate", {
+            "expression": "window.__HERMES_GAZE_OVERLAY__.uiFrame",
+            "uniqueContextId": self._context_unique_id}, timeout=5.)
+        object_id = remote["result"]["objectId"]
+        try:
+            node = await self._send_cmd("DOM.describeNode", {"objectId": object_id}, timeout=5.)
+        finally:
+            await self._send_cmd("Runtime.releaseObject", {"objectId": object_id}, timeout=5.)
+        world = await self._send_cmd("Page.createIsolatedWorld", {
+            "frameId": node["node"]["frameId"], "worldName": _WORLD}, timeout=5.)
+        self._ui_context_id = world["executionContextId"]
+        self._ui_context_unique_id = self._contexts[self._ui_context_id]
+        await self._eval_coro(Path(__file__).with_name("panel.js").read_text(),
+                              timeout=5., context_id=self._ui_context_unique_id)
+        snapshot = await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.takeUiSnapshot()", timeout=5.)
+        await self._render_ui(snapshot)
+
+    async def _render_ui(self, message: dict) -> None:
+        if self._ui_context_unique_id:
+            await self._eval_coro("window.__HERMES_GAZE_PANEL__?.render(" + json.dumps(message) + ")",
+                                  timeout=5., context_id=self._ui_context_unique_id)
+
+    async def _deliver_reply(self, document: str, message: dict) -> None:
+        if document != self._context_unique_id:
+            return
+        delivered = await self._eval_coro(
+            "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
+            "window.__HERMES_GAZE_OVERLAY__?.onIntentResult(" + json.dumps(message) + ");return true})()",
+            timeout=5., context_id=document)
+        if not delivered:
+            self._reply_queue.append((document, message))
+
+    def flush_replies(self) -> None:
+        if self._reply_queue and self.is_connected:
+            self._submit(self._flush_replies(), timeout=8.)
+
+    async def _flush_replies(self) -> None:
+        queued, self._reply_queue = self._reply_queue, deque()
+        for document, message in queued:
+            await self._deliver_reply(document, message)
+
+    async def _ui_message(self, payload: Any, *, from_ui: bool) -> None:
+        try:
+            message = json.loads(payload)
+            if not isinstance(message, dict):
+                return
+            if not from_ui and message.get("type") == "_ui_render":
+                await self._render_ui(message)
+            elif from_ui and message.get("type") == "_ui_size":
+                height = max(1, min(2000, int(message["height"])))
+                await self._eval_coro(
+                    f"window.__HERMES_GAZE_OVERLAY__.fitUiFrame({height});true", timeout=5.)
+            elif from_ui and message.get("type") == "_ui_event":
+                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.onUiEvent("
+                                      + json.dumps(message) + ");true", timeout=5.)
+        except Exception:
+            logger.debug("Private UI unavailable", exc_info=True)
     async def _drop_ws(self) -> None:
         self._ready = False
         self._context_id = None
         self._context_unique_id = None
+        self._ui_context_id = None
+        self._ui_context_unique_id = None
         self._contexts.clear()
         self._fail_pending(ConnectionError("CDP connection reset"))
         task, self._pump_task = self._pump_task, None
@@ -321,8 +387,19 @@ class CdpSession:
 
     def _handle_event(self, method: str, params: Dict[str, Any]) -> None:
         if method == "Runtime.bindingCalled" and params.get("name") == _INTENT_BINDING:
-            if params.get("executionContextId") == self._context_id:
-                self._dispatch_intent(params.get("payload"))
+            context = params.get("executionContextId")
+            if context == self._ui_context_id:
+                asyncio.ensure_future(self._ui_message(params.get("payload"), from_ui=True))
+            elif context == self._context_id:
+                payload = params.get("payload")
+                try:
+                    internal = json.loads(payload).get("type") == "_ui_render"
+                except (TypeError, ValueError, AttributeError):
+                    return
+                if internal:
+                    asyncio.ensure_future(self._ui_message(payload, from_ui=False))
+                else:
+                    self._dispatch_intent(payload)
         elif method == "Runtime.executionContextCreated":
             context = params.get("context") or {}
             if context.get("name") == _WORLD and context.get("uniqueId"):
@@ -331,9 +408,16 @@ class CdpSession:
             self._context_id = None
             self._context_unique_id = None
             self._contexts.clear()
+            self._ui_context_id = None
+            self._ui_context_unique_id = None
         elif method == "Page.loadEventFired" or (
                 method == "Page.frameNavigated" and params.get("type") == "BackForwardCacheRestore"):
             asyncio.ensure_future(self._on_new_context())
+        elif method == "Page.navigatedWithinDocument":
+            if params.get("frameId") == self._main_frame_id:
+                self._route_id += 1
+                asyncio.ensure_future(self._eval_coro(
+                    "window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.))
 
     async def _on_new_context(self, force: bool = False) -> bool:
         """Re-register the intent binding + re-inject the overlay in a new main-frame context."""
@@ -342,6 +426,7 @@ class CdpSession:
         try:
             tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
             frame_id = tree["frameTree"]["frame"]["id"]
+            self._main_frame_id = frame_id
             world = await self._send_cmd("Page.createIsolatedWorld",
                                          {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
             self._context_id = world["executionContextId"]
@@ -349,6 +434,7 @@ class CdpSession:
             src = _overlay_source()
             if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
                 await self._eval_coro(_guarded_inject(src), timeout=8.0)
+            await self._init_ui()
             await self._push_overlay_config()
             self._ready = True
             return True
@@ -369,6 +455,7 @@ class CdpSession:
             return
         context_id = self._context_unique_id
         intent["_browser_document"] = context_id
+        intent["_browser_route"] = self._route_id
 
         def reply(reply_payload: Dict[str, Any]) -> None:
             if self._closed:
@@ -378,9 +465,7 @@ class CdpSession:
                 if intent.get(key) is not None:
                     msg.setdefault(key, intent[key])
             try:
-                self._submit(self._eval_coro(
-                    "window.__HERMES_GAZE_OVERLAY__?.onIntentResult(" + json.dumps(msg) + ");true",
-                    timeout=5.0, context_id=context_id), timeout=6.0)
+                self._submit(self._deliver_reply(context_id, msg), timeout=6.)
             except Exception as exc:
                 logger.debug("onIntentResult reply failed: %s", exc)
 
@@ -567,11 +652,12 @@ class GazeSession:
         """Thin back-compat wrapper: configure() with stored defaults."""
         return self.configure(mode=mode, sigma_px=sigma_px)
 
-    def ingest(self, samples: Any) -> None:
+    def ingest(self, samples: Any) -> List[FixationSample]:
         """One funnel for ALL fixation sources: dicts -> FixationSample, subtract the
         recalibrator bias offset, dedupe on a (t_end, x_doc, y_doc) watermark set."""
+        captured = []
         if not samples:
-            return
+            return captured
         with self._lock:
             bias_x, bias_y = self.recalibrator.offset
             if len(self._ingested_keys) > 400:  # prune watermark with the buffer window
@@ -584,13 +670,14 @@ class GazeSession:
                     logger.debug("skipping malformed fixation %r: %s", raw, exc)
                     continue
                 key = (round(s.t_end, 3), round(s.x_doc, 1), round(s.y_doc, 1))
-                if key in self._ingested_keys:
-                    continue
-                self._ingested_keys.add(key)
                 if bias_x or bias_y:
                     s = replace(s, x_doc=s.x_doc - bias_x, y_doc=s.y_doc - bias_y,
                                 x_vp=s.x_vp - bias_x, y_vp=s.y_vp - bias_y)
-                self.ring_buffer.add(s)
+                captured.append(s)
+                if key not in self._ingested_keys:
+                    self._ingested_keys.add(key)
+                    self.ring_buffer.add(s)
+        return captured
 
     def fetch_cursor_context(self) -> dict[str, Any]:
         """Capture actual DOM identities without invoking the simulated extractor."""
@@ -637,61 +724,46 @@ class GazeSession:
                 self.last_resolution = None
                 self.resolution_id += 1
 
-    def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> List[CandidateElement]:
-        """Pull pointer + fixations + nearby candidates from the pinned tab in ONE eval.
-        Returns [] honestly — never stale last_candidates — when Chrome or a real
-        pointer position is unavailable."""
+    def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> Tuple[List[CandidateElement], dict]:
+        """Return candidates AND their collection-time evidence/owner in one read."""
         if not self.is_chrome_reachable():
             with self._lock:
                 self.last_candidates = []
-            return []
+            return [], {}
         js = (
             "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (!api || !api.state) return null;"
             " const s = api.state; const locked = s.armed && s.lockedX !== null; return {"
-            " page_url: location.href,"
+            " page_url: location.origin + location.pathname,"
             " pointer: { x_vp: locked ? s.lockedX : s.pointerX, y_vp: locked ? s.lockedY : s.pointerY, scroll_x: window.scrollX, scroll_y: window.scrollY },"
             " fixations: s.ringBuffer.slice(-25),"
             f" candidates: api.extractCandidatesNear(locked ? s.lockedX : s.pointerX, locked ? s.lockedY : s.pointerY, {float(radius_px)})"
             " }; })()"
         )
-        data = self.eval_js(js) or {}
-        self.last_resolution_input = data
-        self.ingest(data.get("fixations") or [])
-        p = data.get("pointer") if isinstance(data.get("pointer"), dict) else {}
-        if p.get("x_vp") is None or p.get("y_vp") is None:
-            with self._lock:
-                self.last_candidates = []
-            return []
-        if not self.ring_buffer.latest():
-            self.tracker.record_point(
-                float(p["x_vp"]), float(p["y_vp"]),
-                scroll_x=float(p.get("scroll_x", 0.0)), scroll_y=float(p.get("scroll_y", 0.0)),
-                bias_offset=self.recalibrator.offset)
-
+        data = self._cdp.capture(js)
         cands = [_candidate_from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
-        with self._lock:
-            self.last_candidates = cands
-        return cands
+        return cands, data
 
-    def new_resolution(self, res: ResolutionResult) -> int:
-        """Store res as the active resolution and bump + return the epoch resolution_id."""
-        target, document = self._cdp.current_owner() if self._cdp.is_connected else (None, None)
+    def new_resolution(self, res: ResolutionResult, evidence: Optional[dict] = None) -> int:
+        """Activate one locally frozen result, never reread another worker's input."""
+        evidence = evidence or {}
         with self.actions._lock:
             self.actions.invalidate()
             with self._lock:
                 self.last_resolution = res
                 self.last_hover_snapshot = None
-                self._resolution_target = target
-                self._resolution_document = document
+                self.last_resolution_input = evidence
+                self.last_candidate_wire = list(evidence.get("candidates") or [])
+                self._resolution_target = evidence.get("browser_target")
+                self._resolution_document = evidence.get("browser_document")
+                self._resolution_route = evidence.get("browser_route")
                 self.resolution_id += 1
                 return self.resolution_id
 
-    def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None) -> None:
-        # new_resolution under the lock; browser I/O outside it so slow evals don't
-        # serialize choose/ingest/intent dispatch behind a potentially slow tab.
-        rid = self.new_resolution(resolution)
+    def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None,
+                                     *, evidence: dict) -> int:
+        rid = self.new_resolution(resolution, evidence)
         if not self.is_chrome_reachable():
-            return
+            return rid
         esc = html.escape
         if resolution.decision in ("open_semantic_lens", "confirm_destructive"):
             cards = [sc.to_dict() for sc in resolution.ranked[:4]]
@@ -726,62 +798,65 @@ class GazeSession:
                 )
             js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
         try:
-            self.eval_js(js)
+            self._cdp.eval_js_once(f"(() => {{{js}}})()", target=evidence.get("browser_target"),
+                                   document=evidence.get("browser_document"), route=evidence.get("browser_route"))
         except Exception as exc:
             logger.debug("render_resolution_in_browser eval failed: %s", exc)
+        return rid
 
     def choose(self, resolution_id: Optional[int] = None, candidate_index: int = 1,
                modality: str = "semantic_lens", execute: bool = True) -> Dict[str, Any]:
         """Validate the epoch + index, recalibrate from the latest fixation, click, and re-pin."""
-        with self._lock:
-            res = self.last_resolution
-            if res is None or not res.ranked:
-                return {"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."}
-            if resolution_id is None:
-                return {"ok": False, "error": "resolution_id is required"}
-            if int(resolution_id) != self.resolution_id:
-                return {"ok": False, "error": "stale resolution"}
-            idx = int(candidate_index) - 1
-            if idx < 0 or idx >= len(res.ranked):
-                return {"ok": False, "error": f"candidate_index {candidate_index} out of range (1..{len(res.ranked)})."}
-            chosen = res.ranked[idx]
-            latest_fix = self.ring_buffer.latest()
-            if latest_fix is not None:
-                true_x, true_y = chosen.candidate.center_doc
-                self.recalibrator.update(
-                    est_x=latest_fix.x_doc, est_y=latest_fix.y_doc, true_x=true_x, true_y=true_y,
-                    sigma=latest_fix.sigma_x, weight=0.25,
+        with self.actions._lock:
+            with self._lock:
+                res = self.last_resolution
+                if res is None or not res.ranked:
+                    return {"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."}
+                if resolution_id is None:
+                    return {"ok": False, "error": "resolution_id is required"}
+                if int(resolution_id) != self.resolution_id:
+                    return {"ok": False, "error": "stale resolution"}
+                idx = int(candidate_index) - 1
+                if idx < 0 or idx >= len(res.ranked):
+                    return {"ok": False, "error": f"candidate_index {candidate_index} out of range (1..{len(res.ranked)})."}
+                chosen = res.ranked[idx]
+                latest_fix = self.ring_buffer.latest()
+                if latest_fix is not None:
+                    true_x, true_y = chosen.candidate.center_doc
+                    self.recalibrator.update(
+                        est_x=latest_fix.x_doc, est_y=latest_fix.y_doc, true_x=true_x, true_y=true_y,
+                        sigma=latest_fix.sigma_x, weight=0.25,
+                    )
+            if self.is_chrome_reachable():
+                esc = html.escape
+                role_disp = esc(chosen.candidate.role).capitalize()
+                msg = (
+                    f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {esc(chosen.candidate.label)}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {esc(str(modality))})</span></div>"
+                    f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{esc(str(chosen.consequence_preview))}</div>"
+                    f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {esc(chosen.candidate.selector)}</div>"
                 )
-        if self.is_chrome_reachable():
-            esc = html.escape
-            role_disp = esc(chosen.candidate.role).capitalize()
-            msg = (
-                f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {esc(chosen.candidate.label)}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {esc(str(modality))})</span></div>"
-                f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{esc(str(chosen.consequence_preview))}</div>"
-                f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {esc(chosen.candidate.selector)}</div>"
-            )
-            click_stmt = (
-                f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
-                if execute else "")
-            try:
-                self._cdp.eval_js_once(
-                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
-                    f"{click_stmt} return true;}})()", target=self._resolution_target,
-                    document=self._resolution_document)
-            except Exception as exc:
-                self.clear_hover_snapshot()
-                return {"ok": False, "executed": None if execute else False,
-                        "outcome": "unknown" if execute else "failed",
-                        "error": f"browser choose failed; do not retry automatically: {exc}"}
-        with self._lock:
-            self.last_resolution = None  # consume — a second choose must not re-click stale state
-        return {
-            "ok": True,
-            "selected_index": idx + 1,
-            "selected": chosen.to_dict(),
-            "executed": execute,
-            "recalibrator_bias_offset": list(self.recalibrator.offset),
-        }
+                click_stmt = (
+                    f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
+                    if execute else "")
+                try:
+                    self._cdp.eval_js_once(
+                        f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
+                        f"{click_stmt} return true;}})()", target=self._resolution_target,
+                        document=self._resolution_document, route=self._resolution_route)
+                except Exception as exc:
+                    self.clear_hover_snapshot()
+                    return {"ok": False, "executed": None if execute else False,
+                            "outcome": "unknown" if execute else "failed",
+                            "error": f"browser choose failed; do not retry automatically: {exc}"}
+            with self._lock:
+                self.last_resolution = None  # consume — a second choose must not re-click stale state
+            return {
+                "ok": True,
+                "selected_index": idx + 1,
+                "selected": chosen.to_dict(),
+                "executed": execute,
+                "recalibrator_bias_offset": list(self.recalibrator.offset),
+            }
 
 
     def close(self) -> None:

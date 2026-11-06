@@ -104,13 +104,14 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   getComputedStyle: node => ({ display: node.style.display || 'block' }),
   location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
-  shadow, hudReply, lockLabel, tuckSummary, pinsLayer: element('div'),
+  shadow, hudReply, lockLabel, tuckSummary, pinsLayer: element('div'), lensLayer: element('div'),
   hudInput: element('input'), DEFAULT_PLACEHOLDER: 'Ask about this…',
   renderPins: candidates => rendered.push(candidates), stopTrackingPins() {},
+  trustedUi: event => event.isTrusted,
   _emit: intent => intents.push(intent), cancelListening() {} });
 const start = source.indexOf('  const cursorIds =');
 const end = source.indexOf('  function updateLiveInspector', start);
-vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent };', context);
+vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent, revokeActionAuthority };', context);
 const replyStart = source.indexOf('  function onIntentResult');
 const replyEnd = source.indexOf('  function formatRoleDisplayName', replyStart);
 vm.runInContext(source.slice(replyStart, replyEnd) + '\nthis.onIntentResult = onIntentResult;', context);
@@ -121,7 +122,7 @@ assert.ok(!api.safeLabel(label).includes('secret-label-attribute'));
 
 test('deal links resolve absolutely without schemes, sensitive labels or unbounded link lists', () => {
   const pointed = element('span', [text('£25 deal')]);
-  const link = element('a', [pointed], { href: '/deals/pointed?x=1&y=2' });
+  const link = element('a', [pointed], { href: 'https://alice:SECRET@demo.invalid/deals/pointed?access_token=TOKEN#FRAGMENT' });
   const secret = element('label', [element('a', [text('secret')], { href: '/SECRET' })], { for: 'password' });
   const card = element('article', [link, secret,
     element('a', [text('bad')], { href: 'javascript:alert(1)' }),
@@ -130,9 +131,10 @@ test('deal links resolve absolutely without schemes, sensitive labels or unbound
   api.rememberHit(pointed, 2);
   const evidence = api.captureCursorContext();
   const target = evidence.targets.find(t => t.id === evidence.history.at(-1).id);
-  assert.deepEqual(Array.from(target.urls), ['https://demo.invalid/deals/pointed?x=1&y=2']);
+  assert.deepEqual(Array.from(target.urls), ['https://demo.invalid/deals/pointed']);
   const block = evidence.blocks.find(b => b.kind === 'article');
-  assert.deepEqual(Array.from(block.urls), ['https://demo.invalid/deals/pointed?x=1&y=2', 'https://merchant.invalid/product']);
+  assert.deepEqual(Array.from(block.urls), ['https://demo.invalid/deals/pointed', 'https://merchant.invalid/product']);
+  for (const secret of ['SECRET', 'TOKEN', 'FRAGMENT']) assert.ok(!JSON.stringify(evidence).includes(secret));
   assert.ok(!JSON.stringify(evidence).includes('/SECRET'));
   assert.ok(!JSON.stringify(evidence).includes('javascript:'));
 });
@@ -530,10 +532,23 @@ test('routing retains live evidence and streams; pagehide revokes evidence, not 
   for (const type of ['hashchange', 'popstate']) context.window.dispatchEvent({ type });
   api.onSessionEvent(inboxEvent(4, 'after routing'));
   assert.ok(hudReply.children.some(c => c.textContent.includes('after routing')));
-  assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, true);
+  api.revokeActionAuthority(); // Browser-owned Page.navigatedWithinDocument notification.
+  context.location.href = previousUrl;
+  assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, false);
+  assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 12, [handle]).ok, true);
   context.window.dispatchEvent({ type: 'pagehide' });
   assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, false);
   api.onSessionEvent(inboxEvent(5, 'answer after departure'));
   assert.ok(hudReply.children.some(c => c.textContent.includes('answer after departure')));
   context.location.href = previousUrl;
+});
+
+test('disconnected voice shows the one-shot answer instead of silently queuing', () => {
+  context.hudInput = { value: '' };
+  context.resetMicUiIdle = message => { lockLabel.textContent = message; };
+  context.renderScopeOptions = () => {};
+  context.onIntentResult({ type: 'record_stop', ok: true, delivery: 'one_shot',
+    text: 'What does this mean?', explanation: 'Revenue includes subscription renewals.' });
+  assert.ok(hudReply.textContent.includes('Revenue includes subscription renewals.'));
+  assert.notEqual(lockLabel.textContent, 'queued');
 });
