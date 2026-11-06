@@ -2,7 +2,7 @@
 
 Companion discovery follows foreground Chrome pages. Each page has one persistent
 websocket and worker loop; the overlay and nonce-checked intent binding live in
-the named CDP isolated world. Python retains answer display state across pages.
+the named CDP isolated world. Python retains replies only for their source document.
 Reads may reconnect; mutations use ``eval_js_once`` and never replay.
 """
 
@@ -121,8 +121,12 @@ class CdpSession:
         self._pending: Dict[int, asyncio.Future] = {}
         self._msg_id = 0
         self._target_id: Optional[str] = None
+        self._main_frame_id: Optional[str] = None
         self._context_id: Optional[int] = None
         self._context_unique_id: Optional[str] = None
+        self._ui_context_id: Optional[int] = None
+        self._ui_context_unique_id: Optional[str] = None
+        self._route_id = 0
         self._contexts: Dict[int, str] = {}
         self._ready = False
         self.tab: Optional[Dict[str, Any]] = None
@@ -167,11 +171,15 @@ class CdpSession:
             raise RuntimeError("CDP worker thread failed to start")
 
     def _submit(self, coro: Any, timeout: float) -> Any:
-        self._ensure_thread()
-        loop = self._loop
-        if loop is None or not loop.is_running():
-            raise ConnectionError("CDP worker loop is not running")
-        fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            self._ensure_thread()
+            loop = self._loop
+            if loop is None or not loop.is_running():
+                raise ConnectionError("CDP worker loop is not running")
+            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+        except Exception:
+            coro.close()
+            raise
         try:
             return fut.result(timeout)
         except concurrent.futures.TimeoutError:
@@ -268,15 +276,60 @@ class CdpSession:
             "} return true; })()"
         )
         await self._eval_coro(expr, timeout=5.0)
-        if self.session_event is not None:
-            await self._eval_coro(
-                "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent("
-                + json.dumps(self.session_event) + ");true", timeout=5.0)
+        if (self.session_event is not None and
+                self.session_event.get("browser_document") == self._context_unique_id):
+            await self._display_event(self.session_event)
 
+    async def _display_event(self, event: dict) -> None:
+        await self._eval_coro(
+            "if(document.visibilityState === 'visible' && document.hasFocus()) "
+            "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");true", timeout=5.)
+
+    async def _init_ui(self) -> None:
+        remote = await self._send_cmd("Runtime.evaluate", {
+            "expression": "window.__HERMES_GAZE_OVERLAY__.uiFrame",
+            "uniqueContextId": self._context_unique_id}, timeout=5.)
+        object_id = remote["result"]["objectId"]
+        try:
+            node = await self._send_cmd("DOM.describeNode", {"objectId": object_id}, timeout=5.)
+        finally:
+            await self._send_cmd("Runtime.releaseObject", {"objectId": object_id}, timeout=5.)
+        world = await self._send_cmd("Page.createIsolatedWorld", {
+            "frameId": node["node"]["frameId"], "worldName": _WORLD}, timeout=5.)
+        self._ui_context_id = world["executionContextId"]
+        self._ui_context_unique_id = self._contexts[self._ui_context_id]
+        await self._eval_coro(Path(__file__).with_name("panel.js").read_text(),
+                              timeout=5., context_id=self._ui_context_unique_id)
+        snapshot = await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.takeUiSnapshot()", timeout=5.)
+        await self._render_ui(snapshot)
+
+    async def _render_ui(self, message: dict) -> None:
+        if self._ui_context_unique_id:
+            await self._eval_coro("window.__HERMES_GAZE_PANEL__?.render(" + json.dumps(message) + ")",
+                                  timeout=5., context_id=self._ui_context_unique_id)
+
+    async def _ui_message(self, payload: Any, *, from_ui: bool) -> None:
+        try:
+            message = json.loads(payload)
+            if not isinstance(message, dict):
+                return
+            if not from_ui and message.get("type") == "_ui_render":
+                await self._render_ui(message)
+            elif from_ui and message.get("type") == "_ui_size":
+                height = max(1, min(2000, int(message["height"])))
+                await self._eval_coro(
+                    f"window.__HERMES_GAZE_OVERLAY__.uiFrame.style.height='{height}px';true", timeout=5.)
+            elif from_ui and message.get("type") == "_ui_event":
+                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.onUiEvent("
+                                      + json.dumps(message) + ");true", timeout=5.)
+        except Exception:
+            logger.debug("Private UI unavailable", exc_info=True)
     async def _drop_ws(self) -> None:
         self._ready = False
         self._context_id = None
         self._context_unique_id = None
+        self._ui_context_id = None
+        self._ui_context_unique_id = None
         self._contexts.clear()
         self._fail_pending(ConnectionError("CDP connection reset"))
         task, self._pump_task = self._pump_task, None
@@ -321,8 +374,19 @@ class CdpSession:
 
     def _handle_event(self, method: str, params: Dict[str, Any]) -> None:
         if method == "Runtime.bindingCalled" and params.get("name") == _INTENT_BINDING:
-            if params.get("executionContextId") == self._context_id:
-                self._dispatch_intent(params.get("payload"))
+            context = params.get("executionContextId")
+            if context == self._ui_context_id:
+                asyncio.ensure_future(self._ui_message(params.get("payload"), from_ui=True))
+            elif context == self._context_id:
+                payload = params.get("payload")
+                try:
+                    internal = json.loads(payload).get("type") == "_ui_render"
+                except (TypeError, ValueError, AttributeError):
+                    return
+                if internal:
+                    asyncio.ensure_future(self._ui_message(payload, from_ui=False))
+                else:
+                    self._dispatch_intent(payload)
         elif method == "Runtime.executionContextCreated":
             context = params.get("context") or {}
             if context.get("name") == _WORLD and context.get("uniqueId"):
@@ -331,9 +395,16 @@ class CdpSession:
             self._context_id = None
             self._context_unique_id = None
             self._contexts.clear()
+            self._ui_context_id = None
+            self._ui_context_unique_id = None
         elif method == "Page.loadEventFired" or (
                 method == "Page.frameNavigated" and params.get("type") == "BackForwardCacheRestore"):
             asyncio.ensure_future(self._on_new_context())
+        elif method == "Page.navigatedWithinDocument":
+            if params.get("frameId") == self._main_frame_id:
+                self._route_id += 1
+                asyncio.ensure_future(self._eval_coro(
+                    "window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.))
 
     async def _on_new_context(self, force: bool = False) -> bool:
         """Re-register the intent binding + re-inject the overlay in a new main-frame context."""
@@ -342,6 +413,7 @@ class CdpSession:
         try:
             tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
             frame_id = tree["frameTree"]["frame"]["id"]
+            self._main_frame_id = frame_id
             world = await self._send_cmd("Page.createIsolatedWorld",
                                          {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
             self._context_id = world["executionContextId"]
@@ -349,6 +421,7 @@ class CdpSession:
             src = _overlay_source()
             if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
                 await self._eval_coro(_guarded_inject(src), timeout=8.0)
+            await self._init_ui()
             await self._push_overlay_config()
             self._ready = True
             return True
@@ -369,6 +442,7 @@ class CdpSession:
             return
         context_id = self._context_unique_id
         intent["_browser_document"] = context_id
+        intent["_browser_route"] = self._route_id
 
         def reply(reply_payload: Dict[str, Any]) -> None:
             if self._closed:
@@ -654,7 +728,7 @@ class GazeSession:
             f" candidates: api.extractCandidatesNear(locked ? s.lockedX : s.pointerX, locked ? s.lockedY : s.pointerY, {float(radius_px)})"
             " }; })()"
         )
-        data = self.eval_js(js) or {}
+        data = self._cdp.capture(js)
         self.last_resolution_input = data
         self.ingest(data.get("fixations") or [])
         p = data.get("pointer") if isinstance(data.get("pointer"), dict) else {}
@@ -675,7 +749,8 @@ class GazeSession:
 
     def new_resolution(self, res: ResolutionResult) -> int:
         """Store res as the active resolution and bump + return the epoch resolution_id."""
-        target, document = self._cdp.current_owner() if self._cdp.is_connected else (None, None)
+        target = self.last_resolution_input.get("browser_target")
+        document = self.last_resolution_input.get("browser_document")
         with self.actions._lock:
             self.actions.invalidate()
             with self._lock:
@@ -683,6 +758,7 @@ class GazeSession:
                 self.last_hover_snapshot = None
                 self._resolution_target = target
                 self._resolution_document = document
+                self._resolution_route = self.last_resolution_input.get("browser_route")
                 self.resolution_id += 1
                 return self.resolution_id
 
@@ -726,7 +802,8 @@ class GazeSession:
                 )
             js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
         try:
-            self.eval_js(js)
+            self._cdp.eval_js_once(f"(() => {{{js}}})()", target=self._resolution_target,
+                                   document=self._resolution_document, route=self._resolution_route)
         except Exception as exc:
             logger.debug("render_resolution_in_browser eval failed: %s", exc)
 
@@ -767,7 +844,7 @@ class GazeSession:
                 self._cdp.eval_js_once(
                     f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
                     f"{click_stmt} return true;}})()", target=self._resolution_target,
-                    document=self._resolution_document)
+                    document=self._resolution_document, route=self._resolution_route)
             except Exception as exc:
                 self.clear_hover_snapshot()
                 return {"ok": False, "executed": None if execute else False,

@@ -17,8 +17,9 @@ Use the `Resolution: N` number and short `@` handles in the CURRENT context. Han
 The pointer is highlighted automatically when fresh hover evidence activates;
 the answer's scope is selected automatically after the answer, without a tool turn.
 Scope changes require the captured source tab to be foreground and its document
-still live. A tab switch never retargets the highlight; full navigation clears
-old pins without discarding the answer. Same-document routes retain live nodes.
+still live. A tab switch never retargets the highlight or reply; replacement
+documents inherit neither. Same-document routes retain read-only nodes but revoke
+action authority and confirmations; obtain fresh evidence before acting.
 Use `gaze_highlight(handles=["@..."], resolution_id=N)` for an explicit highlight
 request or to change scope before answering. For a comparison, include both handles.
 Omit `hud_message` during streaming.
@@ -28,7 +29,7 @@ Deferred tools are available through `tool_describe`, then `tool_call`.
 
 ## Voice and followups
 
-Run `/gaze` (or `/gaze connect`) in the intended Hermes TUI/desktop session to start the Chrome companion. Hold Space in Chrome, wait for “Listening”, speak, and release. Native capture opens only during talk; microphone permission belongs to Hermes, not website origins. Switching tabs while recording cancels that recording. The companion follows focused supported tabs and retains the latest answer across routing/navigation, but actions stay bound to the captured tab and identities. Evidence freezes at recording stop, before transcription. Only the spoken words become a normal user message; the hook attaches page evidence privately. The normal answer streams to Hermes and Chrome. Followups use conversation history without reattaching old evidence or changing its epoch; fresh captures replace it. After host compaction removes evidence, `gaze_resolve` captures the current cursor, not the historical target. Current Hermes hosts refuse injected turns in lazy sessions: send one normal Hermes message first if injection is refused; the plugin cannot initialize the host agent.
+Run `/gaze` (or `/gaze connect`) in the intended Hermes TUI/desktop session to start the Chrome companion. Hold Space in Chrome, wait for “Listening”, speak, and release. Native capture opens only during talk; microphone permission belongs to Hermes, not website origins. Losing focus or changing document/route cancels recording. A native 30-second cap cancels and discards capture even if a site suppresses keyup. Evidence freezes at recording stop, before transcription. Only the spoken words become a normal user message; the hook attaches page evidence privately. Answers stream to Hermes and only the captured source document; background replies wait until that document is foreground. Other tabs and replacement documents receive nothing. Followups use conversation history without reattaching old evidence or changing its epoch; fresh captures replace it. After host compaction removes evidence, `gaze_resolve` captures the current cursor, not the historical target. Current Hermes hosts refuse injected turns in lazy sessions: send one normal Hermes message first if injection is refused; the plugin cannot initialize the host agent.
 
 Without a connected/authorized Hermes session, Chrome can answer read-only one-shot questions, clearly labeled as having no conversation followups or actions. Use `/gaze disconnect` to detach. Gateway sessions require `plugins.entries.hermes-gaze.allow_gateway_injection: true` and in-process plugin isolation.
 

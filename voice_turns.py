@@ -74,6 +74,8 @@ class VoiceTurns:
     def _event(self, run: dict, status: str, **fields: Any) -> None:
         event = {"request_id": run["request_id"], "sequence": run["sequence"],
                  "resolution_id": run["resolution_id"], "status": status,
+                 "browser_target": run["snapshot"].get("browser_target"),
+                 "browser_document": run["snapshot"].get("browser_document"),
                  "session_connected": self.binding is not None and not self.closed, **fields}
         try:
             self.session.display_session_event(event)

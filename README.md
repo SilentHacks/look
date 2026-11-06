@@ -104,13 +104,16 @@ turns until its lazy agent is initialized. Run `/gaze` or `/gaze connect` in tha
 conversation to open/attach the dedicated Chrome companion; `/gaze demo` opens
 the dashboard if wanted.
 Hold Space in Chrome, wait for **Listening**, speak and release. Native
-`sounddevice` capture opens only during talk and closes on release; switching
-tabs while recording cancels it. macOS microphone permission belongs to the app
-hosting Hermes (for example Terminal), not Chrome or the website. Only your
-words become a normal user message; the matching session hook attaches frozen
-page context. Answers stream into Hermes and all supported Chrome tabs. The
-latest answer survives navigation in memory; highlights/actions never move to
-an unrelated tab or replacement document.
+`sounddevice` capture opens only during talk and closes on release. Losing tab,
+document or route focus cancels it; a native 30-second cap cancels and discards
+capture even if a hostile site suppresses keyup. No Input Monitoring permission
+is requested. macOS microphone permission belongs to the app hosting Hermes,
+not Chrome or the website. Only your words become a normal user message; the
+matching session hook attaches frozen page context. Answers stream into Hermes
+and the captured source document only. Background replies wait in Python until
+that source returns to the foreground; unrelated tabs and replacement documents
+receive nothing. Private controls/replies use a script-disabled, opaque-origin
+iframe controlled through CDP, not website-accessible shadow DOM.
 Refreshing cursor evidence through a tool does not interrupt that turn's answer stream.
 Followups without a fresh capture use conversation history without reattaching old
 evidence or changing its epoch. A connected non-deictic utterance without a target is delivered
@@ -203,15 +206,16 @@ The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
    previously denied, then restart Hermes and repeat step 3. The exact macOS
    label depends on the launch chain; permission prompting was not triggered
    during the integration check.
-5. Expect the pointed highlight, answer text and captured HTTP(S) deal URL.
+5. Expect the pointed highlight, answer text and captured HTTP(S) deal URL
+   without credentials, query parameters or fragments.
    The post-answer scope can widen without a tool call. Scroll: the outline
    must stay on the same element, disappear offscreen and return with it.
 6. Ask once more, then switch supported tabs while Hermes is answering
-   (after releasing Space). The reply should finish in the newly focused
-   tab and remain available when returning. It must not move the deal's
-   highlight onto another page. A background source retains its pointer
-   highlight; automatic scope changes require the source to be foreground.
-   Reload the source: the latest answer should return, but old pins must not.
+   (after releasing Space). The newly focused tab must receive no reply.
+   Returning to the original source shows its latest answer. Its existing pointer
+   highlight stays there; automatic scope changes require it to be foreground.
+   Same-document routes preserve read-only geometry but revoke action approval.
+   Reloading replaces the document and must not restore private replies or pins.
    Closing Hermes ends this in-memory answer retention.
 
 

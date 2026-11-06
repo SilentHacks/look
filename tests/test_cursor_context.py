@@ -31,7 +31,7 @@ class TestCursorContext(unittest.TestCase):
         data = capture()
         target = data["targets"][1]
         target.update(role="span", label="£25", block_ids=["@deals"], group_item_id="@deal",
-                      urls=["https://deals.invalid/pointed?x=1&y=2"])
+                      urls=["https://alice:SECRET@deals.invalid/pointed?access_token=TOKEN#FRAGMENT"])
         members = [{"id": "@deal", "text": "Pointed offer £25 delivered", "in_view": True,
                     "urls": ["https://merchant.invalid/pointed"]}]
         members += [{"id": f"@peer{i}", "text": "Peer offer " + "x" * 300, "in_view": True,
@@ -39,7 +39,9 @@ class TestCursorContext(unittest.TestCase):
         data["blocks"] = [{"id": "@deals", "kind": "group", "members": members, "total_items": 16}]
         packet = cursor_result(data, "Investigate this deal")["context"]
         page = packet.split("<page_data>\n")[1].split("\n</page_data>")[0]
-        self.assertIn("https://deals.invalid/pointed?x=1&amp;y=2", page)
+        self.assertIn("https://deals.invalid/pointed", page)
+        for secret in ("alice", "SECRET", "TOKEN", "FRAGMENT"):
+            self.assertNotIn(secret, page)
         self.assertIn("https://merchant.invalid/pointed", page)
         self.assertIn("Pointed offer £25 delivered", page)
         self.assertIn("https://deals.invalid/0/", page)

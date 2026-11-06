@@ -22,7 +22,6 @@ class Companion:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._handler = None
-        self._event: dict | None = None
         self._local = threading.local()
 
     @property
@@ -73,12 +72,12 @@ class Companion:
                         tab.tab = page
                         tab.overlay_config = self.overlay_config
                         tab.intent_nonce = self.intent_nonce
-                        tab.session_event = self._event
                         tab.set_intent_handler(lambda intent, reply, key=key: self._dispatch(key, intent, reply))
                         with self._lock:
                             self._tabs[key] = tab
                     if not tab.is_connected:
                         tab.connect()
+                    self._display_pending(tab)
             except Exception:
                 logger.debug("Chrome tab discovery unavailable", exc_info=True)
             self._stop.wait(.25)
@@ -113,56 +112,67 @@ class Companion:
                 continue
         raise ConnectionError("No supported Chrome page has focus")
 
-    def current_owner(self) -> tuple[str, str | None]:
-        tab = self._target()
-        return str(tab._target_id), tab._context_unique_id
 
     def eval_js(self, expression: str, timeout: float = 6.) -> Any:
         return self._target().eval_js(expression, timeout)
 
-    def capture(self) -> dict:
+    def capture(self, expression: str = "window.__HERMES_GAZE_OVERLAY__?.captureCursorContext()") -> dict:
         tab = self._target()
-        capture = tab.eval_js("window.__HERMES_GAZE_OVERLAY__?.captureCursorContext()") or {}
-        capture["browser_target"] = tab._target_id
-        capture["browser_document"] = tab._context_unique_id
+        document, route = tab._context_unique_id, tab._route_id
+        capture = tab.eval_js_once(expression, context_id=document) or {}
+        if tab._context_unique_id != document or tab._route_id != route:
+            raise ConnectionError("Evidence document or route changed during capture")
+        capture.update(browser_target=tab._target_id, browser_document=document, browser_route=route)
         return capture
 
     def eval_js_once(self, expression: str, timeout: float = 6., *, target: str | None = None,
-                     document: str | None = None) -> Any:
-        if target:
-            with self._lock:
-                tab = self._tabs.get(target)
-            if tab is None:
-                raise ConnectionError("The snapshot's tab was closed")
-        else:
-            tab = self._target()
-        if document is not None and tab._context_unique_id != document:
+                     document: str | None = None, route: int | None = None) -> Any:
+        if not target or not document:
+            raise ConnectionError("Snapshot has no captured browser owner")
+        with self._lock:
+            tab = self._tabs.get(target)
+        if tab is None:
+            raise ConnectionError("The snapshot's tab was closed")
+        if tab._context_unique_id != document:
             raise ConnectionError("The snapshot's document was replaced")
-        context_id = document or tab._context_unique_id
+        if route is not None and tab._route_id != route:
+            raise ConnectionError("The snapshot's route changed")
+        context_id = document
         # Check and mutation share ONE evaluation. Never reconnect/replay a mutation.
         return tab.eval_js_once(
             "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) "
             "throw Error('Snapshot tab is not foreground'); return (" + expression + ");})()", timeout,
             context_id=context_id)
 
-    def foreground(self, target: str, document: str) -> bool:
+    def foreground(self, target: str, document: str, route: int | None = None) -> bool:
         with self._lock:
             tab = self._tabs.get(target)
-        return bool(tab and tab.is_connected and tab._context_unique_id == document and tab.eval_js(
-            "document.visibilityState === 'visible' && document.hasFocus()", timeout=.5))
+        return bool(tab and tab.is_connected and tab._context_unique_id == document
+                    and (route is None or tab._route_id == route) and tab.eval_js(
+                        "document.visibilityState === 'visible' && document.hasFocus()", timeout=.5))
+
+    def _display_pending(self, tab: CdpSession) -> None:
+        event = tab.session_event
+        if (not event or not tab.is_connected or event is getattr(tab, "_displayed_event", None)
+                or event.get("browser_document") != tab._context_unique_id):
+            return
+        try:
+            delivered = tab.eval_js_once(
+                "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
+                "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");return true})()",
+                timeout=1., context_id=event["browser_document"])
+            if delivered:
+                tab._displayed_event = event
+        except Exception:
+            logger.debug("Answer display unavailable", exc_info=True)
 
     def display(self, event: dict) -> None:
-        self._event = dict(event)
+        # No default recipient. Conversation content belongs to its captured tab/document.
         with self._lock:
-            tabs = list(self._tabs.values())
-        for tab in tabs:
-            tab.session_event = self._event
-            if not tab.is_connected:
-                continue
-            try:
-                tab.eval_js("window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");true", timeout=1.)
-            except Exception:
-                logger.debug("Answer display unavailable", exc_info=True)
+            tab = self._tabs.get(event.get("browser_target"))
+        if tab is not None:
+            tab.session_event = dict(event)
+            self._display_pending(tab)
 
     def push_overlay_config(self) -> None:
         with self._lock:
