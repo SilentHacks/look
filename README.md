@@ -44,6 +44,7 @@ activates a current control. Risky labels/classes, destructive utterances and fo
 submissions require a trusted primary mouse click on the Chrome confirmation
 card. Synthetic clicks, spoken/tool confirmation, stale epochs and changed targets
 cannot approve it. Safe-looking controls execute immediately.
+Chrome displays confirmation execution, cancellation and failure outcomes.
 
 The action policy is demo-oriented and lexical, not a general website safety
 guarantee; disguised controls can evade classification. Privileged CDP/OS clients
@@ -78,8 +79,9 @@ Restart Hermes after changing plugin configuration. Run `/gaze` or `/gaze connec
 in the TUI/desktop conversation that should receive speech, then `/gaze demo`.
 Hold Space in Chrome, speak and release. Only your words become a normal user
 message; the matching session hook attaches frozen page context. The answer
-streams into Hermes and Chrome, with a final-response backstop. Spoken or typed
-followups use the same conversation. `/gaze disconnect` revokes pending and active
+streams into Hermes and Chrome, with a final-response backstop.
+Refreshing cursor evidence through a tool does not interrupt that turn's answer stream.
+Spoken or typed followups use the same conversation. `/gaze disconnect` revokes pending and active
 action ownership; it does not cancel a Hermes turn already accepted by the host.
 
 The HUD shows listening, transcribing, queued, thinking and completion/error

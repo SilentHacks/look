@@ -81,6 +81,9 @@ const context = vm.createContext({ document, NodeFilter: { SHOW_ELEMENT: 1, SHOW
 const start = source.indexOf('  const cursorIds =');
 const end = source.indexOf('  function updateLiveInspector', start);
 vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent };', context);
+const replyStart = source.indexOf('  function onIntentResult');
+const replyEnd = source.indexOf('  function formatRoleDisplayName', replyStart);
+vm.runInContext(source.slice(replyStart, replyEnd) + '\nthis.onIntentResult = onIntentResult;', context);
 const api = context.collect;
 assert.equal(api.safeText(section), 'Visible content');
 assert.equal(api.safeText(payment), '[redacted]');
@@ -289,4 +292,34 @@ test('final response replaces a turn-end partial completion', () => {
   api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
     status: 'thinking', text: 'late partial' });
   assert.equal(hudReply.textContent, 'complete final response');
+});
+
+test('refreshing cursor evidence does not end the owning answer stream', () => {
+  api.onSessionEvent({ sequence: 2, request_id: 'refreshing-turn', resolution_id: 10,
+    status: 'thinking', text: 'before refresh' });
+  const refreshed = api.captureCursorContext();
+  assert.equal(api.activateSnapshot(refreshed.snapshot_id, 11).ok, true);
+  api.onSessionEvent({ sequence: 2, request_id: 'refreshing-turn', resolution_id: 10,
+    status: 'thinking', text: 'after refresh' });
+  assert.equal(hudReply.textContent, 'after refresh');
+  api.onSessionEvent({ sequence: 2, request_id: 'refreshing-turn', resolution_id: 10,
+    status: 'complete', text: 'refreshed final answer' });
+  api.onSessionEvent({ sequence: 99, request_id: 'obsolete-turn', resolution_id: 9,
+    status: 'complete', text: 'obsolete answer' });
+  assert.equal(hudReply.textContent, 'refreshed final answer');
+});
+
+test('confirmation replies display outcomes without overwriting newer evidence', () => {
+  const resolution_id = context.state.resolutionId;
+  for (const [result, outcome] of [
+    [{ ok: true, executed: true }, 'executed'],
+    [{ ok: true, cancelled: true }, 'cancelled'],
+    [{ ok: false, error: 'Target became disabled' }, 'failed'],
+    [{ ok: false, executed: null, outcome: 'unknown', error: 'Click outcome unknown' }, 'unknown outcome'],
+  ]) {
+    context.onIntentResult({ type: 'confirm_action', resolution_id, ...result });
+    assert.equal(lockLabel.textContent, outcome);
+  }
+  context.onIntentResult({ type: 'confirm_action', resolution_id: resolution_id - 1, ok: true, executed: true });
+  assert.equal(lockLabel.textContent, 'unknown outcome');
 });

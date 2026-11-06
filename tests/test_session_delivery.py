@@ -101,6 +101,25 @@ class TestSessionDelivery(unittest.TestCase):
         self.assertEqual(self.session.resolution_id, epoch)
         self.assertIsNone(self.session.last_hover_snapshot)
 
+    def test_connected_simulated_turn_preserves_the_lens_choice(self):
+        self.session.configure(mode="simulated")
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session", platform="tui")
+        self.addCleanup(turns.close)
+        pushed = {"pointer": {"x_vp": 30, "y_vp": 30}, "fixations": [],
+                  "candidates": [{"id": "purge", "tag": "button", "role": "button",
+                                  "label": "Purge Cache", "selector": "#purge",
+                                  "rect_vp": [10, 10, 100, 40], "is_interactive": True,
+                                  "is_destructive": True, "is_direct_hit": True}],
+                  "page_url": "https://demo.invalid/"}
+        resolve = service.resolve_now
+        with mock.patch.object(service, "resolve_now",
+                               side_effect=lambda session, **kwargs: resolve(session, pushed=pushed, **kwargs)):
+            turns.pre(session_id="session", turn_id="simulated", user_message="Purge this cache")
+        choice = self.session.choose(resolution_id=turns.active["resolution_id"], execute=False)
+        self.assertTrue(choice["ok"], choice)
+        self.assertEqual(choice["selected"]["id"], "purge")
+
 
 
 if __name__ == "__main__":

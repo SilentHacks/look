@@ -1051,7 +1051,8 @@
     if (destroyed || !event || !Number.isSafeInteger(event.sequence)) return;
     const resolution = Number.isSafeInteger(event.resolution_id) ? event.resolution_id : 0;
     const newTurn = resolution > sessionResolution;
-    if (resolution && (resolution < latestResolution || resolution < sessionResolution)) return;
+    const ownsAnswer = event.sequence === sessionSequence && event.request_id === sessionRequest;
+    if (resolution && (resolution < sessionResolution || (resolution < latestResolution && !ownsAnswer))) return;
     if (!newTurn && event.sequence < sessionSequence) return;
     // Turn-end may complete with partial text before the full final-response hook.
     if (!newTurn && event.sequence === sessionSequence &&
@@ -1290,6 +1291,15 @@
       }
     }
     if (!msg || typeof msg !== "object") return;
+
+    if (msg.type === "confirm_action") {
+      if (msg.resolution_id !== state.resolutionId) return;
+      const outcome = msg.outcome === "unknown" ? "unknown outcome" : !msg.ok ? "failed" :
+        msg.cancelled ? "cancelled" : msg.executed ? "executed" : "not executed";
+      lockLabel.textContent = outcome;
+      showPlainMessage(msg.error || `Action ${outcome}.`);
+      return;
+    }
 
     if (msg.type === "transcribe") {
       const pendingTimer = _transcribeTimers.get(msg.id);

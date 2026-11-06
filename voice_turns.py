@@ -180,7 +180,10 @@ class VoiceTurns:
             snapshot = run["snapshot"]
             snapshot["utterance"] = user_message
             try:
-                run["resolution_id"] = self.session.store_hover_snapshot(snapshot)
+                if snapshot.get("mode") == "simulated":
+                    run["resolution_id"] = self.session.resolution_id
+                else:
+                    run["resolution_id"] = self.session.store_hover_snapshot(snapshot)
             except Exception as exc:
                 logger.debug("Cursor evidence activation failed", exc_info=True)
                 run["finished"] = True
