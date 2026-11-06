@@ -28,19 +28,28 @@ Raw gaze/pointer tracking suffers from ~80â€“180 px of spatial jitter and driftâ
 
 Hover supplies evidence, not a preselected subject. The model sees the pointed
 cell, row/column/table/panel handles, surrounding structural text and separate
-controls. Small demo tables include all five rows and six columns; larger tables
-prioritize pointed rows, headers and omission counts. System guidance is registered
+controls. Tables prioritize pointed rows and headers, then up to eleven neighbours
+(visible rows first, nearest rows next), with explicit omission counts. System guidance is registered
 separately from per-turn `<browser_context>` evidence, which labels the user's
 question and pointer age. The complete escaped envelope, including its
 `Resolution` epoch, is at most 6000 characters. New guidance requires a new session.
 
 Hovering inside a card also captures its enclosing item and nearest local peer
-collection. Semantic items and headed flex/grid children supply separate member
-facts, viewport rectangles and exact-node handles; the hovered leaf stays the
-only pointer hit. Group headings/notes exclude member text. Hidden variants and
-editable values are excluded; rendered offscreen peers are explicitly labelled.
-This is bounded DOM/layout evidence, not full visual scene understanding:
-unrelated portals and canvas content need another capture strategy.
+collection. Semantic items, headed flex/grid children and repeated linked blocks
+supply separate member facts, viewport rectangles and exact-node handles; the
+hovered leaf stays the only pointer hit. Group headings/notes exclude member text.
+Hidden variants and editable values are excluded; rendered offscreen peers are
+explicitly labelled. Pointer hits descend through open shadow roots, preserving
+root-local sensitive-label exclusions.
+
+Frames (including same-origin frames), closed components and canvas contents are
+not traversed. Frame hits explicitly say that the page underneath is covered and
+the frame content was not read; they never substitute the hidden page's content.
+Dialogs and wide fixed/sticky surfaces are labelled as potentially covering the
+page, not classified as consent by their wording. Dismissing an overlay restores
+normal pointer capture; the companion never dismisses it automatically. Occluded
+controls are excluded. This is bounded DOM/layout evidence, not full visual scene
+understanding; unrelated portal siblings are not inferred as peers.
 
 Typed questions use the latest real Chrome target and its age. Voice evidence
 freezes at recording stop before ASR; real word timestamps select preceding
