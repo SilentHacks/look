@@ -14,7 +14,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `__init__.py` | Thin registration of six tools, context/stream/final/turn-end hooks, `/gaze` session connection, CLI and skill. |
 | `tools.py` | Schemas/thin handlers for `gaze_resolve`, simulated-only `gaze_choose`, snapshot `gaze_highlight`, guarded `gaze_click`, calibration and benchmark. |
 | `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
-| `voice_turns.py` | `VoiceTurns`: host session binding, exact text/session FIFO matching, frozen contexts, turn-owned answer streaming and final backstop. |
+| `voice_turns.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen item evidence, exact request/session/turn matching and versioned UI state. |
 | `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
 | `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process, ~65ms) → `parakeet-mlx` (~180ms) → `faster-whisper` (the only backend on Linux). `record_microphone`, `MAX_AUDIO_BYTES`. |
@@ -99,11 +99,11 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Fresh hover evidence highlights its available pointer handles automatically.
   After an answer, one bounded `ctx.llm` call selects the evidenced answer scope;
   saved snapshot identity, current epoch and captured handles are checked again
-  before highlighting. No protocol markers enter the answer or transcript.
-  `gaze_highlight` remains for explicit/manual scope changes. Followups without
-  fresh evidence attach nothing and preserve the epoch and pending confirmations.
-  Live identity/fingerprint and single-use approval checks still apply. Read-only
-  one-shot turns may highlight but cannot click or confirm actions.
+  before highlighting. No highlight protocol markers enter the answer or transcript.
+  `gaze_highlight` remains for explicit/manual scope changes. Inbox research is
+  read-only, including recalled items and follow-ups; clicks require fresh manual
+  pointing. A new capture revokes pending approval immediately.
+  Live identity/fingerprint and single-use approval checks still apply.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
   associated labels. Capture history/evidence at recording stop, before ASR.
@@ -122,17 +122,38 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   text in the new HUD paths; it cannot supply confirmation markup.
 - **Never replay mutations.** `eval_js_once` is mandatory for click commands.
   Lost replies mean unknown outcome, not \"not executed\"; revoke that snapshot.
-- **Voice ownership includes session, exact utterance and turn.** Reasoning and
-  foreign/late deltas never reach Chrome. Disconnect revokes active actions.
-  `on_session_end` is a per-turn event, not a chat disconnect.
+- **Voice ownership includes item, request, session, exact wire text and turn.**
+  `VoiceTurns` owns an in-memory inbox and at most eight waiting requests. Reserve
+  capture order at recording stop, before ASR; inject only the FIFO head, and only
+  after the previous `on_session_end` (not `post_llm_call`). Busy host injection
+  merges questions, so each attempt has a unique item/request label matched exactly
+  in `pre_llm_call`. Failures/interruption/disconnect retain partial answers and
+  pause admission. Disconnect must not release host admission ownership:
+  reconnect/Retry/Resume still wait for the actual terminal hook; the host can
+  remain busy while unbound. Retry adds a new answer attempt (or retries saved in-memory ASR),
+  Skip discards the failed attempt, Resume continues waiting work. ASR releases the
+  intent worker so another recording can start; its bytes stay only in memory
+  through transcription/retry. Reasoning and foreign/late deltas never reach Chrome.
+  Recovery commands identify the failed request, not merely its item: an item may
+  already have newer queued follow-ups. ASR finalizes the item's label/evidence;
+  dependent follow-ups copy that finalized evidence only when admitted.
+  Follow-ups explicitly identify a saved item and wait in the same queue. The
+  previous item means capture order, never completion order. Rebuild saved evidence
+  and conversation inside one fenced 6000-character packet; never slice packets.
+  Reserve pointed facts and bounded per-cell row facts from both saved items before
+  optional headers, conversation and surroundings can exhaust the shared budget.
 - **Focus changes do not retarget evidence or discard answers.** Each captured
   snapshot retains its source Chrome target and unique CDP execution context;
   mutations use `uniqueContextId` (numeric context IDs can be reused), require
   foreground focus and still check captured identities/epoch. In-page route events
   alone do not invalidate identities: live detached/fingerprint checks do.
   `pagehide` revokes browser snapshots but not answer streaming. The companion
-  caches the latest session event in Python and restores it after full navigation;
-  it is a single shared latest reply, not a conversation-history implementation.
+  caches the latest full inbox event in Python and restores it after full navigation.
+  Inbox events (`type: inbox`, `version: 1`) replace UI state by increasing `revision`:
+  connection/capture state/paused/selected item plus items with capture order, target/source,
+  unread and expired action state, and request conversations with question, text,
+  status/error/queue position. No DOM identities appear in this UI interface.
+  Completion marks unread but never changes selection or announces an answer.
   Post-answer scope selection uses the same foreground/source-document guard as
   other snapshot operations. A background source keeps its existing pointer
   highlight; it cannot transfer that highlight to the newly focused tab.

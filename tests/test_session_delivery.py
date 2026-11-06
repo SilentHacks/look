@@ -69,8 +69,6 @@ class TestSessionDelivery(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["delivery"], "session")
         self.assertIn("record_error", result)
-        self.assertEqual(messages, ["Summarize this table"])
-        self.assertEqual(len(turns.pending), 1)
 
     def test_replay_requires_explicit_development_setting(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -88,7 +86,7 @@ class TestSessionDelivery(unittest.TestCase):
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
         turns.bind(session_key="route", session_id="session", platform="tui")
         self.addCleanup(turns.close)
-        for index in range(turns.MAX_PENDING):
+        for index in range(turns.MAX_PENDING + 1):
             self.assertTrue(turns.submit(f"queued {index}", self.snapshot("Explain this"))["ok"])
         epoch = self.session.resolution_id
         client = mock.Mock()
@@ -110,16 +108,14 @@ class TestSessionDelivery(unittest.TestCase):
             delivered = service.submit_snapshot({"ok": False, "utterance": "Hello there",
                                                  "context": "unavailable target", "error": "No target"})
             self.assertTrue(delivered["ok"])
-            self.assertIsNone(turns.pre(session_id="session", turn_id="plain", user_message="Hello there"))
-            self.assertEqual(messages, ["Hello there"])
+            self.assertIsNone(turns.pre(session_id="session", turn_id="plain", user_message=messages[0]))
             self.assertEqual(self.session.resolution_id, epoch)
             self.assertIsNone(self.session.last_hover_snapshot)
             refused = service.submit_snapshot({"ok": False, "utterance": "Explain this", "context": "",
                                                "error": "No target"})
             self.assertFalse(refused["ok"])
-            self.assertEqual(messages, ["Hello there"])
 
-    def test_followup_keeps_epoch_and_single_use_confirmation_without_reinjecting(self):
+    def test_inbox_research_cannot_click_and_new_capture_revokes_confirmation(self):
         from hermes_gaze.resolver.cursor_context import build_context
         from tests.test_snapshot_actions import BrowserActions
 
@@ -134,20 +130,35 @@ class TestSessionDelivery(unittest.TestCase):
                     "handles": {h: {"label": n["label"]} for h, n in browser.nodes.items()},
                     "context": build_context(["control @purge: Purge cache"], "Purge this cache", "button Purge cache")}
         turns.submit("Purge this cache", snapshot)
-        turns.pre(session_id="session", turn_id="first", user_message="Purge this cache")
+        turns.pre(session_id="session", turn_id="first", user_message=turns.active["wire"])
         epoch = self.session.resolution_id
-        saved = self.session.last_hover_snapshot
         self.assertEqual(browser.highlights, [["@purge"]])
-        self.assertTrue(self.session.actions.click("@purge", epoch)["confirmation_required"])
-        pending = dict(browser.pending)
-        turns.post(session_id="session", turn_id="first", assistant_response="Confirm in Chrome.")
-        self.assertIsNone(turns.pre(session_id="session", turn_id="followup", user_message="What is ROAS?"))
-        self.assertEqual(self.session.resolution_id, epoch)
-        self.assertIs(self.session.last_hover_snapshot, saved)
+        self.assertFalse(self.session.actions.click("@purge", epoch)["ok"])
+        # Fresh manual pointing remains the action path; an inbox capture revokes its approval.
+        self.session.store_hover_snapshot(snapshot)
+        epoch = self.session.resolution_id
+        pending = self.session.actions.click("@purge", epoch)
+        self.assertTrue(pending["confirmation_required"])
+        approval = browser.pending["action_id"]
+        turns.submit("Another question", self.snapshot("Explain this"))
+        self.assertFalse(self.session.actions.confirm(approval, epoch, True)["ok"])
         self.assertEqual(browser.executed, [])
-        self.assertTrue(self.session.actions.confirm(pending["action_id"], epoch, True)["executed"])
-        self.assertFalse(self.session.actions.confirm(pending["action_id"], epoch, True)["ok"])
-        self.assertEqual(browser.executed, ["@purge"])
+
+    def test_connected_typed_deictic_highlights_fresh_evidence_before_answer(self):
+        from tests.test_snapshot_actions import BrowserActions
+        browser = BrowserActions()
+        self.addCleanup(setattr, self.session, "_cdp", self.session._cdp)
+        self.session._cdp = browser
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+        saved = self.snapshot("Explain this")
+        saved.update(snapshot_id="snapshot-1", pointed=[{"id": "@purge", "available": True}],
+                     handles={"@purge": {"label": "Purge"}})
+        with mock.patch.object(service, "resolve_now", return_value=saved):
+            context = turns.pre(session_id="session", turn_id="typed", user_message="Explain this")
+        self.assertEqual(browser.highlights, [["@purge"]])
+        self.assertEqual(context["context"], self.session.last_hover_snapshot["context"])
 
     def test_connected_simulated_turn_preserves_the_lens_choice(self):
         self.session.configure(mode="simulated")
@@ -164,9 +175,45 @@ class TestSessionDelivery(unittest.TestCase):
         with mock.patch.object(service, "resolve_now",
                                side_effect=lambda session, **kwargs: resolve(session, pushed=pushed, **kwargs)):
             turns.pre(session_id="session", turn_id="simulated", user_message="Purge this cache")
-        choice = self.session.choose(resolution_id=turns.active["resolution_id"], execute=False)
+        choice = self.session.choose(resolution_id=self.session.resolution_id, execute=False)
         self.assertTrue(choice["ok"], choice)
         self.assertEqual(choice["selected"]["id"], "purge")
+
+    def test_slow_transcription_releases_intents_and_preserves_capture_order(self):
+        import threading
+        from hermes_gaze import voice
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        replies = []
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+        def transcribe(*args, **kwargs):
+            entered.set()
+            if not release.wait(3):
+                raise TimeoutError("test ASR release")
+            return "What is this?", []
+        def reply(result):
+            replies.append(result)
+            if len(replies) == 2:
+                finished.set()
+        intent = {"type": "record_stop", "nonce": self.session._intent_nonce,
+                  "_browser_target": "source", "_browser_document": "document",
+                  "cursor_context": capture()}
+        with mock.patch.object(service, "_VOICE_TURNS", turns), \
+                mock.patch.object(self.session.microphone, "stop", return_value=(b"audio", 100.)), \
+                mock.patch.object(voice, "transcribe_audio_buffer", side_effect=transcribe):
+            try:
+                service.handle_intent(intent, reply)
+                self.assertTrue(entered.wait(1))
+                service.handle_intent({**intent, "cursor_context": capture()}, reply)
+                self.assertEqual([r["status"] for r in turns.pending], ["transcribing", "transcribing"])
+                self.assertEqual(replies, [])
+            finally:
+                release.set()
+                self.assertTrue(finished.wait(3))
+        self.assertTrue(all(r["ok"] for r in replies))
+        self.assertEqual(turns.active["snapshot"]["browser_target"], "source")
+        self.assertEqual(turns.pending[0]["snapshot"]["browser_document"], "document")
 
 
 

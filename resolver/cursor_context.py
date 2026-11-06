@@ -212,6 +212,8 @@ def cursor_result(capture, utterance, words=None, now=None):
     # Reserve space for every pointed row/header before spending it on surrounding text.
     required = sum(bool(b.get("headers")) + bool(b.get("columns")) + len(rows) for b, rows, _ in tables)
     kept = {}
+    row_facts = []
+    essential = []
     for block, rows, _ in tables:
         add(f"{block.get('id')} table {str(block.get('label', ''))[:80]} total_rows={block.get('total_rows', 0)}")
         if block.get("collection_limited"):
@@ -232,16 +234,26 @@ def cursor_result(capture, utterance, words=None, now=None):
                 col = cell.get("column", 0)
                 if cell.get("block") == block["id"] and cell.get("row") == row.get("index") and 0 < col <= len(cells):
                     cells[col - 1] = f"«{cells[col - 1]}»"
+            for index, value in enumerate(cells, 1):
+                headers = block.get("headers") or []
+                header = str(headers[index - 1])[:40] if index <= len(headers) else str(index)
+                text = str(value)
+                bounded = text[:80] + ("… [truncated]" if len(text) > 80 else "")
+                row_facts.append(f"row {row.get('index')} col {index} {header}: {bounded}")
             kept[block["id"]] += bool(add_values(f"row {row.get('index')} {row.get('id', '')}: ", cells,
                                                 min(1800, max(0, remaining() - 200) // max(1, required))))
             required -= 1
     for target in selected:
-        add(f"POINTED {target.get('id')} {str(target.get('role', ''))[:40]} {str(target.get('label', ''))[:100]}")
+        fact = f"POINTED {target.get('id')} {str(target.get('role', ''))[:40]} {str(target.get('label', ''))[:100]}"
+        essential.append(fact)
+        add(fact)
         if target.get("cell"):
             cell = target["cell"]
-            add(f"pointed cell value {str(cell.get('value', ''))[:120]}; "
-                f"header {str(cell.get('header', ''))[:80]}; row {cell.get('row')}; "
-                f"column {cell.get('column')}; table {cell.get('block')}")
+            fact = (f"pointed cell value {str(cell.get('value', ''))[:120]}; "
+                    f"header {str(cell.get('header', ''))[:80]}; row {cell.get('row')}; "
+                    f"column {cell.get('column')}; table {cell.get('block')}")
+            essential.append(fact)
+            add(fact)
     # Pointed facts and destinations precede peers, even on link-heavy pages.
     for target in selected:
         add_urls(target)
@@ -250,6 +262,7 @@ def cursor_result(capture, utterance, words=None, now=None):
                 for member in block.get("members", [])[:64]:
                     if member.get("id") == target.get("group_item_id"):
                         add(f"pointed item {member.get('id')}: {str(member.get('text', ''))[:300]}")
+                        essential.append(f"pointed item {member.get('id')}: {str(member.get('text', ''))[:300]}")
                         add_urls(member)
             elif block.get("kind") == "table":
                 for row in block.get("rows", [])[:64]:
@@ -307,11 +320,14 @@ def cursor_result(capture, utterance, words=None, now=None):
         if block.get("kind") not in ("table", "group"):
             add(f"{block.get('id')} {block.get('kind')} {str(block.get('label', ''))[:80]}")
         if block.get("text"):
+            essential.append(str(block["text"])[:650])
             add(f"bounded text (max {block.get('text_limit', 650)} chars): " + str(block["text"])[:650])
     lines.append(f"omitted evidence blocks/lines: {omitted}")
     context = build_context(lines, utterance, pointer_evidence)
     return {"ok": bool(selected), **({"error": "No available cursor target for the requested time"} if not selected else {}),
             "mode": "hover", "pointed": pointed, "context": context,
+            "page_lines": lines, "pointer_evidence": pointer_evidence,
+            "essential_lines": essential + row_facts,
             "snapshot_id": capture.get("snapshot_id"),
             "handles": {key: dict(value) for key, value in list(capture.get("handles", {}).items())[:8192]
                         if isinstance(key, str) and isinstance(value, dict)},

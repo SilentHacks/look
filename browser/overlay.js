@@ -497,10 +497,8 @@
   let activeSnapshot = null;
   let destroyed = false;
   let confirmation = null;
-  let sessionSequence = -1;
-  let sessionRequest = null;
-  let sessionFinished = false;
-  let sessionResolution = 0;
+  let inbox = null;
+  let inboxRevision = -1;
   const fingerprints = new WeakMap();
   let fingerprintSerial = 0;
   function actionFacts(el) {
@@ -978,29 +976,46 @@
     hudReply.style.whiteSpace = "pre-wrap";
     hudReply.textContent = String(text);
   }
-  function onSessionEvent(event) {
-    if (destroyed || !event || !Number.isSafeInteger(event.sequence)) return;
-    const resolution = Number.isSafeInteger(event.resolution_id) ? event.resolution_id : 0;
-    const newTurn = resolution > sessionResolution;
-    const ownsAnswer = event.sequence === sessionSequence && event.request_id === sessionRequest;
-    if (resolution && (resolution < sessionResolution || (resolution < latestResolution && !ownsAnswer))) return;
-    if (!newTurn && event.sequence < sessionSequence) return;
-    // Turn-end may complete with partial text before the full final-response hook.
-    if (!newTurn && event.sequence === sessionSequence &&
-        (event.request_id !== sessionRequest || (sessionFinished && event.status !== "complete"))) return;
-    if (!resolution && event.status === "queued" && sessionSequence >= 0 && !sessionFinished) return;
-    if (newTurn || event.sequence > sessionSequence) {
-      sessionResolution = resolution || sessionResolution;
-      sessionSequence = event.sequence;
-      sessionRequest = event.request_id;
-      sessionFinished = false;
+  function renderInbox(event) {
+    if (event.revision <= inboxRevision) return;
+    inboxRevision = event.revision;
+    inbox = event;
+    if (event.session_connected === false) cancelListening();
+    tuckSummary.textContent = `${event.session_connected ? "INBOX" : "DISCONNECTED"} · ${event.items.filter(i => i.unread).length} unread`;
+    lockLabel.textContent = event.session_connected === false ? "Disconnected · /gaze connect to resume" :
+      event.capture_state === "recording" ? "Listening…" :
+      event.paused ? "Queue paused" : "Questions answered in order";
+    hudReply.style.display = "block";
+    hudReply.style.whiteSpace = "pre-wrap";
+    hudReply.replaceChildren();
+    const button = (label, action, itemId = "", requestId = "") => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.style.display = "block";
+      b.textContent = label;
+      b.addEventListener("click", () => _emit({ type: "inbox", action, item_id: itemId, request_id: requestId }));
+      hudReply.appendChild(b);
+    };
+    button("New question at pointer", "new");
+    if (event.paused) button("Resume", "resume");
+    for (const item of event.items) {
+      const last = item.conversation.at(-1);
+      button(`${item.item_id === event.selected_item_id ? "Selected · " : ""}${item.unread ? "● " : ""}#${item.capture_order} ${item.target_label} · ${last?.status || "captured"}${last?.queue_position ? ` · waiting ${last.queue_position}` : ""}`, "select", item.item_id);
+      if (item.item_id !== event.selected_item_id) continue;
+      const detail = document.createElement("div");
+      detail.textContent = `${item.source_url}\n${item.action_state}\n` + item.conversation.map(m =>
+        `Q: ${m.utterance || "(transcribing)"}\n${m.status}${m.queue_position ? ` · queue ${m.queue_position}` : ""}\n${m.text}${m.error ? `\n${m.error}` : ""}`).join("\n\n");
+      hudReply.appendChild(detail);
+      for (const message of item.conversation) {
+        if (!["failed", "interrupted"].includes(message.status)) continue;
+        button("Retry", "retry", item.item_id, message.request_id);
+        button("Skip", "skip", item.item_id, message.request_id);
+      }
     }
-    lockLabel.textContent = String(event.status || "thinking");
-    tuckSummary.textContent = event.session_connected === false ? "SESSION DISCONNECTED" : "HERMES SESSION";
-    if (event.text !== undefined) showPlainMessage(event.text);
-    if (event.error) showPlainMessage(event.error);
-    if (["complete", "error", "disconnected"].includes(event.status) || event.session_connected === false)
-      sessionFinished = true;
+    hudInput.placeholder = event.selected_item_id ? "Follow up on selected item…" : DEFAULT_PLACEHOLDER;
+  }
+  function onSessionEvent(event) {
+    if (!destroyed && event?.type === "inbox") renderInbox(event);
   }
   function onNavigation() {
     activeSnapshot = null;
@@ -1134,6 +1149,9 @@
   function emitResolve(utterance, words, captured) {
     const text = (utterance || "").trim();
     if (!text) return false;
+    if (inbox?.selected_item_id) {
+      return _emit({ type: "followup", item_id: inbox.selected_item_id, utterance: text });
+    }
     state.scopePending = false;
     state.scopes = [];
     const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
@@ -1196,6 +1214,10 @@
       }
     }
     if (!msg || typeof msg !== "object") return;
+    if (msg.type === "inbox" || msg.type === "followup") {
+      if (!msg.ok) lockLabel.textContent = String(msg.error || "Inbox request failed.");
+      return;
+    }
 
     if (msg.type === "record_start") {
       if (!msg.ok) {
@@ -1209,8 +1231,7 @@
       return;
     }
     if (msg.type === "record_stop") {
-      resetMicUiIdle(msg.ok ? "queued" : msg.error || "Recording failed.");
-      if (msg.text) hudInput.value = String(msg.text);
+      if (!isListening) resetMicUiIdle(msg.ok ? "queued" : msg.error || "Recording failed.");
       return;
     }
     if (msg.type === "confirm_action") {
@@ -1225,12 +1246,10 @@
 
 
     if (msg.type === "submit") {
-      if (msg.id !== _lastSentResolveId) return;
       if (!msg.ok) {
         showPlainMessage(msg.error || "Connect Hermes with /gaze, then retry.");
       } else if (msg.delivery === "session") {
-        if (sessionSequence < 0 || sessionFinished) lockLabel.textContent = "queued";
-        tuckSummary.textContent = "HERMES SESSION";
+        tuckSummary.textContent = "INBOX";
       } else if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         if (msg.mode !== "hover" && Array.isArray(msg.ranked)) renderPins(msg.ranked);
@@ -1353,7 +1372,8 @@
     isListening = false;
     resetMicUiIdle("Transcribing audio locally…");
     // Freeze evidence at release, before transcription and before routing can change it.
-    _emit({ type: "record_stop", cursor_context: captureCursorContext() });
+    _emit({ type: "record_stop", cursor_context: captureCursorContext(),
+      item_id: inbox?.selected_item_id || "" });
   }
 
   function cancelListening() {

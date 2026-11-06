@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence
 
 _RECORD_LOCK = threading.Lock()
+_TRANSCRIBE_LOCK = threading.Lock()
 
 from .browser.cdp_bridge import GazeSession, get_shared_session
 from .config import GazeConfig
@@ -424,6 +425,21 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
         return
     itype = str(intent.get("type") or "")
     try:
+        if itype == "inbox":
+            if _VOICE_TURNS is None:
+                reply({"ok": False, "error": "No connected inbox"})
+            else:
+                reply(_VOICE_TURNS.control(str(intent.get("action") or ""),
+                                           str(intent.get("item_id") or ""),
+                                           str(intent.get("request_id") or "")))
+            return
+        if itype == "followup":
+            if _VOICE_TURNS is None or not intent.get("item_id"):
+                reply({"ok": False, "error": "No connected inbox"})
+            else:
+                reply(_VOICE_TURNS.submit(str(intent.get("utterance") or ""), {},
+                                          str(intent.get("item_id") or "")))
+            return
         if itype in ("record_start", "record_stop", "record_cancel"):
             from . import voice as _voice
 
@@ -434,23 +450,58 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             owner = f"{target}:{document}"
             if itype == "record_start":
-                reply(session.microphone.start(owner, lambda: session.cdp.foreground(target, document)))
+                result = session.microphone.start(owner, lambda: session.cdp.foreground(target, document))
+                if _VOICE_TURNS is not None:
+                    _VOICE_TURNS.capture_status("recording" if result.get("ok") else "failed")
+                reply(result)
             elif itype == "record_cancel":
                 session.microphone.cancel(owner)
+                if _VOICE_TURNS is not None:
+                    _VOICE_TURNS.capture_status("idle")
                 reply({"ok": True, "cancelled": True})
             else:
                 audio, epoch = session.microphone.stop(owner)
+                if _VOICE_TURNS is not None:
+                    _VOICE_TURNS.capture_status("idle")
                 capture = intent.get("cursor_context")
                 if not isinstance(capture, dict):
                     reply({"ok": False, "error": "Recording has no cursor capture"})
                     return
                 capture["browser_target"] = target
                 capture["browser_document"] = document
-                text, words = _voice.transcribe_audio_buffer(
-                    audio, model_name=_whisper_model_name(), audio_epoch=epoch)
-                snapshot = resolve_now(session, utterance=text, words=words,
-                                       pushed={"cursor_context": capture}, activate=False)
-                reply({**submit_snapshot(snapshot), "text": text})
+                # Reserve capture order before ASR, including a visible transcription state.
+                reservation = None
+                turns = _VOICE_TURNS
+                if turns is not None and turns.connected:
+                    initial = resolve_now(session, utterance="Captured question", words=None,
+                                          pushed={"cursor_context": capture}, activate=False)
+                    reservation = turns.capture(initial, transcribing=True,
+                                                item_id=str(intent.get("item_id") or ""))
+                    if not reservation["ok"]:
+                        reply(reservation)
+                        return
+                def finish_recording():
+                    try:
+                        # Release the ordered intent worker so the next talk can open
+                        # while ASR runs. Admission is bounded by the inbox's eight slots.
+                        with _TRANSCRIBE_LOCK:
+                            text, words = _voice.transcribe_audio_buffer(
+                                audio, model_name=_whisper_model_name(), audio_epoch=epoch)
+                        snapshot = resolve_now(session, utterance=text, words=words,
+                                               pushed={"cursor_context": capture}, activate=False)
+                        if reservation:
+                            result = turns.transcribed(reservation["request_id"], text, snapshot)
+                        else:
+                            result = submit_snapshot(snapshot)
+                        reply({**result, "text": text})
+                    except Exception as exc:
+                        if reservation:
+                            turns.transcribed(reservation["request_id"], "", error=str(exc))
+                        reply({"ok": False, "error": str(exc)})
+                if reservation:
+                    turns.start_transcription(reservation["request_id"], finish_recording)
+                else:
+                    finish_recording()
             return
         if itype == "submit":
             capture = intent.get("cursor_context")

@@ -20,6 +20,7 @@ function element(tag, children = [], attrs = {}) {
     },
     setAttribute(name, value) { this.attrs[name] = value; },
     appendChild(child) { this.childNodes.push(child); child.parentElement = this; return child; },
+    replaceChildren(...children) { this.childNodes = []; for (const child of children) this.appendChild(child); },
     remove() { if (this.parentElement) this.parentElement.childNodes = this.parentElement.childNodes.filter(c => c !== this);
       this.isConnected = false; },
     addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); },
@@ -104,6 +105,7 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
   shadow, hudReply, lockLabel, tuckSummary, pinsLayer: element('div'),
+  hudInput: element('input'), DEFAULT_PLACEHOLDER: 'Ask about this…',
   renderPins: candidates => rendered.push(candidates), stopTrackingPins() {},
   _emit: intent => intents.push(intent), cancelListening() {} });
 const start = source.indexOf('  const cursorIds =');
@@ -466,13 +468,30 @@ test('confirmation rejects synthetic clicks, emits once, and expires on capture'
   assert.equal(intents.length, before + 1);
 });
 
-test('session text stays text and late streams cannot replace a newer final', () => {
-  api.onSessionEvent({ sequence: 1, request_id: 'first', resolution_id: 7, status: 'thinking', text: 'old' });
-  api.onSessionEvent({ sequence: 2, request_id: 'second', resolution_id: 7, status: 'complete', text: '<script>page()</script>' });
-  api.onSessionEvent({ sequence: 1, request_id: 'first', resolution_id: 7, status: 'complete', text: 'late old' });
-  api.onSessionEvent({ sequence: 2, request_id: 'second', resolution_id: 7, status: 'thinking', text: 'late partial' });
-  assert.equal(hudReply.textContent, '<script>page()</script>');
-  assert.equal(lockLabel.textContent, 'complete');
+function inboxEvent(revision, answer, selected = 'first') {
+  return { type: 'inbox', revision, session_connected: true, selected_item_id: selected, paused: false,
+    items: [{ item_id: 'first', capture_order: 1, target_label: 'Deal A', source_url: 'https://demo.invalid/a',
+      unread: true, action_state: 'expired', conversation: [{ utterance: 'price?', text: answer, status: 'complete' }] }] };
+}
+test('inbox renders plain text, rejects stale revisions and follows explicit selection only', () => {
+  api.onSessionEvent(inboxEvent(1, '<script>page()</script>'));
+  assert.ok(hudReply.children.some(c => c.textContent.includes('<script>page()</script>')));
+  api.onSessionEvent(inboxEvent(0, 'obsolete'));
+  assert.ok(!hudReply.children.some(c => c.textContent.includes('obsolete')));
+  api.onSessionEvent(inboxEvent(2, 'new answer', ''));
+  assert.ok(!hudReply.children.some(c => c.textContent.includes('new answer')));
+  hudReply.children[1].click();
+  assert.equal(intents.at(-1).action, 'select');
+  assert.equal(intents.at(-1).item_id, 'first');
+});
+test('recovery addresses a failed request even with a newer queued followup', () => {
+  const event = inboxEvent(3, 'partial');
+  event.items[0].conversation[0].status = 'failed';
+  event.items[0].conversation[0].request_id = 'failed-asr';
+  event.items[0].conversation.push({ request_id: 'follow', utterance: 'why?', text: '', status: 'queued' });
+  api.onSessionEvent(event);
+  hudReply.children.find(b => b.textContent === 'Skip').click();
+  assert.equal(intents.at(-1).request_id, 'failed-asr');
 });
 
 test('bounded snapshot retention expires honestly', () => {
@@ -483,42 +502,6 @@ test('bounded snapshot retention expires honestly', () => {
   assert.equal(api.activateSnapshot(current.snapshot_id, 8).ok, true);
 });
 
-test('newly activated epochs win even when a queued request has an older sequence', () => {
-  api.onSessionEvent({ sequence: 0, request_id: 'queued-earlier', resolution_id: 8,
-    status: 'thinking', text: 'new active answer' });
-  api.onSessionEvent({ sequence: 99, request_id: 'old-epoch', resolution_id: 7,
-    status: 'complete', text: 'obsolete' });
-  assert.equal(hudReply.textContent, 'new active answer');
-  api.onSessionEvent({ sequence: 100, request_id: 'queued-future', resolution_id: 0, status: 'queued' });
-  api.onSessionEvent({ sequence: 0, request_id: 'queued-earlier', resolution_id: 8,
-    status: 'complete', text: 'finished active answer' });
-  assert.equal(hudReply.textContent, 'finished active answer');
-});
-
-test('final response replaces a turn-end partial completion', () => {
-  api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
-    status: 'complete', text: 'streamed partial' });
-  api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
-    status: 'complete', text: 'complete final response' });
-  api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
-    status: 'thinking', text: 'late partial' });
-  assert.equal(hudReply.textContent, 'complete final response');
-});
-
-test('refreshing cursor evidence does not end the owning answer stream', () => {
-  api.onSessionEvent({ sequence: 2, request_id: 'refreshing-turn', resolution_id: 10,
-    status: 'thinking', text: 'before refresh' });
-  const refreshed = api.captureCursorContext();
-  assert.equal(api.activateSnapshot(refreshed.snapshot_id, 11).ok, true);
-  api.onSessionEvent({ sequence: 2, request_id: 'refreshing-turn', resolution_id: 10,
-    status: 'thinking', text: 'after refresh' });
-  assert.equal(hudReply.textContent, 'after refresh');
-  api.onSessionEvent({ sequence: 2, request_id: 'refreshing-turn', resolution_id: 10,
-    status: 'complete', text: 'refreshed final answer' });
-  api.onSessionEvent({ sequence: 99, request_id: 'obsolete-turn', resolution_id: 9,
-    status: 'complete', text: 'obsolete answer' });
-  assert.equal(hudReply.textContent, 'refreshed final answer');
-});
 
 test('confirmation replies display outcomes without overwriting newer evidence', () => {
   const resolution_id = context.state.resolutionId;
@@ -541,19 +524,16 @@ test('routing retains live evidence and streams; pagehide revokes evidence, not 
   const snapshot = api.captureCursorContext();
   const handle = snapshot.history.at(-1).id;
   assert.equal(api.activateSnapshot(snapshot.snapshot_id, 12).ok, true);
-  api.onSessionEvent({ sequence: 3, request_id: 'routing', resolution_id: 12,
-    status: 'thinking', text: 'before routing' });
+  api.onSessionEvent(inboxEvent(3, 'before routing'));
   const previousUrl = context.location.href;
   context.location.href = 'https://demo.invalid/next-route#details';
   for (const type of ['hashchange', 'popstate']) context.window.dispatchEvent({ type });
-  api.onSessionEvent({ sequence: 3, request_id: 'routing', resolution_id: 12,
-    status: 'thinking', text: 'after routing' });
-  assert.equal(hudReply.textContent, 'after routing');
+  api.onSessionEvent(inboxEvent(4, 'after routing'));
+  assert.ok(hudReply.children.some(c => c.textContent.includes('after routing')));
   assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, true);
   context.window.dispatchEvent({ type: 'pagehide' });
   assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, false);
-  api.onSessionEvent({ sequence: 3, request_id: 'routing', resolution_id: 12,
-    status: 'thinking', text: 'answer after departure' });
-  assert.equal(hudReply.textContent, 'answer after departure');
+  api.onSessionEvent(inboxEvent(5, 'answer after departure'));
+  assert.ok(hudReply.children.some(c => c.textContent.includes('answer after departure')));
   context.location.href = previousUrl;
 });
