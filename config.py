@@ -22,7 +22,6 @@ class GazeConfig:
     highlight_model: str = "jev-1.14.0"
     highlight_include_page_text: bool = False
     answer_turn_seconds: float = 12.0  # Each unseen answer's turn before the stack moves on or retreats.
-    model_subject_names: bool = True  # Short side call after an answer, only when the queue is idle.
 
     @classmethod
     def from_ctx(cls, ctx: Any) -> "GazeConfig":
@@ -43,5 +42,4 @@ class GazeConfig:
             highlight_model=str(get("highlight_model", cls.highlight_model) or cls.highlight_model),
             highlight_include_page_text=bool(get("highlight_include_page_text", cls.highlight_include_page_text)),
             answer_turn_seconds=float(get("answer_turn_seconds", cls.answer_turn_seconds) or cls.answer_turn_seconds),
-            model_subject_names=bool(get("model_subject_names", cls.model_subject_names)),
         )

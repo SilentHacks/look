@@ -415,8 +415,6 @@ def scenario(flow, tab, rpc, sid, args):
     print(text[:500], flush=True)
     flow.note("markdown answer has no raw markers", "**" not in text and "|---" not in text, text[:120])
     flow.note("markdown table rendered", "<table" in table_html, table_html[:100])
-    # Model-written name arrives only when the queue is idle.
-    flow.until(lambda: any(i["subject"] for i in tab.debug()["items"]), 5)
     # ---------- click-back ----------
     tab.main("window.scrollTo(0,700)")
     time.sleep(.7)

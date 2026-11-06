@@ -26,7 +26,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |
 | `browser/panel.js` | Card stack and capsule renderer in two script-disabled, opaque-origin sandbox iframes. All words and the voice-level bars live here. Trusted events return only through its CDP context. |
 | `browser/markdown.js` | PURE allow-list markdown parser for answers, loaded into the frames and into node tests. No DOM, no HTML passthrough, no images, no hrefs. |
-| `naming.py` | PURE plain-language strings: card names, one-sentence errors, speech text and link validation. |
+| `naming.py`, `answer_title.py` | PURE plain-language names, errors and speech; bounded opening answer-heading extraction. |
 | `microphone.py` | Single-owner native capture; closes on release, cancellation, definite focus/document loss, device error, disconnect or the native 30-second deadline. Chrome checks cannot block the native deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
@@ -94,9 +94,17 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 - **A quick Space tap is the website's.** Under 130ms it is replayed as real trusted
   input over CDP, so media sites keep their behaviour. Holds under 220ms cancel silently.
 - **Everything lit counts.** The capture lists what was lit (`lit`) and the resolver adds
-  those to `pointed`, after any spoken-word anchors. Names use bounded `safeText` only.
-  Model-written names come from a side call only while nothing is queued, so they cannot
-  delay an answer or spend its quota; they pass `model_name` and never enter a turn.
+  those to `pointed`, after any spoken-word anchors.
+  Immediate names use bounded `safeText` only; combined targets use the first short
+  subject and a count. Queued cards keep that fallback until their answer starts.
+  Exact-owned browsing requests ask for an ordinary `## Subject` heading and blank
+  line. Terminal/history retain it; cards and read-aloud use the body. Only the first
+  attempt of the original question can promote the item name, once; Retry and
+  follow-ups never rename it. No naming side call or hosted-title setting exists.
+  A request-owned parser waits at most 500ms from first text and buffers at most
+  96 undecided characters. Invalid, missing or cut headings pass through unchanged
+  and keep the fallback. Final hooks reuse that decision. A title update never
+  selects, reorders, marks unread, announces or speaks.
 - **Inbox `speak` resolves server-owned item/request text, never client-supplied speech.**
   It speaks `speech_text`, no markup characters. macOS `/usr/bin/say` receives text on
   stdin; one cancellable worker owns playback. `auto_speak` is an explicit runtime toggle,
@@ -152,7 +160,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   described scope labels cross that boundary otherwise; identities map locally.
   Failed/disabled/no-key decisions alone use the existing post-answer `ctx.llm`
   selector; successful `none` does not. Saved identity, epoch, foreground document
-  and supersession checks guard application. No protocol tokens enter answers.
+  and supersession checks guard application. No protocol tokens are generated for
+  titles: the ordinary Markdown heading remains readable in terminal/history.
   `gaze_highlight` remains for explicit/manual scope changes. Inbox research is
   read-only, including recalled items and follow-ups; clicks require fresh manual
   pointing. A new capture revokes pending approval immediately.

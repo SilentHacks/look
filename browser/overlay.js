@@ -872,7 +872,7 @@
     if (names.length === 1) name = names[0].short;
     else if (names.length === 2 && names[0].base && names[0].base === names[1].base && names[0].col && names[1].col)
       name = `${humanName(names[0].base, 18)} · ${names[0].col} and ${names[1].col}`;
-    else name = `${names[0].around ? "Around " : ""}${short(names[0])} and ${names.length > 2 ? "others" : short(names[1])}`;
+    else name = `${names[0].around ? "Around " : ""}${short(names[0])} and ${names.length - 1} more`;
     return {name, count: names.length};
   }
 

@@ -60,15 +60,6 @@ def subject_hint(raw: object) -> tuple[str, int]:
     return name[:64], count
 
 
-def model_name(raw: object) -> str:
-    """A model-written name: strict, because it replaces a title without review."""
-    text = str(raw or "").strip().strip("\"'“”.")
-    if not 2 <= len(text) <= MAX_SUBJECT or "\n" in text or _PROTOCOL.search(text):
-        return ""
-    if re.search(r"[*_`#|<>\[\]{}\\/:]", text) or len(text.split()) > 5:
-        return ""
-    return text
-
 
 def plain_error(status: str, error: str) -> str:
     """One plain sentence for the card. Raw provider and host text stays out of the UI."""

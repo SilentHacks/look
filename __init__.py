@@ -102,7 +102,6 @@ def register(ctx: Any) -> None:
     from .voice_turns import VoiceTurns
 
     turns = VoiceTurns(ctx, session)
-    turns.model_names = cfg.model_subject_names
     service.set_voice_turns(turns)
     answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -117,7 +116,9 @@ def register(ctx: Any) -> None:
                 early = turns.active["snapshot"].get("early_highlight")
                 if early and result:
                     snapshot = early.snapshot
-            if result and snapshot and (snapshot.get("early_highlight") or result.get("context") == snapshot.get("context")):
+            if result and snapshot and (snapshot.get("early_highlight") or
+                    turns.active and turns.active["turn_id"] == kwargs.get("turn_id") or
+                    result.get("context") == snapshot.get("context")):
                 key = (kwargs.get("session_id", ""), kwargs.get("turn_id", ""))
                 answer_snapshots[key] = snapshot
                 while len(answer_snapshots) > 128:
@@ -125,11 +126,12 @@ def register(ctx: Any) -> None:
             return result
 
     def post_llm_call(**kwargs: Any) -> None:
-        turns.post(**kwargs)
+        body = turns.post(**kwargs)
         with turns.lock:
             snapshot = answer_snapshots.pop((kwargs.get("session_id", ""), kwargs.get("turn_id", "")), None)
         if snapshot:
-            service.highlight_answer_scope(session, snapshot, kwargs.get("assistant_response", ""))
+            service.highlight_answer_scope(session, snapshot,
+                                           body if body is not None else kwargs.get("assistant_response", ""))
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
         if raw_args.strip() in ("", "connect", "start"):

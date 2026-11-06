@@ -159,7 +159,7 @@ class VoiceTurnsTests(unittest.TestCase):
         self.turns.submit('why?', {}, a['item_id'])
         self.pre('follow'); self.post('follow', 'Because'); self.end('follow')
         self.turns.submit('Compare this with the last one', {}, b['item_id'])
-        context = self.pre('compare')['context']
+        context = self.pre('compare')['context'].partition('\n\n')[2]
         self.assertIn('10 pounds', context)
         self.assertIn('20 pounds', context)
         self.assertIn('Previous captured item (last one)', context)
@@ -333,7 +333,7 @@ class VoiceTurnsTests(unittest.TestCase):
         self.pre('first'); self.end('first')
         self.pre('second'); self.post('second', 'long answer ' * 1000); self.end('second')
         self.turns.submit('Compare this with the last one', {}, second['item_id'])
-        context = self.pre('compare')['context']
+        context = self.pre('compare')['context'].partition('\n\n')[2]
         for value in ('£111.19', '£222.37', '£901.42', '£902.43'):
             self.assertIn(value, context)
         for price in ('£111.19', '£222.37'):

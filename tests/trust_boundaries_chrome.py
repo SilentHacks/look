@@ -214,7 +214,6 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
         seed(a)
         injected = []
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda text, **kw: injected.append(text) or True), session)
-        turns.model_names = False
         turns.bind(session_key='private', session_id='private-session')
         replies = []
         def handle(intent, reply):
@@ -519,7 +518,6 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             foreground(c, [a, b])
             page(c, 'document.body.tabIndex=-1;document.body.focus();window.__seen.length=0')
             hostile_turns = VoiceTurns(SimpleNamespace(inject_message=lambda text, **kw: injected.append(text) or True), session)
-            hostile_turns.model_names = False
             hostile_turns.bind(session_key='private', session_id='private-session')
             turns = hostile_turns
             service._VOICE_TURNS = hostile_turns

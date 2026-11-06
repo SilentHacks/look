@@ -1,4 +1,4 @@
-"""Python-owned companion state: names, spoken text, plain errors, stack and side calls."""
+"""Python-owned companion state: names, spoken text, plain errors and stack."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 
 from hermes_gaze import service
-from hermes_gaze.naming import clean_subject, model_name, plain_error, safe_link, speech_text, subject_hint
+from hermes_gaze.naming import clean_subject, plain_error, safe_link, speech_text, subject_hint
 from hermes_gaze.resolver.cursor_context import cursor_result
 from hermes_gaze.voice_turns import VoiceTurns
 
@@ -45,13 +45,6 @@ class Names(unittest.TestCase):
         for bad in ("Delete @12 row", "[Browsing inbox abc; request def]", "<browser_context>", "resolution 12", "gaze_click now", "</page_data>"):
             self.assertEqual(clean_subject(bad), "", bad)
             self.assertEqual(subject_hint({"name": bad})[0], "", bad)
-            self.assertEqual(model_name(bad), "", bad)
-
-    def test_model_name_is_strict(self):
-        self.assertEqual(model_name("MacBook deal"), "MacBook deal")
-        self.assertEqual(model_name('"CTR column."'), "CTR column")
-        for bad in ("**Bold**", "line\nbreak", "http://x.test/a", "one two three four five six", "x" * 40, "", None):
-            self.assertEqual(model_name(bad), "", bad)
 
     def test_count_is_bounded(self):
         self.assertEqual(subject_hint({"name": "A", "count": 99})[1], 5)
@@ -178,45 +171,6 @@ class Stack(unittest.TestCase):
         self.assertNotIn("@1", json.dumps(self.last()))
         self.assertNotIn("#x", json.dumps(self.last()))
 
-
-class SideName(unittest.TestCase):
-    def run_name(self, reply, *, queued=False):
-        chrome = Chrome()
-        calls, done = [], threading.Event()
-        def complete(**kwargs):
-            calls.append(kwargs)
-            done.set()
-            return reply
-        ctx = SimpleNamespace(inject_message=lambda *a, **k: True, llm=SimpleNamespace(complete_structured=complete))
-        turns = VoiceTurns(ctx, chrome)
-        turns.bind(session_key="k", session_id="s")
-        turns.submit("q", snapshot("Page name"))
-        if queued:
-            turns.submit("r", snapshot("Other"))
-        wire = turns.active["wire"]
-        turns.pre(session_id="s", turn_id="t", user_message=wire)
-        turns.post(session_id="s", turn_id="t", assistant_response="An answer")
-        turns.end(session_id="s", turn_id="t")
-        done.wait(.3)
-        for _ in range(50):
-            if not turns._naming:
-                break
-            threading.Event().wait(.01)
-        return turns, chrome, calls
-
-    def test_a_good_name_upgrades_the_card_after_the_answer(self):
-        turns, chrome, calls = self.run_name(SimpleNamespace(parsed={"name": "MacBook deal"}, text=""))
-        self.assertEqual(chrome.events[-1]["items"][0]["subject"], "MacBook deal")
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["max_tokens"], 64)
-
-    def test_a_bad_name_keeps_the_page_name(self):
-        turns, chrome, _ = self.run_name(SimpleNamespace(parsed={"name": "@12 [Browsing inbox x]"}, text=""))
-        self.assertEqual(chrome.events[-1]["items"][0]["subject"], "Page name")
-
-    def test_no_side_call_while_questions_wait(self):
-        turns, chrome, calls = self.run_name(SimpleNamespace(parsed={"name": "Nope"}, text=""), queued=True)
-        self.assertEqual(calls, [], "quota belongs to the waiting question")
 
 
 class LitEvidence(unittest.TestCase):
