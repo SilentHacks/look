@@ -5,11 +5,23 @@ const vm = require('node:vm');
 const test = require('node:test');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../browser/overlay.js'), 'utf8');
 function element(tag, children = [], attrs = {}) {
-  const el = { nodeType: 1, tagName: tag.toUpperCase(), children, attrs, isConnected: true,
+  const el = { nodeType: 1, tagName: tag.toUpperCase(), childNodes: children, attrs, isConnected: true,
     parentElement: null, htmlFor: attrs.for || '', style: {}, dataset: {}, listeners: {},
+    get children() { return this.childNodes.filter(node => node.nodeType === 1); },
+    get childElementCount() { return this.children.length; },
+    get firstElementChild() { return this.children[0] || null; },
+    contains(node) { for (let n = node; n; n = n.parentElement) if (n === this) return true; return false; },
+    checkVisibility() {
+      for (let node = this; node; node = node.parentElement) {
+        if (!node.isConnected || Object.hasOwn(node.attrs, 'hidden') || node.style.display === 'none' ||
+            node.style.visibility === 'hidden' || node.style.opacity === '0') return false;
+      }
+      return this.style.display !== 'contents';
+    },
     setAttribute(name, value) { this.attrs[name] = value; },
-    appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
-    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(c => c !== this); },
+    appendChild(child) { this.childNodes.push(child); child.parentElement = this; return child; },
+    remove() { if (this.parentElement) this.parentElement.childNodes = this.parentElement.childNodes.filter(c => c !== this);
+      this.isConnected = false; },
     addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); },
     click() { this.clickCount = (this.clickCount || 0) + 1;
       for (const fn of this.listeners.click || []) fn({ isTrusted: false, button: 0, detail: 0 }); },
@@ -20,19 +32,19 @@ function element(tag, children = [], attrs = {}) {
         if (s === 'input' || s === 'textarea' || s === 'select' || s === 'script' || s === 'style' || s === 'label') return tag === s;
         if (s === 'input[type="password"]') return tag === 'input' && attrs.type === 'password';
         if (s === '[contenteditable]') return Object.hasOwn(attrs, 'contenteditable');
-        if (s === '.panel-title') return (attrs.class || '').split(/\s+/).includes('panel-title');
+        if (s.startsWith('.')) return (attrs.class || '').split(/\s+/).includes(s.slice(1));
         if (s === '[scope=row]' || s === '[scope=rowgroup]') return attrs.scope === s.slice(7, -1);
         if (s.startsWith('[role=') && s.endsWith(']')) return attrs.role === s.slice(6, -1);
         if (s === 'th[scope=col]' || s === 'th[scope=colgroup]') return tag === 'th' && attrs.scope === s.slice(9, -1);
         if (s.startsWith('[autocomplete')) return !!attrs.autocomplete && attrs.autocomplete.startsWith('cc-');
-        if (['table', 'caption', 'tr', 'td', 'th', 'section', 'ul', 'ol', 'li', 'article', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form'].includes(s)) return tag === s;
+        if (/^[a-z][a-z0-9-]*$/.test(s)) return tag === s;
         return false;
       });
     },
     closest(selector) { for (let n = this; n; n = n.parentElement) if (n.matches(selector)) return n; return null; },
     querySelectorAll(selector) {
       const result = [];
-      function visit(n) { for (const c of n.children || []) { if (c.nodeType === 1 && c.matches(selector)) result.push(c); visit(c); } }
+      function visit(n) { for (const c of n.childNodes || []) { if (c.nodeType === 1 && c.matches(selector)) result.push(c); visit(c); } }
       visit(this); return result;
     },
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
@@ -40,7 +52,7 @@ function element(tag, children = [], attrs = {}) {
       let root = this;
       while (root.parentElement) root = root.parentElement;
       const nodes = [];
-      function visit(node) { nodes.push(node); for (const child of node.children || []) visit(child); }
+      function visit(node) { nodes.push(node); for (const child of node.childNodes || []) visit(child); }
       visit(root);
       if (!nodes.includes(other)) return 1;
       return nodes.indexOf(this) < nodes.indexOf(other) ? 4 : this === other ? 0 : 2;
@@ -66,7 +78,7 @@ const document = {
   createTreeWalker(root, mask, filter) {
     const nodes = [];
     function walk(node) {
-      for (const child of node.children || []) {
+      for (const child of node.childNodes || []) {
         const result = filter.acceptNode(child);
         if (result === 2) continue;
         if (result === 1) nodes.push(child);
@@ -84,7 +96,9 @@ const hudReply = element('div');
 const lockLabel = element('div');
 const tuckSummary = element('div');
 const context = vm.createContext({ document, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
-  window: { addEventListener() {} }, location: { origin: 'https://example.invalid', pathname: '/' },
+  window: { addEventListener() {}, innerWidth: 1200, innerHeight: 800 },
+  getComputedStyle: node => ({ display: node.style.display || 'block' }),
+  location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
   shadow, hudReply, lockLabel, tuckSummary, renderPins: candidates => rendered.push(candidates),
   _emit: intent => intents.push(intent), releaseAudioStream() {} });
@@ -208,9 +222,91 @@ test('table headings and outside notes survive without flattening captured cells
   snapshot = api.captureCursorContext();
   block = snapshot.blocks.find(b => b.id === current.cell.block);
   assert.equal(block.label, 'Caption takes precedence');
-  caption.children[0].textContent = 'C'.repeat(100);
+  caption.childNodes[0].textContent = 'C'.repeat(100);
   snapshot = api.captureCursorContext();
   assert.equal(snapshot.blocks.find(b => b.id === current.cell.block).label, 'C'.repeat(80));
+});
+
+function cardNode(title, detail, tag = 'article') {
+  return element(tag, [element('h3', [text(title)]), element('p', [text(detail)])]);
+}
+test('card leaves retain their peer group, privacy, visibility and captured identities', () => {
+  const pro = cardNode('Pro model', '142 tok/s; 128k context; $0.80 per million');
+  const flash = cardNode('Flash model', '410 tok/s; 64k context; $0.10 per million');
+  const hidden = cardNode('HIDDEN_VARIANT', 'PRIVATE_PRICE');
+  hidden.style.display = 'none';
+  const secret = element('span', [text('HIDDEN_DETAIL')]);
+  secret.style.visibility = 'hidden';
+  pro.appendChild(secret);
+  pro.appendChild(element('div', [text('PRIVATE_DRAFT')], { contenteditable: '' }));
+  const collection = element('div', [element('div', [pro]), element('div', [flash]), hidden]);
+  collection.style.display = 'flex';
+  element('div', [
+    element('section', [element('h2', [text('Deployment models')]), collection, element('p', [text('Prices exclude tax')])]),
+    element('section', [cardNode('UNRELATED_PANEL', 'NOT_A_PEER')]),
+  ]);
+  for (const [index, node] of [pro.children[0], pro.children[1], pro, flash.children[0]].entries()) {
+    api.rememberHit(node, 8.2 + index / 100);
+    const snapshot = api.captureCursorContext();
+    const pointed = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+    const group = snapshot.blocks.find(b => pointed.block_ids.includes(b.id) && b.kind === 'group');
+    assert.equal(group.label, 'Deployment models');
+    assert.deepEqual(Array.from(group.members, member => member.label).sort(), ['Flash model', 'Pro model']);
+    assert.ok(group.members.some(member => member.id === pointed.group_item_id));
+    assert.ok(group.members.find(member => member.label === 'Pro model').text.includes('$0.80'));
+    assert.ok(group.members.find(member => member.label === 'Flash model').text.includes('$0.10'));
+    assert.ok(group.text.includes('Prices exclude tax'));
+    assert.ok(!group.text.includes('142 tok/s'));
+    for (const forbidden of ['HIDDEN_VARIANT', 'PRIVATE_PRICE', 'HIDDEN_DETAIL', 'PRIVATE_DRAFT', 'UNRELATED_PANEL', 'NOT_A_PEER']) {
+      assert.ok(!JSON.stringify(group).includes(forbidden), forbidden);
+    }
+  }
+  flash.rect = { left: 1, top: 1200, width: 200, height: 100 };
+  api.rememberHit(pro, 8.3);
+  const snapshot = api.captureCursorContext();
+  const pointed = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  const group = snapshot.blocks.find(b => b.id === pointed.block_ids[0]);
+  assert.equal(group.offscreen_items, 1);
+  assert.equal(group.members.find(member => member.label === 'Flash model').in_view, false);
+  assert.equal(api.activateSnapshot(snapshot.snapshot_id, 1).ok, true);
+  const handles = Array.from(group.members, member => member.id);
+  assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 1, handles).ok, true);
+  flash.remove();
+  collection.appendChild(cardNode('Flash model', 'replacement'));
+  assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 1, handles).ok, false);
+});
+
+test('ordinary headed div cards survive wrapper chains and display-contents containers', () => {
+  const left = cardNode('Local tier', 'Runs on device', 'div');
+  const right = cardNode('Cloud tier', 'Runs remotely', 'div');
+  const wrapper = element('div', [left]);
+  wrapper.style.display = 'contents';
+  const collection = element('div', [wrapper, element('div', [element('div', [right])])]);
+  collection.style.display = 'grid';
+  element('article', [element('div', [text('Choose deployment')], { class: 'panel-title' }), collection]);
+  api.rememberHit(left.children[1], 8.4);
+  const snapshot = api.captureCursorContext();
+  const pointed = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  const group = snapshot.blocks.find(b => pointed.block_ids.includes(b.id) && b.kind === 'group');
+  assert.equal(group.label, 'Choose deployment');
+  assert.deepEqual(Array.from(group.members, member => member.label).sort(), ['Cloud tier', 'Local tier']);
+  assert.equal(api.safeText(wrapper), 'Local tier Runs on device');
+});
+
+test('large groups retain the pointed item and report bounded collection honestly', () => {
+  const cards = Array.from({ length: 180 }, (_, i) => cardNode(`Tier ${i}`, `Price ${i}`, 'div'));
+  const collection = element('div', cards);
+  collection.style.display = 'flex';
+  element('section', [element('h2', [text('Capacity tiers')]), collection]);
+  api.rememberHit(cards.at(-1).children[1], 8.5);
+  const snapshot = api.captureCursorContext();
+  const pointed = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  const group = snapshot.blocks.find(b => b.id === pointed.block_ids[0]);
+  assert.equal(group.collection_limited, true);
+  assert.equal(group.members.length, 16);
+  assert.equal(group.total_items, 129);
+  assert.equal(group.omitted_items, 113);
+  assert.ok(group.members.some(member => member.id === pointed.group_item_id && member.label === 'Tier 179'));
 });
 
 test('revisiting an old node keeps the latest target after the snapshot cap', () => {

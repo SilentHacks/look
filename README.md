@@ -34,6 +34,14 @@ separately from per-turn `<browser_context>` evidence, which labels the user's
 question and pointer age. The complete escaped envelope, including its
 `Resolution` epoch, is at most 6000 characters. New guidance requires a new session.
 
+Hovering inside a card also captures its enclosing item and nearest local peer
+collection. Semantic items and headed flex/grid children supply separate member
+facts, viewport rectangles and exact-node handles; the hovered leaf stays the
+only pointer hit. Group headings/notes exclude member text. Hidden variants and
+editable values are excluded; rendered offscreen peers are explicitly labelled.
+This is bounded DOM/layout evidence, not full visual scene understanding:
+unrelated portals and canvas content need another capture strategy.
+
 Typed questions use the latest real Chrome target and its age. Voice evidence
 freezes at recording stop before ASR; real word timestamps select preceding
 cursor identities, including two spoken referents. Detached or replaced nodes
@@ -42,7 +50,7 @@ filtered before serialization; page text stays inside an escaped untrusted fence
 
 Fresh hover evidence automatically highlights the pointed handles.
 `gaze_highlight(handles=[...], resolution_id=N)` changes that highlight for a different
-scope, including captured rows and columns; the wider highlight depends on the model
+scope, including captured rows, columns and peer cards; the wider highlight depends on the model
 invoking the tool. `gaze_click(handle=..., resolution_id=N)`
 activates a current control. Risky labels/classes, destructive utterances and form
 submissions require a trusted primary mouse click on the Chrome confirmation
@@ -60,6 +68,10 @@ Collection is bounded: 60 seconds/256 cursor intervals, 64 target identities, 32
 retained captures, 1024 rows/table, 64 collected columns and 8192 captured members/
 handles. Model rows use at most 12 cells, with the pointed value described
 separately; column handles retain captured members, never replacement cells.
+Card groups search at most eight ancestor levels and 128 children per container;
+they retain 16 members (more only to preserve pointed items), with visible peers
+first. Collection caps and packet omissions are explicit; capped membership
+counts are lower bounds.
 Scope navigation, up/down scope correction and save-trial controls are removed.
 Replay recording is off unless `record_trials: true`; files may contain sensitive
 browsing evidence but never microphone audio.

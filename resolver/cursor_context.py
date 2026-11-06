@@ -181,9 +181,9 @@ def cursor_result(capture, utterance, words=None, now=None):
         omitted += 1
         return False
 
-    def add_values(prefix, values, budget):
+    def add_values(prefix, values, budget, limits=(100, 70, 48, 32, 16, 8, 0)):
         values = [str(value) for value in values[:12]]
-        for limit in (100, 70, 48, 32, 16, 8, 0):
+        for limit in limits:
             clipped = [value if len(value) <= limit else value[:limit] + "…" for value in values]
             suffix = " [truncated fields]" if clipped != values else ""
             text = prefix + json.dumps(clipped, ensure_ascii=False) + suffix
@@ -237,6 +237,37 @@ def cursor_result(capture, utterance, words=None, now=None):
             add(f"pointed cell value {str(cell.get('value', ''))[:120]}; "
                 f"header {str(cell.get('header', ''))[:80]}; row {cell.get('row')}; "
                 f"column {cell.get('column')}; table {cell.get('block')}")
+    groups = []
+    pointed_items = {target.get("group_item_id") for target in selected}
+    for block in blocks:
+        if block.get("kind") != "group":
+            continue
+        members = [member for member in block.get("members", [])[:64] if isinstance(member, dict)]
+        chosen = [member for member in members if member.get("id") in pointed_items]
+        peers = [member for member in members if member.get("id") not in pointed_items]
+        ordered = chosen + [member for member in peers if member.get("in_view")] + [
+            member for member in peers if not member.get("in_view")]
+        groups.append((block, ordered[:max(16, len(chosen))]))
+    members_left = sum(len(members) for _, members in groups)
+    for group, members in groups:
+        total = int(group.get("total_items", len(members)))
+        add(f"{group.get('id')} group {str(group.get('label', ''))[:80]}; rendered items: {total}")
+        if group.get("collection_limited"):
+            add("Group collection capped: membership counts are lower bounds.")
+        written = 0
+        for member in members:
+            relation = "pointed item" if member.get("id") in pointed_items else "peer item"
+            location = "in viewport" if member.get("in_view") else "offscreen"
+            values = [f"{str(member.get('role', 'item'))[:30]} {str(member.get('label', ''))[:100]}",
+                      str(member.get("text", ""))[:300]]
+            if isinstance(member.get("rect_vp"), list):
+                values.append("viewport rect: " + json.dumps(member["rect_vp"][:4]))
+            written += bool(add_values(f"member {member.get('id')} ({relation}, {location}): ", values,
+                                       min(1200, max(0, remaining() - 200) // max(1, members_left)),
+                                       limits=(300, 160, 100, 70, 48, 32, 16, 8, 0)))
+            members_left -= 1
+        add(f"{group.get('id')} omitted items: {max(0, total - written)}; "
+            f"offscreen items: {group.get('offscreen_items', 0)}")
     for block, _, rows in tables:
         for row in rows[:max(0, 12 - kept[block["id"]])]:
             kept[block["id"]] += bool(add_values(f"row {row.get('index')} {row.get('id', '')}: ",
@@ -250,7 +281,7 @@ def cursor_result(capture, utterance, words=None, now=None):
     if capture.get("omitted_controls"):
         add(f"omitted controls: {capture['omitted_controls']}")
     for block in blocks:
-        if block.get("kind") != "table":
+        if block.get("kind") not in ("table", "group"):
             add(f"{block.get('id')} {block.get('kind')} {str(block.get('label', ''))[:80]}")
         if block.get("text"):
             add(f"bounded text (max {block.get('text_limit', 650)} chars): " + str(block["text"])[:650])

@@ -743,16 +743,40 @@
     return field.matches(sensitiveSelector) ||
       tokens.some(token => token.startsWith("cc-") || token === "current-password" || token === "new-password");
   }
+  function rendered(el) {
+    return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  }
+  const contextHeadings = "h1,h2,h3,h4,h5,h6,[role=heading],.panel-title";
+  const contextRegions = "article,section,.card,[role=region]";
+  function ownHeading(container, excluded = null, before = null) {
+    let label = "", visited = 0;
+    for (const heading of container.querySelectorAll(contextHeadings)) {
+      if (++visited > 128) break;
+      if (!rendered(heading) || heading.closest(contextRegions) !==
+          (container.matches(contextRegions) ? container : container.closest(contextRegions)) ||
+          heading.closest("form,label,input,textarea,select,[contenteditable]") ||
+          before && !(heading.compareDocumentPosition(before) & 4)) continue;
+      let node = heading;
+      while (node && node !== container && !excluded?.has(node)) node = node.parentElement;
+      if (excluded?.has(node)) continue;
+      label = safeText(heading, 80);
+      if (label && !before) break;
+    }
+    return label;
+  }
   function safeText(el, max = 160, excluded = null) {
     if (!el) return "";
     if (sensitive(el)) return "[redacted]";
-    if (el.matches("input,textarea,select")) return "";
+    if (el.matches("input,textarea,select,[contenteditable]")) return "";
     if (el.matches("label") && el.htmlFor && sensitive(document.getElementById(el.htmlFor))) return "[redacted]";
+    if (!rendered(el) && getComputedStyle(el).display !== "contents") return "";
     // Never read field values, labels/attributes, or ancestor innerText wholesale.
     const parts = [];
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        if (node.nodeType === 1 && (excluded?.has(node) || node.matches('input,textarea,select,script,style,#hermes-gaze-root') || sensitive(node)))
+        if (node.nodeType === 1 && (excluded?.has(node) ||
+            node.matches('input,textarea,select,[contenteditable],script,style,#hermes-gaze-root') || sensitive(node) ||
+            !rendered(node) && getComputedStyle(node).display !== "contents"))
           return NodeFilter.FILTER_REJECT;
         if (node.nodeType === 1 && node.matches("label") && node.htmlFor &&
             sensitive(document.getElementById(node.htmlFor))) return NodeFilter.FILTER_REJECT;
@@ -798,10 +822,12 @@
   function cursorMetadata(el) {
     const r = el.getBoundingClientRect();
     const hidden = sensitive(el);
-    return { id: cursorId(el), available: el.isConnected && !hidden,
-      ...(hidden ? { sensitive: true, reason: "sensitive target redacted" } : {}),
+    const visible = el.isConnected && rendered(el);
+    return { id: cursorId(el), available: visible && !hidden,
+      ...(hidden ? { sensitive: true, reason: "sensitive target redacted" } :
+        !visible ? { reason: "target not rendered" } : {}),
       tag: el.tagName.toLowerCase(), role: (el.getAttribute("role") || el.tagName.toLowerCase()).slice(0, 40),
-      label: hidden ? "[redacted]" : safeLabel(el, 100),
+      label: hidden ? "[redacted]" : visible ? safeLabel(el, 100) : "",
       selector: hidden ? "" : buildSelector(el).slice(0, 350),
       rect_vp: [r.left, r.top, r.width, r.height],
       rect_doc: [r.left + scrollX, r.top + scrollY, r.width, r.height], block_ids: [] };
@@ -827,6 +853,81 @@
       return id;
     }
     const blocks = new Map();
+    const groups = new Map();
+    function unwrap(node) {
+      for (let depth = 0; depth < 4 && node.matches("div,span") &&
+           !node.matches(".card") && node.children.length === 1; depth++) node = node.children[0];
+      return node;
+    }
+    function inView(node) {
+      const r = node.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.left < window.innerWidth && r.top < window.innerHeight &&
+        r.left + r.width > 0 && r.top + r.height > 0;
+    }
+    function captureGroup(el) {
+      // ponytail: bounded DOM/layout groups; portals and canvas need a visual fallback.
+      let branch = el;
+      for (let depth = 0; branch?.parentElement && depth < 8; depth++, branch = branch.parentElement) {
+        const parent = branch.parentElement;
+        if (parent === document.body || parent === document.documentElement) break;
+        const item = unwrap(branch);
+        const collection = parent.matches("ul,ol,[role=list],[role=group],[role=grid]") ||
+          ["flex", "inline-flex", "grid", "inline-grid"].includes(getComputedStyle(parent).display);
+        let group = groups.get(parent);
+        if (!group) {
+          const items = [];
+          let scanned = 0;
+          for (const child of parent.children) {
+            if (scanned++ >= 128) break;
+            const node = unwrap(child);
+            if (!rendered(node) || sensitive(node) ||
+                node.matches("section,main,aside,nav,header,footer,form,[role=region]")) continue;
+            const r = node.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0 && (node.matches("article,li,[role=listitem],.card") ||
+                collection && ownHeading(node))) items.push(node);
+          }
+          if (items.length >= 2 && (items.includes(item) || scanned > 128 &&
+              rendered(item) && (item.matches("article,li,[role=listitem],.card") || collection && ownHeading(item)))) {
+            if (!items.includes(item)) items.push(item);
+            const excluded = new Set(items);
+            let owner = parent, label = "";
+            for (let level = 0; owner && owner !== document.body && level < 8; level++, owner = owner.parentElement) {
+              label = ownHeading(owner, excluded);
+              if (label || owner.matches("section,[role=region],main,aside,dialog")) break;
+            }
+            const id = handle(parent);
+            const block = { id, kind: "group", label: (label || parent.getAttribute("aria-label") || "").slice(0, 80),
+              text: safeText(owner && owner !== document.body ? owner : parent, 300, excluded), text_limit: 300, members: [],
+              total_items: items.length, collection_limited: scanned > 128 };
+            group = { block, items, pointed: new Set(), facts: new Map() };
+            groups.set(parent, group);
+            blocks.set(id, block);
+          }
+        }
+        if (group && (group.items.includes(item) || rendered(item) &&
+            (item.matches("article,li,[role=listitem],.card") || collection && ownHeading(item)))) {
+          if (!group.items.includes(item)) group.items.push(item);
+          group.pointed.add(item);
+          const peers = group.items.filter(node => !group.pointed.has(node));
+          const kept = [...group.pointed, ...peers.filter(inView), ...peers.filter(node => !inView(node))]
+            .slice(0, Math.max(16, group.pointed.size));
+          group.block.members = kept.map(node => {
+            if (!group.facts.has(node)) {
+              const metadata = cursorMetadata(node);
+              group.facts.set(node, { id: handle(node), role: metadata.role, label: ownHeading(node) || metadata.label,
+                text: safeText(node, 300), rect_vp: metadata.rect_vp, in_view: inView(node) });
+            }
+            return group.facts.get(node);
+          });
+          group.block.total_items = group.items.length;
+          group.block.omitted_items = group.items.length - kept.length;
+          group.block.offscreen_items = group.items.filter(node => !inView(node)).length;
+          return { id: group.block.id, item_id: handle(item) };
+        }
+        if (parent.matches("section,[role=region],main,aside,dialog")) break;
+      }
+      return null;
+    }
     const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean).reverse())].slice(0, 64).reverse();
     const capturedTables = new Set(refs.map(id => cursorRefs.get(id))
       .filter(el => el?.isConnected && !sensitive(el)).map(el => el.closest("table,[role=grid]")).filter(Boolean));
@@ -838,7 +939,8 @@
       if (!target.available) continue;
       handle(el);
       const cell = el.closest("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]");
-      const table = el.closest("table,[role=grid]");
+      let table = el.closest("table,[role=grid]");
+      if (table && !table.matches("table") && !table.querySelector("tr,[role=row]")) table = null;
       if (table) {
         const bid = handle(table);
         if (!blocks.has(bid)) {
@@ -879,13 +981,8 @@
           }
           let label = safeText(table.querySelector("caption"), 80);
           if (!label) {
-            const container = table.parentElement?.closest("article,section,.card");
-            for (const heading of container?.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=heading],.panel-title") || []) {
-              if (heading.closest("article,section,.card") === container &&
-                  !heading.closest("table,[role=grid],form,label,input,textarea,select,[contenteditable]") &&
-                  (heading.compareDocumentPosition(table) & 4))
-                label = safeText(heading, 80) || label;
-            }
+            const container = table.parentElement?.closest(contextRegions);
+            if (container) label = ownHeading(container, capturedTables, table);
           }
           blocks.set(bid, { id: bid, kind: "table", label,
             headers: headerRow ? cellsOf(headerRow).map(c => `${handle(c)} ${safeText(c, 60)}`) : [],
@@ -913,6 +1010,12 @@
           block.rows.push({ id: handle(node), index: i + 1, cells: block._cells(node).map(c => safeText(c, 70)) });
         }
       }
+      const group = !table && captureGroup(el);
+      if (group) {
+        target.block_ids.push(group.id);
+        target.group_item_id = group.item_id;
+        continue;
+      }
       const parents = new Set([el.closest("ul,ol,[role=list],p,h1,h2,h3,h4,h5,h6"), el.closest("article,section,.card")]);
       if (![...parents].some(Boolean)) parents.add(el.parentElement);
       for (const parent of parents) {
@@ -920,7 +1023,7 @@
         const bid = handle(parent);
         target.block_ids.push(bid);
         if (!blocks.has(bid)) blocks.set(bid, { id: bid, kind: parent.tagName.toLowerCase(),
-          label: safeLabel(parent.querySelector("h1,h2,h3,h4,h5,h6") || parent, 80, capturedTables),
+          label: ownHeading(parent, capturedTables) || safeLabel(parent, 80, capturedTables),
           text: safeText(parent, 650, capturedTables), text_limit: 650 });
       }
     }
