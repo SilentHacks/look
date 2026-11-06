@@ -48,6 +48,10 @@ class TrustBoundaries(unittest.TestCase):
 
         def scoring(*args, **kwargs):
             result = original(*args, **kwargs)
+            if args[2] == 'Open this':
+                other = {**pushed, 'browser_target': 'B', 'browser_document': 'doc-B', 'browser_route': 9,
+                         'candidates': [{**pushed['candidates'][0], 'label': 'PRIVATE B target'}]}
+                service.resolve_now(session, utterance='Inspect B', mode='simulated', pushed=other)
             session.cdp._target = Mock(side_effect=AssertionError('Do not look up focus after capture'))
             return result
 
@@ -57,6 +61,8 @@ class TrustBoundaries(unittest.TestCase):
         self.assertEqual(result['browser_target'], 'A')
         self.assertEqual((session._resolution_target, session._resolution_document, session._resolution_route),
                          ('A', 'doc-A', 4))
+        self.assertIn('Open preferences', result['context'])
+        self.assertNotIn('PRIVATE B target', result['context'])
         session.cdp._target.assert_not_called()
 
     def test_recording_deadline_closes_and_discards_without_release_event(self):

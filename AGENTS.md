@@ -96,6 +96,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   `FixationSample`, subtracts the recalibrator bias, and dedupes on a
   `(t_end, x_doc, y_doc)` watermark. Bypassing it re-introduces double-counted
   fixations and un-corrected drift.
+  It also returns that capture's normalized samples for local scoring; never score
+  a tab against the machine-wide ring's samples from other documents.
 - **Resolution epoch guards `choose`.** Every resolution bumps
   `session.resolution_id`; a `choose` intent carrying a mismatched `resolution_id`
   gets `"stale resolution"`. Never accept a choose without the epoch check — a stale
@@ -139,14 +141,16 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   `on_session_end` is a per-turn event, not a chat disconnect.
 - **Focus changes do not retarget evidence or replies.** Freeze the source tab,
   unique CDP document context and route generation during collection, before
-  scoring/ASR. Mutations require that owner and foreground focus; never fall back
-  to the newly focused tab. Browser-owned same-document navigation events revoke
+  scoring/ASR. Carry that evidence locally through scoring and pass it explicitly
+  into activation; `last_resolution_input` is current-resolution state, not a
+  worker's ownership token. Mutations require that owner and foreground focus;
+  never fall back to the newly focused tab. Browser-owned same-document navigation events revoke
   action authority and confirmations, including after a route returns to its old
   URL; captured read-only highlight geometry remains usable.
-  Replies carry their run's captured tab/document. No recipient means no delivery.
-  Background source replies wait in Python and never broadcast to other tabs.
-  Replacement documents do not inherit private answers. Post-answer highlighting
-  uses the same foreground/source-document guard.
+  Session events and intent replies (including one-shot answers) retain their
+  captured tab/document. No recipient means no delivery. Background replies wait
+  in Python until that source is foreground; replacement documents inherit none.
+  Post-answer highlighting uses the same foreground/source-document guard.
 - **Microphone capture stays outside website origins.** Native `sounddevice`
   owns the device only during talk; no browser grant, `getUserMedia`, pre-warmed
   input stream or audio bytes in the page. Focus/document/route loss, device error

@@ -122,9 +122,9 @@ class TestHonestNoPointer(unittest.TestCase):
         self.addCleanup(self.session.close)
 
     def test_fetch_returns_empty_when_unreachable(self) -> None:
-        """Unreachable Chrome yields [], never stale last_candidates."""
+        """Unreachable Chrome yields no candidates/evidence, never stale candidates."""
         self.session.last_candidates = ["stale"]  # type: ignore[list-item]
-        self.assertEqual(self.session.fetch_live_state_and_candidates(), [])
+        self.assertEqual(self.session.fetch_live_state_and_candidates(), ([], {}))
         self.assertEqual(self.session.last_candidates, [])
 
     def test_null_pointer_records_no_fixation(self) -> None:

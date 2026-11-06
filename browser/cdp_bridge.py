@@ -23,6 +23,7 @@ import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections import deque
 from ..resolver.cursor_context import stamp_resolution
 
 try:
@@ -130,6 +131,7 @@ class CdpSession:
         self._contexts: Dict[int, str] = {}
         self._ready = False
         self.tab: Optional[Dict[str, Any]] = None
+        self._reply_queue = deque()
         self.session_event: Optional[Dict[str, Any]] = None
         self._intent_handler: Optional[Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]] = None
         self._handler_pool = concurrent.futures.ThreadPoolExecutor(
@@ -276,14 +278,6 @@ class CdpSession:
             "} return true; })()"
         )
         await self._eval_coro(expr, timeout=5.0)
-        if (self.session_event is not None and
-                self.session_event.get("browser_document") == self._context_unique_id):
-            await self._display_event(self.session_event)
-
-    async def _display_event(self, event: dict) -> None:
-        await self._eval_coro(
-            "if(document.visibilityState === 'visible' && document.hasFocus()) "
-            "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");true", timeout=5.)
 
     async def _init_ui(self) -> None:
         remote = await self._send_cmd("Runtime.evaluate", {
@@ -308,6 +302,25 @@ class CdpSession:
             await self._eval_coro("window.__HERMES_GAZE_PANEL__?.render(" + json.dumps(message) + ")",
                                   timeout=5., context_id=self._ui_context_unique_id)
 
+    async def _deliver_reply(self, document: str, message: dict) -> None:
+        if document != self._context_unique_id:
+            return
+        delivered = await self._eval_coro(
+            "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
+            "window.__HERMES_GAZE_OVERLAY__?.onIntentResult(" + json.dumps(message) + ");return true})()",
+            timeout=5., context_id=document)
+        if not delivered:
+            self._reply_queue.append((document, message))
+
+    def flush_replies(self) -> None:
+        if self._reply_queue and self.is_connected:
+            self._submit(self._flush_replies(), timeout=8.)
+
+    async def _flush_replies(self) -> None:
+        queued, self._reply_queue = self._reply_queue, deque()
+        for document, message in queued:
+            await self._deliver_reply(document, message)
+
     async def _ui_message(self, payload: Any, *, from_ui: bool) -> None:
         try:
             message = json.loads(payload)
@@ -318,7 +331,7 @@ class CdpSession:
             elif from_ui and message.get("type") == "_ui_size":
                 height = max(1, min(2000, int(message["height"])))
                 await self._eval_coro(
-                    f"window.__HERMES_GAZE_OVERLAY__.uiFrame.style.height='{height}px';true", timeout=5.)
+                    f"window.__HERMES_GAZE_OVERLAY__.fitUiFrame({height});true", timeout=5.)
             elif from_ui and message.get("type") == "_ui_event":
                 await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.onUiEvent("
                                       + json.dumps(message) + ");true", timeout=5.)
@@ -452,9 +465,7 @@ class CdpSession:
                 if intent.get(key) is not None:
                     msg.setdefault(key, intent[key])
             try:
-                self._submit(self._eval_coro(
-                    "window.__HERMES_GAZE_OVERLAY__?.onIntentResult(" + json.dumps(msg) + ");true",
-                    timeout=5.0, context_id=context_id), timeout=6.0)
+                self._submit(self._deliver_reply(context_id, msg), timeout=6.)
             except Exception as exc:
                 logger.debug("onIntentResult reply failed: %s", exc)
 
@@ -641,11 +652,12 @@ class GazeSession:
         """Thin back-compat wrapper: configure() with stored defaults."""
         return self.configure(mode=mode, sigma_px=sigma_px)
 
-    def ingest(self, samples: Any) -> None:
+    def ingest(self, samples: Any) -> List[FixationSample]:
         """One funnel for ALL fixation sources: dicts -> FixationSample, subtract the
         recalibrator bias offset, dedupe on a (t_end, x_doc, y_doc) watermark set."""
+        captured = []
         if not samples:
-            return
+            return captured
         with self._lock:
             bias_x, bias_y = self.recalibrator.offset
             if len(self._ingested_keys) > 400:  # prune watermark with the buffer window
@@ -658,13 +670,14 @@ class GazeSession:
                     logger.debug("skipping malformed fixation %r: %s", raw, exc)
                     continue
                 key = (round(s.t_end, 3), round(s.x_doc, 1), round(s.y_doc, 1))
-                if key in self._ingested_keys:
-                    continue
-                self._ingested_keys.add(key)
                 if bias_x or bias_y:
                     s = replace(s, x_doc=s.x_doc - bias_x, y_doc=s.y_doc - bias_y,
                                 x_vp=s.x_vp - bias_x, y_vp=s.y_vp - bias_y)
-                self.ring_buffer.add(s)
+                captured.append(s)
+                if key not in self._ingested_keys:
+                    self._ingested_keys.add(key)
+                    self.ring_buffer.add(s)
+        return captured
 
     def fetch_cursor_context(self) -> dict[str, Any]:
         """Capture actual DOM identities without invoking the simulated extractor."""
@@ -711,63 +724,46 @@ class GazeSession:
                 self.last_resolution = None
                 self.resolution_id += 1
 
-    def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> List[CandidateElement]:
-        """Pull pointer + fixations + nearby candidates from the pinned tab in ONE eval.
-        Returns [] honestly — never stale last_candidates — when Chrome or a real
-        pointer position is unavailable."""
+    def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> Tuple[List[CandidateElement], dict]:
+        """Return candidates AND their collection-time evidence/owner in one read."""
         if not self.is_chrome_reachable():
             with self._lock:
                 self.last_candidates = []
-            return []
+            return [], {}
         js = (
             "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (!api || !api.state) return null;"
             " const s = api.state; const locked = s.armed && s.lockedX !== null; return {"
-            " page_url: location.href,"
+            " page_url: location.origin + location.pathname,"
             " pointer: { x_vp: locked ? s.lockedX : s.pointerX, y_vp: locked ? s.lockedY : s.pointerY, scroll_x: window.scrollX, scroll_y: window.scrollY },"
             " fixations: s.ringBuffer.slice(-25),"
             f" candidates: api.extractCandidatesNear(locked ? s.lockedX : s.pointerX, locked ? s.lockedY : s.pointerY, {float(radius_px)})"
             " }; })()"
         )
         data = self._cdp.capture(js)
-        self.last_resolution_input = data
-        self.ingest(data.get("fixations") or [])
-        p = data.get("pointer") if isinstance(data.get("pointer"), dict) else {}
-        if p.get("x_vp") is None or p.get("y_vp") is None:
-            with self._lock:
-                self.last_candidates = []
-            return []
-        if not self.ring_buffer.latest():
-            self.tracker.record_point(
-                float(p["x_vp"]), float(p["y_vp"]),
-                scroll_x=float(p.get("scroll_x", 0.0)), scroll_y=float(p.get("scroll_y", 0.0)),
-                bias_offset=self.recalibrator.offset)
-
         cands = [_candidate_from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
-        with self._lock:
-            self.last_candidates = cands
-        return cands
+        return cands, data
 
-    def new_resolution(self, res: ResolutionResult) -> int:
-        """Store res as the active resolution and bump + return the epoch resolution_id."""
-        target = self.last_resolution_input.get("browser_target")
-        document = self.last_resolution_input.get("browser_document")
+    def new_resolution(self, res: ResolutionResult, evidence: Optional[dict] = None) -> int:
+        """Activate one locally frozen result, never reread another worker's input."""
+        evidence = evidence or {}
         with self.actions._lock:
             self.actions.invalidate()
             with self._lock:
                 self.last_resolution = res
                 self.last_hover_snapshot = None
-                self._resolution_target = target
-                self._resolution_document = document
-                self._resolution_route = self.last_resolution_input.get("browser_route")
+                self.last_resolution_input = evidence
+                self.last_candidate_wire = list(evidence.get("candidates") or [])
+                self._resolution_target = evidence.get("browser_target")
+                self._resolution_document = evidence.get("browser_document")
+                self._resolution_route = evidence.get("browser_route")
                 self.resolution_id += 1
                 return self.resolution_id
 
-    def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None) -> None:
-        # new_resolution under the lock; browser I/O outside it so slow evals don't
-        # serialize choose/ingest/intent dispatch behind a potentially slow tab.
-        rid = self.new_resolution(resolution)
+    def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None,
+                                     *, evidence: dict) -> int:
+        rid = self.new_resolution(resolution, evidence)
         if not self.is_chrome_reachable():
-            return
+            return rid
         esc = html.escape
         if resolution.decision in ("open_semantic_lens", "confirm_destructive"):
             cards = [sc.to_dict() for sc in resolution.ranked[:4]]
@@ -802,63 +798,65 @@ class GazeSession:
                 )
             js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
         try:
-            self._cdp.eval_js_once(f"(() => {{{js}}})()", target=self._resolution_target,
-                                   document=self._resolution_document, route=self._resolution_route)
+            self._cdp.eval_js_once(f"(() => {{{js}}})()", target=evidence.get("browser_target"),
+                                   document=evidence.get("browser_document"), route=evidence.get("browser_route"))
         except Exception as exc:
             logger.debug("render_resolution_in_browser eval failed: %s", exc)
+        return rid
 
     def choose(self, resolution_id: Optional[int] = None, candidate_index: int = 1,
                modality: str = "semantic_lens", execute: bool = True) -> Dict[str, Any]:
         """Validate the epoch + index, recalibrate from the latest fixation, click, and re-pin."""
-        with self._lock:
-            res = self.last_resolution
-            if res is None or not res.ranked:
-                return {"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."}
-            if resolution_id is None:
-                return {"ok": False, "error": "resolution_id is required"}
-            if int(resolution_id) != self.resolution_id:
-                return {"ok": False, "error": "stale resolution"}
-            idx = int(candidate_index) - 1
-            if idx < 0 or idx >= len(res.ranked):
-                return {"ok": False, "error": f"candidate_index {candidate_index} out of range (1..{len(res.ranked)})."}
-            chosen = res.ranked[idx]
-            latest_fix = self.ring_buffer.latest()
-            if latest_fix is not None:
-                true_x, true_y = chosen.candidate.center_doc
-                self.recalibrator.update(
-                    est_x=latest_fix.x_doc, est_y=latest_fix.y_doc, true_x=true_x, true_y=true_y,
-                    sigma=latest_fix.sigma_x, weight=0.25,
+        with self.actions._lock:
+            with self._lock:
+                res = self.last_resolution
+                if res is None or not res.ranked:
+                    return {"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."}
+                if resolution_id is None:
+                    return {"ok": False, "error": "resolution_id is required"}
+                if int(resolution_id) != self.resolution_id:
+                    return {"ok": False, "error": "stale resolution"}
+                idx = int(candidate_index) - 1
+                if idx < 0 or idx >= len(res.ranked):
+                    return {"ok": False, "error": f"candidate_index {candidate_index} out of range (1..{len(res.ranked)})."}
+                chosen = res.ranked[idx]
+                latest_fix = self.ring_buffer.latest()
+                if latest_fix is not None:
+                    true_x, true_y = chosen.candidate.center_doc
+                    self.recalibrator.update(
+                        est_x=latest_fix.x_doc, est_y=latest_fix.y_doc, true_x=true_x, true_y=true_y,
+                        sigma=latest_fix.sigma_x, weight=0.25,
+                    )
+            if self.is_chrome_reachable():
+                esc = html.escape
+                role_disp = esc(chosen.candidate.role).capitalize()
+                msg = (
+                    f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {esc(chosen.candidate.label)}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {esc(str(modality))})</span></div>"
+                    f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{esc(str(chosen.consequence_preview))}</div>"
+                    f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {esc(chosen.candidate.selector)}</div>"
                 )
-        if self.is_chrome_reachable():
-            esc = html.escape
-            role_disp = esc(chosen.candidate.role).capitalize()
-            msg = (
-                f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {esc(chosen.candidate.label)}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {esc(str(modality))})</span></div>"
-                f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{esc(str(chosen.consequence_preview))}</div>"
-                f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {esc(chosen.candidate.selector)}</div>"
-            )
-            click_stmt = (
-                f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
-                if execute else "")
-            try:
-                self._cdp.eval_js_once(
-                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
-                    f"{click_stmt} return true;}})()", target=self._resolution_target,
-                    document=self._resolution_document, route=self._resolution_route)
-            except Exception as exc:
-                self.clear_hover_snapshot()
-                return {"ok": False, "executed": None if execute else False,
-                        "outcome": "unknown" if execute else "failed",
-                        "error": f"browser choose failed; do not retry automatically: {exc}"}
-        with self._lock:
-            self.last_resolution = None  # consume — a second choose must not re-click stale state
-        return {
-            "ok": True,
-            "selected_index": idx + 1,
-            "selected": chosen.to_dict(),
-            "executed": execute,
-            "recalibrator_bias_offset": list(self.recalibrator.offset),
-        }
+                click_stmt = (
+                    f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
+                    if execute else "")
+                try:
+                    self._cdp.eval_js_once(
+                        f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
+                        f"{click_stmt} return true;}})()", target=self._resolution_target,
+                        document=self._resolution_document, route=self._resolution_route)
+                except Exception as exc:
+                    self.clear_hover_snapshot()
+                    return {"ok": False, "executed": None if execute else False,
+                            "outcome": "unknown" if execute else "failed",
+                            "error": f"browser choose failed; do not retry automatically: {exc}"}
+            with self._lock:
+                self.last_resolution = None  # consume — a second choose must not re-click stale state
+            return {
+                "ok": True,
+                "selected_index": idx + 1,
+                "selected": chosen.to_dict(),
+                "executed": execute,
+                "recalibrator_bias_offset": list(self.recalibrator.offset),
+            }
 
 
     def close(self) -> None:

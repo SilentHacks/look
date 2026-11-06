@@ -61,7 +61,7 @@
   const uiFrame = document.createElement("iframe");
   uiFrame.setAttribute("sandbox", "");
   uiFrame.setAttribute("aria-label", "Hermes Gaze private controls");
-  uiFrame.style.cssText = "position:fixed;right:22px;bottom:22px;width:438px;height:1px;border:0;pointer-events:auto;background:transparent;color-scheme:normal";
+  uiFrame.style.cssText = "position:fixed;right:16px;bottom:16px;width:min(438px,calc(100vw - 32px));max-height:calc(100vh - 32px);height:1px;border:0;pointer-events:auto;background:transparent;color-scheme:normal";
   visualShadow.appendChild(uiFrame);
   let uiRevision = 0;
   let uiEvent = null;
@@ -76,7 +76,8 @@
       }
     }
     for (const [id, node] of uiNodes) if (!shadow.contains(node)) uiNodes.delete(id);
-    return { revision: ++uiRevision, html: shadow.innerHTML, value: hudInput.value };
+    return { revision: ++uiRevision, html: shadow.innerHTML, value: hudInput.value,
+      viewportHeight: Math.max(1, window.innerHeight - 32), hotkey: state.hotkey, lensActive: state.lensActive };
   }
   const uiObserver = new MutationObserver(() => {
     if (_intentNonce && !destroyed)
@@ -84,8 +85,26 @@
   });
   uiObserver.observe(shadow, { childList: true, subtree: true, characterData: true, attributes: true,
     attributeFilter: ["style", "class", "aria-expanded", "placeholder"] });
+  function fitUiFrame(height) {
+    uiFrame.style.height = `${Math.max(1, Math.min(height, window.innerHeight - 32))}px`;
+    const r = uiFrame.getBoundingClientRect();
+    if (r.left < 16 || r.right > window.innerWidth - 16) {
+      uiFrame.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - r.width - 16))}px`;
+      uiFrame.style.right = "auto";
+    }
+    if (r.top < 16 || r.bottom > window.innerHeight - 16) {
+      uiFrame.style.top = `${Math.max(16, Math.min(r.top, window.innerHeight - r.height - 16))}px`;
+      uiFrame.style.bottom = "auto";
+    }
+  }
+  function onUiResize() {
+    fitUiFrame(uiFrame.getBoundingClientRect().height);
+    if (_intentNonce && !destroyed)
+      window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
+  }
+  window.addEventListener("resize", onUiResize);
   function onUiEvent(message) {
-    if (message.revision !== uiRevision || document.visibilityState !== "visible" || !document.hasFocus()) return;
+    if (document.visibilityState !== "visible" || !document.hasFocus()) return;
     const surface = getComputedStyle(host);
     if (host.style.cssText !== hostStyle || !host.matches(":popover-open") ||
         surface.visibility !== "visible" || surface.opacity !== "1" ||
@@ -96,7 +115,7 @@
     if (!node || !shadow.contains(node)) return;
     hudInput.value = String(message.value || "");
     if (message.event === "input") return;
-    const EventType = message.event === "keydown" ? KeyboardEvent : message.pointerType ? PointerEvent : MouseEvent;
+    const EventType = message.event.startsWith("key") ? KeyboardEvent : message.pointerType ? PointerEvent : MouseEvent;
     const frame = uiFrame.getBoundingClientRect();
     uiEvent = new EventType(message.event, { ...message, clientX: frame.left + (message.clientX || 0),
       clientY: frame.top + (message.clientY || 0),
@@ -287,7 +306,7 @@
   shadow.appendChild(style);
   visualShadow.appendChild(style.cloneNode(true));
   const uiStyle = document.createElement("style");
-  uiStyle.textContent = ".hud-shell{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;max-height:650px!important;box-sizing:border-box}.lens-card{position:relative!important;inset:auto!important;width:auto!important;margin-bottom:8px}";
+  uiStyle.textContent = ".hud-shell{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;max-height:var(--hg-max-height)!important;box-sizing:border-box}.lens-layer{position:relative!important;inset:auto!important}.lens-card{position:relative!important;inset:auto!important;width:auto!important;margin-bottom:8px}";
   shadow.appendChild(uiStyle);
 
   const spotlight = document.createElement("div");
@@ -1493,7 +1512,7 @@
   }
 
   function onWindowKeyDown(e) {
-    if (!e.isTrusted || document.visibilityState !== "visible") return;
+    if (!trustedUi(e) || document.visibilityState !== "visible") return;
     if (isEditableTarget(e)) return;
     if (e.code === TALK_KEY && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
@@ -1519,7 +1538,7 @@
   }
 
   function onWindowKeyUp(e) {
-    if (e.isTrusted && e.code === TALK_KEY && spaceHeld) {
+    if (trustedUi(e) && e.code === TALK_KEY && spaceHeld) {
       e.preventDefault();
       e.stopPropagation();
       spaceHeld = false;
@@ -1533,6 +1552,8 @@
 
   window.addEventListener("keydown", onWindowKeyDown, { capture: true });
   window.addEventListener("keyup", onWindowKeyUp, { capture: true });
+  shadow.addEventListener("keydown", onWindowKeyDown);
+  shadow.addEventListener("keyup", onWindowKeyUp);
   window.addEventListener("blur", onWindowBlur);
   document.addEventListener("visibilitychange", onWindowBlur);
 
@@ -1961,6 +1982,7 @@
   function destroy() {
     destroyed = true;
     uiObserver.disconnect();
+    window.removeEventListener("resize", onUiResize);
     stopTrackingPins();
     activeSnapshot = null;
     snapshots.clear();
@@ -1987,6 +2009,7 @@
     state,
     uiFrame,
     takeUiSnapshot,
+    fitUiFrame,
     onUiEvent,
     getReplyText: () => hudReply.textContent,
     Configure(opts) {

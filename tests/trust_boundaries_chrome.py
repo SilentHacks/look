@@ -22,7 +22,6 @@ from hermes_gaze.config import GazeConfig
 from hermes_gaze.resolver.cursor_context import cursor_result
 from hermes_gaze.voice_turns import VoiceTurns
 
-PORT = 19419
 
 
 def until(predicate, seconds=10):
@@ -56,7 +55,9 @@ def node(tab, selector, expression):
     def search(value):
         if isinstance(value, dict):
             attrs = value.get('attributes', [])
-            if any(attrs[i] == 'id' and attrs[i + 1] == wanted for i in range(0, len(attrs), 2)):
+            attributes = dict(zip(attrs[::2], attrs[1::2]))
+            if (selector.startswith('#') and attributes.get('id') == wanted or
+                    selector.startswith('.') and selector[1:] in attributes.get('class', '').split()):
                 return value.get('backendNodeId')
             for child in value.values():
                 found = search(child)
@@ -74,7 +75,7 @@ def node(tab, selector, expression):
         'executionContextId': tab._ui_context_id})['object']['objectId']
     try:
         result = command(tab, 'Runtime.callFunctionOn', {'objectId': obj,
-            'functionDeclaration': 'function(){' + expression + '}', 'returnByValue': True})
+            'functionDeclaration': 'function(){if(!this.isConnected)return;' + expression + '}', 'returnByValue': True})
         assert not result.get('exceptionDetails'), result
         return result['result'].get('value')
     finally:
@@ -117,15 +118,15 @@ class FakeInput:
 
 with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
     chrome = subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        f'--remote-debugging-port={PORT}', f'--user-data-dir={tmp}', '--no-first-run',
+        '--remote-debugging-port=0', f'--user-data-dir={tmp}', '--no-first-run',
         '--no-default-browser-check', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    session = GazeSession(f'http://127.0.0.1:{PORT}')
+    session = None
     try:
-        def ready():
-            try:
-                with urllib.request.urlopen(session.cdp_http_url + '/json/version', timeout=1): return True
-            except OSError: return False
-        until(ready)
+        # Discover only the port published by OUR private profile, never an existing browser.
+        active_port = Path(tmp) / 'DevToolsActivePort'
+        until(active_port.exists)
+        port = int(active_port.read_text().splitlines()[0])
+        session = GazeSession(f'http://127.0.0.1:{port}')
         assert session.cdp.connect()
         def new_tab():
             request = urllib.request.Request(session.cdp_http_url + '/json/new?about:blank', method='PUT')
@@ -228,9 +229,16 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             turns.close()
             service._VOICE_TURNS = None
             replies.clear()
+            switch_on_answer = [True]
+            def one_shot_model(**kwargs):
+                if switch_on_answer[0]:
+                    switch_on_answer[0] = False
+                    command(a, 'Emulation.setFocusEmulationEnabled', {'enabled': False})
+                    command(b, 'Page.bringToFront', {})
+                    command(b, 'Emulation.setFocusEmulationEnabled', {'enabled': True})
+                return SimpleNamespace(text='ONE_SHOT_ANSWER_MARKER', parsed={'handles': []})
             with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=FakeInput)), \
-                 patch.object(service, '_LLM', SimpleNamespace(complete_structured=lambda **kw:
-                    SimpleNamespace(text='ONE_SHOT_ANSWER_MARKER', parsed={'handles':[]}))), \
+                 patch.object(service, '_LLM', SimpleNamespace(complete_structured=one_shot_model)), \
                  patch.object(voice, 'transcribe_audio_buffer', return_value=('What is this export?', [])):
                 aim(a, '#secret')
                 # Use trusted mic clicks; the hostile keyup listener is still installed.
@@ -239,8 +247,14 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
                 click(a, '#hg-mic-btn')
                 stop = until(lambda: next((r for r in replies if r['type']=='record_stop'), None))
                 assert stop['ok'] and stop['delivery']=='one_shot', stop
+                assert 'ONE_SHOT_ANSWER_MARKER' not in node(a, '#hg-reply', 'return this.textContent')
+                command(b, 'Emulation.setFocusEmulationEnabled', {'enabled': False})
+                command(a, 'Page.bringToFront', {})
+                command(a, 'Emulation.setFocusEmulationEnabled', {'enabled': True})
                 until(lambda: 'ONE_SHOT_ANSWER_MARKER' in (node(a, '#hg-reply', 'return this.textContent') or ''))
                 assert node(a, '#hg-lock-label', 'return this.textContent') == 'complete'
+                session.configure(mode='hover')
+                assert 'ONE_SHOT_ANSWER_MARKER' in node(a, '#hg-reply', 'return this.textContent')
                 print('PASS 7: disconnected voice displays actual one-shot answer, not queued')
                 replies.clear()
                 session.configure(mode='simulated')
@@ -249,6 +263,46 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
                 assert stop['ok'] and stop['mode']=='simulated', stop
                 assert 'No DOM candidates' not in json.dumps(stop)
                 print('PASS 8: simulated voice freezes candidates and pointer at release and resolves successfully')
+                session.configure(mode='hover')
+                def key(code, key_name=None):
+                    for kind in ('keyDown', 'keyUp'):
+                        command(a, 'Input.dispatchKeyEvent', {'type': kind, 'code': code,
+                            'key': key_name or code, 'windowsVirtualKeyCode': 13 if code == 'Enter' else 0,
+                            'text': '\r' if kind == 'keyDown' and code == 'Enter' else ''})
+                        time.sleep(.1)
+                    drain(a)
+                aim(a, '#secret')
+                node(a, '#hg-lock-btn', 'this.focus();return true')
+                before = a.eval_js('window.__HERMES_GAZE_OVERLAY__.state.armed')
+                key('Enter')
+                until(lambda: a.eval_js('window.__HERMES_GAZE_OVERLAY__.state.armed') != before)
+                node(a, '#hg-tuck-btn', 'this.focus();return true')
+                key('Enter')
+                until(lambda: a.eval_js('window.__HERMES_GAZE_OVERLAY__.state.tucked'))
+                key('Enter')
+                until(lambda: not a.eval_js('window.__HERMES_GAZE_OVERLAY__.state.tucked'))
+                node(a, '#hg-input', 'this.value="What is this export?";return true')
+                node(a, '#hg-send', 'this.focus();return true')
+                replies.clear()
+                key('Enter')
+                until(lambda: any(r['type'] == 'submit' and r.get('delivery') == 'one_shot' for r in replies))
+                node(a, '#hg-mic-btn', 'this.focus();return true')
+                key('Enter')
+                until(lambda: session.microphone._stream is not None)
+                key('Enter')
+                until(lambda: session.microphone._stream is None)
+                node(a, '#hg-lock-btn', 'this.focus();return true')
+                before = a.eval_js('window.__HERMES_GAZE_OVERLAY__.state.armed')
+                key('AltRight', 'Alt')
+                until(lambda: a.eval_js('window.__HERMES_GAZE_OVERLAY__.state.armed') != before)
+                node(a, '#hg-mic-btn', 'this.focus();return true')
+                command(a, 'Input.dispatchKeyEvent', {'type': 'keyDown', 'code': 'Space', 'key': ' ', 'windowsVirtualKeyCode': 32})
+                until(lambda: session.microphone._stream is not None)
+                command(a, 'Input.dispatchKeyEvent', {'type': 'keyUp', 'code': 'Space', 'key': ' ', 'windowsVirtualKeyCode': 32})
+                until(lambda: session.microphone._stream is None)
+                key('Escape')
+                until(lambda: node(a, '#hg-reply', 'return this.style.display') == 'none')
+                print('PASS review: iframe shortcuts and Space release work; native Enter activates Ask/Speak/Lock/Minimize')
             session.configure(mode='hover')
 
             # Fresh snapshot: normal trusted confirmation remains single-use.
@@ -293,10 +347,15 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             real_resolve=service.resolve_candidates
             def switch_after_scoring(*args,**kwargs):
                 result=real_resolve(*args,**kwargs)
+                if args[2] != 'Open this':
+                    return result
                 command(a,'Emulation.setFocusEmulationEnabled',{'enabled':False})
                 command(b,'Page.bringToFront',{})
                 command(b,'Emulation.setFocusEmulationEnabled',{'enabled':True})
                 selected[0]=b
+                aim(b, '#cross-target')
+                other = service.resolve_now(session, utterance='Inspect B', mode='simulated')
+                assert other['browser_target'] == b._target_id
                 return result
             with patch.object(service,'_LLM',None),patch.object(service,'resolve_candidates',side_effect=switch_after_scoring), \
                  patch.object(session.cdp,'_target',side_effect=lambda:selected[0]):
@@ -305,7 +364,27 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             chosen=session.choose(resolution_id=result['resolution_id'])
             assert not chosen['ok'] and page(b,'return crossClicks')==0 and page(a,'return crossClicks')==0
             print('PASS 4: scoring-time focus switch cannot transfer resolution or click to matching selector in B')
+            # Actual Lens keyboard selection and compact private renderer layout.
+            aim(b, '#cross-target')
+            with patch.object(service, '_LLM', None):
+                lens = service.resolve_now(session, utterance='Open this', mode='simulated')
+            b.eval_js('window.__HERMES_GAZE_OVERLAY__.renderSemanticLens(' +
+                json.dumps(lens['ranked'][:1]) + ',"Choose the captured test control",' + str(lens['resolution_id']) + ');true')
+            until(lambda: node(b, '.lens-card', 'const r=this.getBoundingClientRect(),h=this.getRootNode().querySelector(".hud-shell").getBoundingClientRect();return r.bottom<=h.top||h.bottom<=r.top'))
+            node(b, '#hg-lock-btn', 'this.focus();return true')
+            command(b, 'Input.dispatchKeyEvent', {'type':'keyDown','key':'1','code':'Digit1','windowsVirtualKeyCode':49})
+            command(b, 'Input.dispatchKeyEvent', {'type':'keyUp','key':'1','code':'Digit1','windowsVirtualKeyCode':49})
+            until(lambda: page(b, 'return crossClicks') == 1)
+            command(b, 'Emulation.setDeviceMetricsOverride', {'width':390,'height':420,'deviceScaleFactor':1,'mobile':False})
+            b.eval_js('window.__HERMES_GAZE_OVERLAY__.showHudMessage("Long private reply ".repeat(500));true')
+            until(lambda: b.eval_js('(()=>{const r=window.__HERMES_GAZE_OVERLAY__.uiFrame.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()'))
+            until(lambda: node(b, '#hg-reply', 'return this.textContent.startsWith("Long private reply") && this.scrollHeight>this.clientHeight'))
+            Path('/tmp/hermes-trust-small.png').write_bytes(base64.b64decode(
+                command(b, 'Page.captureScreenshot', {'format': 'png'})['data']))
+            command(b, 'Emulation.clearDeviceMetricsOverride', {})
+            print('PASS review: concurrent B resolution cannot steal A ownership; Lens is usable and frame stays inside 390x420 viewport')
     finally:
-        session.close()
+        if session:
+            session.close()
         chrome.terminate()
         chrome.wait(timeout=10)

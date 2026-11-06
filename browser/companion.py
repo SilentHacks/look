@@ -78,6 +78,7 @@ class Companion:
                     if not tab.is_connected:
                         tab.connect()
                     self._display_pending(tab)
+                    tab.flush_replies()
             except Exception:
                 logger.debug("Chrome tab discovery unavailable", exc_info=True)
             self._stop.wait(.25)

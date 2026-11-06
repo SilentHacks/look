@@ -168,8 +168,7 @@ def resolve_now(
             if mode == "hover":
                 pushed = {"cursor_context": session.fetch_cursor_context()}
             else:
-                session.fetch_live_state_and_candidates()
-                pushed = dict(session.last_resolution_input)
+                _, pushed = session.fetch_live_state_and_candidates()
             transcribed_text, word_ts = transcribe_audio_buffer(
                 audio_pcm, model_name=_whisper_model_name(), audio_epoch=audio_epoch
             )
@@ -207,9 +206,10 @@ def resolve_now(
             message = (f'Cursor evidence<div id="gaze-explanation-text" data-rid="{rid}">Asking Hermes…</div>'
                        if payload["ok"] else html.escape(payload["error"]))
             try:
-                session.eval_js_once(
+                session.cdp.eval_js_once(
                     f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])}, {json.dumps(message)});"
-                    f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});return true}})()")
+                    f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});return true}})()",
+                    target=payload.get("browser_target"), document=payload.get("browser_document"))
             except Exception:
                 logger.debug("Cursor source is no longer foreground", exc_info=True)
         _append_record(session, {"type": "cursor_context", "context": payload["context"],
@@ -220,49 +220,26 @@ def resolve_now(
         return payload
     now = time.time()
 
-    if pushed is not None:
-        session.ingest(pushed.get("fixations") or [])
-        pointer = pushed.get("pointer")
-        # A null pointer is honest "no pointer yet" — never record it as a fixation.
-        if isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
-            session.tracker.record_point(
-                float(pointer["x_vp"]),
-                float(pointer["y_vp"]),
-                scroll_x=float(pointer.get("scroll_x", 0.0)),
-                scroll_y=float(pointer.get("scroll_y", 0.0)),
-                timestamp=now,
-                bias_offset=session.recalibrator.offset,
-            )
-        candidates = [
-            CandidateElement.from_wire(raw)
-            for raw in pushed.get("candidates") or []
-            if isinstance(raw, dict)
-        ]
-        session.last_candidate_wire = list(pushed.get("candidates") or [])
-        session.last_resolution_input = {"pointer": pointer, "fixations": pushed.get("fixations") or [],
-                                         "candidates": pushed.get("candidates") or [], "words": word_timestamps or [],
-                                         "utterance": utterance, "page_url": pushed.get("page_url")}
-        session.last_resolution_input.update(
-            {key: pushed.get(key) for key in ("browser_target", "browser_document", "browser_route")})
-        with session._lock:
-            session.last_candidates = candidates
+    if pushed is None:
+        candidates, resolution_input = session.fetch_live_state_and_candidates(
+            radius_px=getattr(session, "_candidate_radius_px", 380.0))
     else:
-        candidates = session.fetch_live_state_and_candidates(
-            radius_px=getattr(session, "_candidate_radius_px", 380.0)
-        )
-        session.last_candidate_wire = [vars(candidate).copy() for candidate in candidates]
-
+        resolution_input = dict(pushed)
+        candidates = [CandidateElement.from_wire(raw) for raw in pushed.get("candidates") or []
+                      if isinstance(raw, dict)]
+    resolution_input.update(words=word_timestamps or [], utterance=utterance)
+    fixations = session.ingest(resolution_input.get("fixations") or [])
+    pointer = resolution_input.get("pointer")
+    if isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
+        fixations.append(session.tracker.record_point(
+            float(pointer["x_vp"]), float(pointer["y_vp"]),
+            scroll_x=float(pointer.get("scroll_x", 0.0)), scroll_y=float(pointer.get("scroll_y", 0.0)),
+            timestamp=now, bias_offset=session.recalibrator.offset))
     if not candidates:
         return {"ok": False, "error": "No DOM candidates extracted — is the overlay injected into the Chrome tab?"}
-    fixations = session.ring_buffer.snapshot(now)
-    if pushed is None:
-        session.last_resolution_input.update({"words": word_timestamps or [], "utterance": utterance})
     if not fixations:
         return {"ok": False, "error": "No pointer/gaze fixations recorded yet."}
-    page_url = session.last_resolution_input.get("page_url")
-    if page_url != session.scope_page_url:
-        session.scope_selection.clear()
-        session.scope_page_url = page_url
+    page_url = resolution_input.get("page_url")
 
     res = resolve_candidates(
         candidates, fixations, utterance, t_arm=now, word_timestamps=word_timestamps,
@@ -270,7 +247,7 @@ def resolve_now(
     )
     payload = res.to_dict()
     payload["ok"] = res.top is not None
-    owner = {key: session.last_resolution_input.get(key)
+    owner = {key: resolution_input.get(key)
              for key in ("browser_target", "browser_document", "browser_route")}
     payload.update(owner)
 
@@ -295,14 +272,16 @@ def resolve_now(
                 f"<div style='margin-top:6px;'>{svg_chart}</div>"
             )
 
-    session.render_resolution_in_browser(res, hud_html=hud_html)
-    payload["resolution_id"] = session.resolution_id
-    payload["chrome_connected"] = session.is_chrome_reachable()
-    payload["mode"] = mode
-    payload["page_url"] = page_url
-    payload.update(_scope_payload(session, payload.get("ranked") or []))
-    if payload["scope_anchor_id"] in session.scope_selection:
-        _render_scope(session, {**payload, "needs_explain": res.intent_class == "read_only"})
+    with session.actions._lock:
+        if page_url != session.scope_page_url:
+            session.scope_selection.clear()
+            session.scope_page_url = page_url
+        session.last_candidates = candidates
+        rid = session.render_resolution_in_browser(res, hud_html=hud_html, evidence=resolution_input)
+        payload.update(resolution_id=rid, chrome_connected=session.is_chrome_reachable(), mode=mode, page_url=page_url)
+        payload.update(_scope_payload(session, payload.get("ranked") or []))
+        if payload["scope_anchor_id"] in session.scope_selection:
+            _render_scope(session, {**payload, "needs_explain": res.intent_class == "read_only"})
     if session.is_chrome_reachable():
         view = {key: payload[key] for key in ("scopes", "selected_scope_id", "resolution_id", "utterance")}
         try:
@@ -313,11 +292,11 @@ def resolve_now(
             logger.debug("Resolution source is no longer foreground", exc_info=True)
     try:
         _append_record(session, {"type": "resolution", "wall_time": time.time(),
-                                 "resolution_id": session.resolution_id, "mode": mode,
+                                 "resolution_id": rid, "mode": mode,
                                  "page_url": payload["page_url"], "utterance": utterance,
-                                 "words": word_timestamps or [], "pointer": session.last_resolution_input.get("pointer", {}),
-                                 "fixations": session.last_resolution_input.get("fixations", []),
-                                 "candidates": session.last_resolution_input.get("candidates", []),
+                                 "words": word_timestamps or [], "pointer": resolution_input.get("pointer", {}),
+                                 "fixations": resolution_input.get("fixations", []),
+                                 "candidates": resolution_input.get("candidates", []),
                                  "result": payload})
     except Exception as exc:
         payload["ok"] = False
