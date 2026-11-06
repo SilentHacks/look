@@ -9,7 +9,6 @@ explanation requests (``explain_element``) via ``ctx.llm``.
 from __future__ import annotations
 
 import base64
-import copy
 import html
 import json
 import logging
@@ -23,7 +22,7 @@ _RECORD_LOCK = threading.Lock()
 from .browser.cdp_bridge import GazeSession, get_shared_session
 from .config import GazeConfig
 from .resolver.bayesian_fusion import CandidateElement, classify_utterance_intent, resolve_candidates
-from .resolver.cursor_context import CONTEXT_INSTRUCTIONS, cursor_result
+from .resolver.cursor_context import EVIDENCE_RULES, build_context, cursor_result
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 from .resolver.temporal_aligner import has_deictic_pronoun
 from .voice import MAX_AUDIO_BYTES
@@ -71,7 +70,8 @@ def _append_record(session: GazeSession, event: Dict[str, Any]) -> str | None:
     return str(path)
 
 
-def _compact_context(selected: Dict[str, Any], scopes: Sequence[Dict[str, Any]]) -> str:
+def _compact_context(selected: Dict[str, Any], scopes: Sequence[Dict[str, Any]], *,
+                     utterance: str, resolution_id: int, intent=None, decision=None) -> str:
     def description(scope: Dict[str, Any]) -> str:
         return f"{scope.get('scope') or scope.get('role') or 'element'} {str(scope.get('label') or scope.get('id'))[:65]}"
 
@@ -79,17 +79,19 @@ def _compact_context(selected: Dict[str, Any], scopes: Sequence[Dict[str, Any]])
     for scope in scopes:
         for action in scope.get("actions") or []:
             actions.setdefault(action.get("selector"), action)
-    text = f"[gaze_ref] Subject: {description(selected)} ({str(selected.get('selector') or '')[:120]})"
-    text += ": " + str(selected.get("summary") or selected.get("consequence") or "")[:160]
+    lines = [f"Subject: {description(selected)} ({str(selected.get('selector') or '')[:120]}): "
+             + str(selected.get("summary") or selected.get("consequence") or "")[:500]]
     alternatives = [description(scope) for scope in scopes if scope.get("id") != selected.get("id")]
     if alternatives:
-        text += " | Alternatives: " + "; ".join(alternatives[:7])
+        lines.append("Alternatives: " + "; ".join(alternatives[:7]))
     if actions:
-        text += " | Actions (separate controls): " + "; ".join(
+        lines.append("Actions (separate controls): " + "; ".join(
             f"{str(a.get('label', 'action'))[:35]} {str(a.get('selector') or '')[:65]}: {str(a.get('consequence') or '')[:75]}"
             for a in list(actions.values())[:3]
-        )
-    return text[:900]
+        ))
+    return build_context(lines, utterance, "Simulated gaze estimate: " + description(selected)
+                         + ". No hover identity or automatic highlight is claimed.",
+                         resolution_id=resolution_id, intent=intent, decision=decision)
 
 
 def _scope_payload(session: GazeSession, ranked: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -109,7 +111,12 @@ def _scope_payload(session: GazeSession, ranked: Sequence[Dict[str, Any]]) -> Di
     if selected_id not in ids:
         selected_id = scopes[0]["id"] if scopes else anchor_id
     selected = next((s for s in scopes if s.get("id") == selected_id), anchor)
-    return {"scopes": scopes, "selected_scope_id": selected_id, "context": _compact_context(selected, scopes),
+    resolution = session.last_resolution.to_dict() if session.last_resolution else {}
+    return {"scopes": scopes, "selected_scope_id": selected_id,
+            "context": _compact_context(selected, scopes,
+                utterance=str(session.last_resolution_input.get("utterance") or ""),
+                resolution_id=session.resolution_id, intent=resolution.get("intent_class"),
+                decision=resolution.get("decision")),
             "top": selected, "scope_anchor_id": anchor_id}
 
 
@@ -308,7 +315,7 @@ def explain_element(utterance: str, context: str, llm: Any = None) -> str:
         raise RuntimeError("Hermes model unavailable")
     res = client.complete_structured(
         instructions=(
-            CONTEXT_INSTRUCTIONS +
+            EVIDENCE_RULES +
             "Answer the user's question usefully, including table analysis when relevant. "
             "You cannot execute UI actions. For action requests describe or clarify; never claim execution. "
             "Tools are unavailable in this one-shot call: answer directly from the evidence."
@@ -326,11 +333,10 @@ def explain_element(utterance: str, context: str, llm: Any = None) -> str:
 def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Deliver frozen evidence as a real turn; only unconnected questions fall back."""
     if not snapshot.get("ok"):
-        previous = getattr(_VOICE_TURNS, "last_snapshot", None)
-        if (_VOICE_TURNS is None or not _VOICE_TURNS.connected or not previous or
+        if (_VOICE_TURNS is None or not _VOICE_TURNS.connected or
                 has_deictic_pronoun(snapshot.get("utterance", ""))):
             return snapshot
-        snapshot = {**copy.deepcopy(previous), "utterance": snapshot["utterance"]}
+        snapshot = {**snapshot, "context": ""}
     delivery = (_VOICE_TURNS.submit(snapshot["utterance"], snapshot) if _VOICE_TURNS is not None
                 else {"ok": False, "fallback_allowed": True, "error": "No Hermes session connected"})
     if delivery.get("ok"):
@@ -342,7 +348,7 @@ def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             # Delivery already happened; reporting rejection here would invite duplicate turns.
             delivery["record_error"] = str(exc)
         return delivery
-    if not delivery.get("fallback_allowed"):
+    if not delivery.get("fallback_allowed") or not snapshot.get("ok"):
         return {**delivery, "delivery": "unavailable"}
     notice = (str(delivery.get("error") or "No Hermes session connected") +
               ". Run /gaze in your Hermes TUI/desktop session to connect. "
@@ -422,7 +428,10 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             session.scope_selection[info["scope_anchor_id"]] = sid
             info.update({"selected_scope_id": sid, "top": chosen,
-                         "context": _compact_context(chosen, info["scopes"]),
+                         "context": _compact_context(chosen, info["scopes"],
+                             utterance=str(session.last_resolution_input.get("utterance") or ""),
+                             resolution_id=session.resolution_id, intent=payload.get("intent_class"),
+                             decision=payload.get("decision")),
                          "resolution_id": session.resolution_id,
                          "needs_explain": payload.get("intent_class") == "read_only"})
             try:
@@ -488,8 +497,12 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             if chosen is None:
                 reply({"ok": False, "error": "scope_id is not a scope of the current resolution"})
                 return
-            context = _compact_context(chosen, info["scopes"])
-            explanation = explain_element(str(intent.get("utterance") or ""), context, llm=_LLM)
+            utterance = str(intent.get("utterance") or session.last_resolution_input.get("utterance") or "")
+            resolution = session.last_resolution.to_dict()
+            context = _compact_context(chosen, info["scopes"], utterance=utterance,
+                                       resolution_id=session.resolution_id,
+                                       intent=resolution.get("intent_class"), decision=resolution.get("decision"))
+            explanation = explain_element(utterance, context, llm=_LLM)
             try:
                 _append_record(session, {"type": "explain", "wall_time": time.time(),
                                          "resolution_id": session.resolution_id, "scope_id": sid,

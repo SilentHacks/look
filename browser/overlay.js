@@ -743,7 +743,7 @@
     return field.matches(sensitiveSelector) ||
       tokens.some(token => token.startsWith("cc-") || token === "current-password" || token === "new-password");
   }
-  function safeText(el, max = 160) {
+  function safeText(el, max = 160, excluded = null) {
     if (!el) return "";
     if (sensitive(el)) return "[redacted]";
     if (el.matches("input,textarea,select")) return "";
@@ -752,7 +752,7 @@
     const parts = [];
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
-        if (node.nodeType === 1 && (node.matches('input,textarea,select,script,style,#hermes-gaze-root') || sensitive(node)))
+        if (node.nodeType === 1 && (excluded?.has(node) || node.matches('input,textarea,select,script,style,#hermes-gaze-root') || sensitive(node)))
           return NodeFilter.FILTER_REJECT;
         if (node.nodeType === 1 && node.matches("label") && node.htmlFor &&
             sensitive(document.getElementById(node.htmlFor))) return NodeFilter.FILTER_REJECT;
@@ -767,10 +767,10 @@
     }
     return parts.join(" ").slice(0, max);
   }
-  function safeLabel(el, max = 100) {
+  function safeLabel(el, max = 100, excluded = null) {
     if (sensitive(el) || (el.matches("label") && el.htmlFor && sensitive(document.getElementById(el.htmlFor))))
       return "[redacted]";
-    return (el.getAttribute("aria-label") || el.getAttribute("title") || safeText(el, max)).slice(0, max);
+    return (el.getAttribute("aria-label") || el.getAttribute("title") || safeText(el, max, excluded)).slice(0, max);
   }
   function cursorId(el) {
     if (!cursorIds.has(el)) cursorIds.set(el, `@${++cursorSerial}`);
@@ -828,6 +828,8 @@
     }
     const blocks = new Map();
     const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean).reverse())].slice(0, 64).reverse();
+    const capturedTables = new Set(refs.map(id => cursorRefs.get(id))
+      .filter(el => el?.isConnected && !sensitive(el)).map(el => el.closest("table,[role=grid]")).filter(Boolean));
     for (const id of refs.slice().reverse()) {
       const el = cursorRefs.get(id);
       if (!el || !el.isConnected) { capture.targets.push({ id, available: false, reason: "historical node detached" }); continue; }
@@ -875,7 +877,17 @@
               columns.push(`${id} ${label}`);
             }
           }
-          blocks.set(bid, { id: bid, kind: "table", label: safeText(table.querySelector("caption"), 80),
+          let label = safeText(table.querySelector("caption"), 80);
+          if (!label) {
+            const container = table.parentElement?.closest("article,section,.card");
+            for (const heading of container?.querySelectorAll("h1,h2,h3,h4,h5,h6,[role=heading],.panel-title") || []) {
+              if (heading.closest("article,section,.card") === container &&
+                  !heading.closest("table,[role=grid],form,label,input,textarea,select,[contenteditable]") &&
+                  (heading.compareDocumentPosition(table) & 4))
+                label = safeText(heading, 80) || label;
+            }
+          }
+          blocks.set(bid, { id: bid, kind: "table", label,
             headers: headerRow ? cellsOf(headerRow).map(c => `${handle(c)} ${safeText(c, 60)}`) : [],
             columns, total_rows: dataRows.length, collection_limited: collectionLimited,
             rows: [], _rows: dataRows, _cells: cellsOf, _allCells: allCells,
@@ -908,8 +920,8 @@
         const bid = handle(parent);
         target.block_ids.push(bid);
         if (!blocks.has(bid)) blocks.set(bid, { id: bid, kind: parent.tagName.toLowerCase(),
-          label: safeLabel(parent.querySelector("h1,h2,h3,h4,h5,h6") || parent, 80),
-          text: safeText(parent, 650), text_limit: 650 });
+          label: safeLabel(parent.querySelector("h1,h2,h3,h4,h5,h6") || parent, 80, capturedTables),
+          text: safeText(parent, 650, capturedTables), text_limit: 650 });
       }
     }
     capture.targets.reverse();

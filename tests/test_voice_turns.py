@@ -103,17 +103,21 @@ class VoiceTurnsTests(unittest.TestCase):
         self.turns.post(session_id="agent-A", turn_id="early", assistant_response="must not display")
         self.assertEqual(len(self.chrome.events), count)
 
-    def test_typed_turn_does_not_consume_unrelated_pending_and_followup_keeps_evidence(self):
+    def test_typed_turn_preserves_pending_and_followup_streams_without_reinjecting(self):
         result = self.turns.submit("queued words", {"context": "queued evidence", "snapshot_id": "queued"})
         with patch("hermes_gaze.service.resolve_now", return_value={"context": "fresh typed evidence", "snapshot_id": "typed"}):
             context = self.pre("explain this", "typed")
         self.assertIn("fresh typed evidence", context["context"])
+        epoch = self.chrome.resolution_id
         self.turns.post(session_id="agent-A", turn_id="typed", assistant_response="The result is 42.")
         history = [{"role": "assistant", "content": "The result is 42."}]
         followup = self.pre("Why 42?", "followup", conversation_history=history)
-        self.assertIn("fresh typed evidence", followup["context"])
+        self.assertIsNone(followup)
+        self.assertEqual(self.chrome.resolution_id, epoch)
+        self.assertEqual(len(self.chrome.stored), 1)
         self.assertEqual(history[0]["content"], "The result is 42.")
         self.turns.post(session_id="agent-A", turn_id="followup", assistant_response="Because of the data.")
+        self.assertEqual(self.chrome.events[-1]["text"], "Because of the data.")
         self.assertIn("queued evidence", self.pre("queued words", "queued")["context"])
         self.assertEqual(self.chrome.events[-1]["request_id"], result["request_id"])
 
@@ -143,7 +147,11 @@ class VoiceTurnsTests(unittest.TestCase):
         self.turns.post(session_id="agent-A", turn_id="turn-1", assistant_response="late")
         self.assertEqual(self.chrome.events[-1]["error"], "API failed")
         self.assertTrue(self.turns.connected)
-        self.assertIn("real evidence", self.pre("Try again", "retry")["context"])
+        epoch = self.chrome.resolution_id
+        self.assertIsNone(self.pre("Try again", "retry"))
+        self.assertEqual(self.chrome.resolution_id, epoch)
+        self.turns.post(session_id="agent-A", turn_id="retry", assistant_response="Retry answer")
+        self.assertEqual(self.chrome.events[-1]["text"], "Retry answer")
 
     def test_rebinding_disconnect_and_unload_reject_old_owner(self):
         self.turns.submit("private words", {"context": "A private page"})
@@ -180,13 +188,13 @@ class VoiceTurnsTests(unittest.TestCase):
         self.assertIsNone(self.pre("followup", "new", session="agent-B"))
 
     def test_queue_and_context_are_bounded_and_inputs_are_frozen(self):
-        source = {"context": "x" * 10000, "handles": {"@1": {"label": "original"}}}
+        self.assertFalse(self.turns.submit("oversized", {"context": "x" * 6001})["ok"])
+        source = {"context": "x" * 3000, "handles": {"@1": {"label": "original"}}}
         for i in range(self.turns.MAX_PENDING):
             self.assertTrue(self.turns.submit(f"question {i}", source)["ok"])
         self.assertFalse(self.turns.submit("overflow", {})["ok"])
         source["handles"]["@1"]["label"] = "mutated"
-        context = self.pre("question 0")["context"]
-        self.assertLessEqual(len(context), self.turns.MAX_CONTEXT)
+        self.pre("question 0")
         self.assertEqual(self.chrome.stored[0]["handles"]["@1"]["label"], "original")
         self.assertEqual(len(self.host.messages), self.turns.MAX_PENDING)
 

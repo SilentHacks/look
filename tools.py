@@ -85,8 +85,8 @@ GAZE_CHOOSE_SCHEMA = _schema(
 
 GAZE_HIGHLIGHT_SCHEMA = _schema(
     "gaze_highlight",
-    "Highlight the snapshot scope used in your answer: cell, row, column, table or panel. "
-    "Use only handles and the Resolution number from the current gaze context.",
+    "Change the automatically highlighted pointer to the snapshot scope used in your answer: cell, row, column, table or panel. "
+    "No call is needed when using the pointed scope. Use current @ handles and Resolution; omit hud_message while streaming.",
     {
         "handles": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8,
                     "description": "Current snapshot @ handles to highlight; never CSS selectors."},
@@ -98,8 +98,12 @@ GAZE_HIGHLIGHT_SCHEMA = _schema(
 
 GAZE_CLICK_SCHEMA = _schema(
     "gaze_click",
-    "Click one current snapshot control. Risky actions require a real confirmation click in Chrome; "
-    "you cannot confirm them through this tool. Clarify ambiguous action requests first.",
+    "Click one current snapshot control, not a data container. Clarify ambiguous action requests first; "
+    "a question about a control is not permission to click. Claim execution only when executed is true. "
+    "If confirmation_required is returned, tell the user which control awaits their trusted primary click in Chrome. "
+    "Never approve through tools, speech, dwell or keys, and never bypass gaze_click or the confirmation with browser, "
+    "JavaScript or terminal tools. Changed, detached or expired targets need fresh gaze_resolve evidence. "
+    "An unknown click outcome must not be retried.",
     {
         "handle": {"type": "string", "description": "Current @ handle of the control to activate, not the data subject."},
         "resolution_id": {"type": "integer", "description": "Resolution number in the current gaze context."},

@@ -29,7 +29,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `benchmark/` | `benchmark_page.html` (self-contained demo dashboard) + `run_benchmark.py` (accuracy suite). |
 | `tests/` | stdlib `unittest` only. `tests/__init__.py` registers a `hermes_gaze` package *shell* (no `__init__.py` exec) so tests can `from hermes_gaze.service import ...` exactly like Hermes's plugin loader. |
 | `docs/` | PLAN (original design — see its header note), prior art & pitch, demo playbook. |
-| `skills/gaze-telepathy/SKILL.md` | Bundled skill teaching Hermes how to act on `[gaze_ref]` context. Keep decision names/thresholds in sync with `resolver/bayesian_fusion.py`. |
+| `skills/gaze-telepathy/SKILL.md` | Bundled skill for browser evidence, snapshot tools and session setup. Keep simulated decision names/thresholds in sync with `resolver/bayesian_fusion.py`. |
 
 ## Invariants (each with the WHY)
 
@@ -37,6 +37,11 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   The overlay collects identities/structural facts and renders highlights/status,
   never scores, ranks or decides semantic scope/risk. This keeps one policy
   implementation instead of diverging JS/Python decisions.
+- **User message and browser evidence are separate concepts.** Durable guidance is
+  registered as a frozen system prompt section. Both modes use `build_context` for
+  an escaped `<browser_context>` envelope with `<page_data>`, relative pointer age
+  and the labelled question. `stamp_resolution` changes only its trusted epoch
+  slot. Never slice a rendered packet: its fences and suffix share the 6000-char bound.
 - **Overlay → Python only via `__hermesGazeIntent`.** No `fetch()` to `server.py`, no
   new HTTP endpoints, no `Runtime.evaluate` polling for decisions. The binding keeps a
   single ordered channel that works on file:// and any origin without CORS. Replies
@@ -87,6 +92,10 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Queued voice snapshots activate only in the matching session/text pre-hook.
   Explain checks the saved snapshot before and after the call; hook context is
   returned verbatim, including the current epoch.
+  Fresh hover evidence highlights its available pointer handles automatically;
+  the model calls `gaze_highlight` only to change scope. Followups without a fresh
+  capture stream normally but attach nothing and preserve the epoch and pending
+  confirmations. Live identity/fingerprint and single-use approval checks still apply.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
   associated labels. Capture history/evidence at recording stop, before ASR.
@@ -137,3 +146,8 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
 - `benchmark/benchmark_page.html` must stay self-contained: zero server
   dependencies (no fetch, no script tags served from the demo server). The overlay
   is always injected via CDP.
+- System guidance is frozen into new Hermes sessions; start a new session after
+  changing it. Compaction can remove historical evidence: `gaze_resolve` then
+  captures the current cursor, not the historical target.
+- Hermes persists browser evidence in `state.db` through `api_content`, independently
+  of `record_trials`. Disabling plugin replay recording does not disable host retention.

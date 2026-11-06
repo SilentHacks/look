@@ -25,6 +25,7 @@ import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from ..resolver.cursor_context import stamp_resolution
 
 try:
     from plugins.plugin_utils import lazy_singleton
@@ -607,10 +608,11 @@ class GazeSession:
                 self.scope_selection.clear()
                 self.resolution_id += 1
                 rid = self.resolution_id
-                context = str(payload.get("context") or "")
-                if context.startswith("Resolution: ") and "\n" in context:
-                    context = context.split("\n", 1)[1]
-                context = f"Resolution: {rid}\n{context}"[:6000]
+                try:
+                    context = stamp_resolution(payload.get("context"), rid)
+                except ValueError as exc:
+                    context = ""
+                    payload.update(ok=False, error=str(exc))
                 payload.update(resolution_id=rid, epoch=rid, context=context, browser_active=False)
                 snapshot = copy.deepcopy(payload)
                 self.last_hover_snapshot = snapshot

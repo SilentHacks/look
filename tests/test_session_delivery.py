@@ -83,7 +83,6 @@ class TestSessionDelivery(unittest.TestCase):
             event = json.loads(path.read_text())
             self.assertEqual(event["type"], "cursor_context")
             self.assertLessEqual(len(event["context"]), 6000)
-            self.assertTrue(event["context"].endswith("</page_data>"))
             self.assertNotIn("audio", event)
     def test_full_connected_queue_cannot_displace_context_with_one_shot(self):
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
@@ -100,6 +99,55 @@ class TestSessionDelivery(unittest.TestCase):
         self.assertEqual(result["delivery"], "unavailable")
         self.assertEqual(self.session.resolution_id, epoch)
         self.assertIsNone(self.session.last_hover_snapshot)
+
+    def test_connected_targetless_speech_is_plain_text_without_activating_evidence(self):
+        messages = []
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda text, **_: messages.append(text) or True), self.session)
+        turns.bind(session_key="route", session_id="session", platform="tui")
+        self.addCleanup(turns.close)
+        epoch = self.session.resolution_id
+        with mock.patch.object(service, "_VOICE_TURNS", turns):
+            delivered = service.submit_snapshot({"ok": False, "utterance": "Hello there",
+                                                 "context": "unavailable target", "error": "No target"})
+            self.assertTrue(delivered["ok"])
+            self.assertIsNone(turns.pre(session_id="session", turn_id="plain", user_message="Hello there"))
+            self.assertEqual(messages, ["Hello there"])
+            self.assertEqual(self.session.resolution_id, epoch)
+            self.assertIsNone(self.session.last_hover_snapshot)
+            refused = service.submit_snapshot({"ok": False, "utterance": "Explain this", "context": "",
+                                               "error": "No target"})
+            self.assertFalse(refused["ok"])
+            self.assertEqual(messages, ["Hello there"])
+
+    def test_followup_keeps_epoch_and_single_use_confirmation_without_reinjecting(self):
+        from hermes_gaze.resolver.cursor_context import build_context
+        from tests.test_snapshot_actions import BrowserActions
+
+        browser = BrowserActions()
+        self.addCleanup(setattr, self.session, "_cdp", self.session._cdp)
+        self.session._cdp = browser
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session", platform="tui")
+        self.addCleanup(turns.close)
+        snapshot = {"ok": True, "snapshot_id": "snapshot-1", "mode": "hover",
+                    "pointed": [{"id": "@purge", "available": True}],
+                    "handles": {h: {"label": n["label"]} for h, n in browser.nodes.items()},
+                    "context": build_context(["control @purge: Purge cache"], "Purge this cache", "button Purge cache")}
+        turns.submit("Purge this cache", snapshot)
+        turns.pre(session_id="session", turn_id="first", user_message="Purge this cache")
+        epoch = self.session.resolution_id
+        saved = self.session.last_hover_snapshot
+        self.assertEqual(browser.highlights, [["@purge"]])
+        self.assertTrue(self.session.actions.click("@purge", epoch)["confirmation_required"])
+        pending = dict(browser.pending)
+        turns.post(session_id="session", turn_id="first", assistant_response="Confirm in Chrome.")
+        self.assertIsNone(turns.pre(session_id="session", turn_id="followup", user_message="What is ROAS?"))
+        self.assertEqual(self.session.resolution_id, epoch)
+        self.assertIs(self.session.last_hover_snapshot, saved)
+        self.assertEqual(browser.executed, [])
+        self.assertTrue(self.session.actions.confirm(pending["action_id"], epoch, True)["executed"])
+        self.assertFalse(self.session.actions.confirm(pending["action_id"], epoch, True)["ok"])
+        self.assertEqual(browser.executed, ["@purge"])
 
     def test_connected_simulated_turn_preserves_the_lens_choice(self):
         self.session.configure(mode="simulated")

@@ -20,11 +20,12 @@ function element(tag, children = [], attrs = {}) {
         if (s === 'input' || s === 'textarea' || s === 'select' || s === 'script' || s === 'style' || s === 'label') return tag === s;
         if (s === 'input[type="password"]') return tag === 'input' && attrs.type === 'password';
         if (s === '[contenteditable]') return Object.hasOwn(attrs, 'contenteditable');
+        if (s === '.panel-title') return (attrs.class || '').split(/\s+/).includes('panel-title');
         if (s === '[scope=row]' || s === '[scope=rowgroup]') return attrs.scope === s.slice(7, -1);
-        if (s === '[role=rowheader]' || s === '[role=columnheader]') return attrs.role === s.slice(6, -1);
+        if (s.startsWith('[role=') && s.endsWith(']')) return attrs.role === s.slice(6, -1);
         if (s === 'th[scope=col]' || s === 'th[scope=colgroup]') return tag === 'th' && attrs.scope === s.slice(9, -1);
         if (s.startsWith('[autocomplete')) return !!attrs.autocomplete && attrs.autocomplete.startsWith('cc-');
-        if (['table', 'tr', 'td', 'th', 'section', 'ul', 'ol', 'li', 'article', 'p', 'h2'].includes(s)) return tag === s;
+        if (['table', 'caption', 'tr', 'td', 'th', 'section', 'ul', 'ol', 'li', 'article', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'form'].includes(s)) return tag === s;
         return false;
       });
     },
@@ -35,6 +36,15 @@ function element(tag, children = [], attrs = {}) {
       visit(this); return result;
     },
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
+    compareDocumentPosition(other) {
+      let root = this;
+      while (root.parentElement) root = root.parentElement;
+      const nodes = [];
+      function visit(node) { nodes.push(node); for (const child of node.children || []) visit(child); }
+      visit(root);
+      if (!nodes.includes(other)) return 1;
+      return nodes.indexOf(this) < nodes.indexOf(other) ? 4 : this === other ? 0 : 2;
+    },
     getBoundingClientRect() { return this.rect || { left: 1, top: 2, width: 20, height: 10 }; },
   };
   for (const c of children) c.parentElement = el;
@@ -165,6 +175,42 @@ test('tokenized payment autocomplete never enters the wire or ancestors', () => 
   assert.equal(current.available, false);
   assert.ok(!JSON.stringify(snapshot).includes('TOKEN-CARD-SECRET'));
   assert.ok(!api.safeText(parent).includes('TOKEN-CARD-SECRET'));
+});
+
+test('table headings and outside notes survive without flattening captured cells into section text', () => {
+  const { table, rows } = tableFixture(2);
+  const heading = element('div', [text('Q4 Acquisition Campaigns')], { class: 'panel-title', 'aria-label': 'Not heading text' });
+  element('section', [
+    element('section', [element('h2', [text('Unrelated earlier section')])]),
+    heading,
+    element('form', [element('h3', [text('Unrelated form heading')])]),
+    element('label', [element('h3', [text('secret-associated-label')])], { for: 'password' }),
+    element('div', [table]),
+    element('p', [text('ROAS excludes refunds')]),
+    element('h2', [text('Unrelated later heading')]),
+    password, payment,
+  ]);
+  api.rememberHit(rows[0].children[1], 8.1);
+  let snapshot = api.captureCursorContext();
+  const current = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  let block = snapshot.blocks.find(b => b.id === current.cell.block);
+  assert.equal(block.label, 'Q4 Acquisition Campaigns');
+  assert.equal(block.rows[0].cells[0], 'Campaign 1');
+  const surrounding = snapshot.blocks.find(b => current.block_ids.includes(b.id) && b.kind === 'section');
+  assert.ok(surrounding.text.includes('ROAS excludes refunds'));
+  assert.ok(surrounding.text.includes('Q4 Acquisition Campaigns'));
+  assert.ok(!surrounding.text.includes('Campaign 1'));
+  assert.ok(!surrounding.text.includes('24.7%'));
+  assert.ok(!JSON.stringify(snapshot).includes('secret-associated-label'));
+  assert.ok(!JSON.stringify(snapshot).includes('4111111111111111'));
+  const caption = element('caption', [text('Caption takes precedence')]);
+  table.appendChild(caption);
+  snapshot = api.captureCursorContext();
+  block = snapshot.blocks.find(b => b.id === current.cell.block);
+  assert.equal(block.label, 'Caption takes precedence');
+  caption.children[0].textContent = 'C'.repeat(100);
+  snapshot = api.captureCursorContext();
+  assert.equal(snapshot.blocks.find(b => b.id === current.cell.block).label, 'C'.repeat(80));
 });
 
 test('revisiting an old node keeps the latest target after the snapshot cap', () => {

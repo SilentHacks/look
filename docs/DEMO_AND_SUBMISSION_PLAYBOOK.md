@@ -108,8 +108,9 @@ Adds `hermes-gaze` (**Hermes Gaze / Telepathy**) to the Hermes plugin catalog (H
 - **Pinned SHA**: `<40-character-commit-sha>`
 
 ## Hermes Surfaces Used
-- `ctx.register_tool`: `gaze_resolve`, `gaze_choose`, `gaze_highlight`, `gaze_calibrate`, `gaze_benchmark`
-- `ctx.register_hook`: `pre_llm_call` (injects resolved DOM reference handles when deictic pronouns are used in chat)
+- `ctx.register_tool`: `gaze_resolve`, `gaze_choose`, `gaze_highlight`, `gaze_click`, `gaze_calibrate`, `gaze_benchmark`
+- `ctx.register_system_prompt_section`: durable browser-evidence guidance, frozen for each new session
+- `ctx.register_hook`: `pre_llm_call` (bounded, labelled browser evidence; pointer highlight on fresh hover activation), plus answer-stream and turn lifecycle hooks
 - `ctx.register_platform`: `gaze` push-to-talk voice + gaze turn adapter
 - `ctx.register_cli_command`: `gaze-chrome`, `gaze-calibrate`, `gaze-benchmark`
 - `ctx.register_skill`: `gaze-telepathy`

@@ -29,8 +29,10 @@ Raw gaze/pointer tracking suffers from ~80â€“180 px of spatial jitter and driftâ
 Hover supplies evidence, not a preselected subject. The model sees the pointed
 cell, row/column/table/panel handles, surrounding structural text and separate
 controls. Small demo tables include all five rows and six columns; larger tables
-prioritize pointed rows, headers and omission counts. Final context, including
-the `Resolution` epoch, is at most 6000 characters.
+prioritize pointed rows, headers and omission counts. System guidance is registered
+separately from per-turn `<browser_context>` evidence, which labels the user's
+question and pointer age. The complete escaped envelope, including its
+`Resolution` epoch, is at most 6000 characters. New guidance requires a new session.
 
 Typed questions use the latest real Chrome target and its age. Voice evidence
 freezes at recording stop before ASR; real word timestamps select preceding
@@ -38,8 +40,9 @@ cursor identities, including two spoken referents. Detached or replaced nodes
 never rematch selectors. Password/payment fields and associated labels are
 filtered before serialization; page text stays inside an escaped untrusted fence.
 
-`gaze_highlight(handles=[...], resolution_id=N)` highlights what the model used,
-including captured rows and columns. `gaze_click(handle=..., resolution_id=N)`
+Fresh hover evidence automatically highlights the pointed handles.
+`gaze_highlight(handles=[...], resolution_id=N)` changes that highlight when the model
+uses a different scope, including captured rows and columns. `gaze_click(handle=..., resolution_id=N)`
 activates a current control. Risky labels/classes, destructive utterances and form
 submissions require a trusted primary mouse click on the Chrome confirmation
 card. Synthetic clicks, spoken/tool confirmation, stale epochs and changed targets
@@ -59,6 +62,8 @@ separately; column handles retain captured members, never replacement cells.
 Scope navigation, up/down scope correction and save-trial controls are removed.
 Replay recording is off unless `record_trials: true`; files may contain sensitive
 browsing evidence but never microphone audio.
+Hermes also persists injected page evidence in `state.db` (`api_content`),
+independently of plugin replay recording.
 
 Run `node tests/cursor_context_dom.js` and
 `python3 -m unittest discover -s tests -t .` for deterministic checks.
@@ -81,8 +86,11 @@ Hold Space in Chrome, speak and release. Only your words become a normal user
 message; the matching session hook attaches frozen page context. The answer
 streams into Hermes and Chrome, with a final-response backstop.
 Refreshing cursor evidence through a tool does not interrupt that turn's answer stream.
-Spoken or typed followups use the same conversation. `/gaze disconnect` revokes pending and active
-action ownership; it does not cancel a Hermes turn already accepted by the host.
+Spoken or typed followups use conversation history without reattaching old evidence
+or changing its epoch. A connected non-deictic utterance without a target is delivered
+as plain text. After compaction, resolving again captures the current cursor, not
+the historical target. `/gaze disconnect` revokes pending and active action ownership;
+it does not cancel a Hermes turn already accepted by the host.
 
 The HUD shows listening, transcribing, queued, thinking and completion/error
 states. Without a connected/authorized session, read-only questions can use a
@@ -95,11 +103,18 @@ Development smoke: use Python from a Hermes environment:
 ```bash
 python benchmark/probe_sessions.py --output /tmp/gaze-sessions.json
 python benchmark/probe_phase1.py --output /tmp/gaze-dom.json
+python benchmark/probe_sessions.py --prompt-only --trials 10 --sources tui --require-pass --output /tmp/gaze-prompts-neutral.json
+python benchmark/probe_sessions.py --prompt-only --repo-folder --trials 10 --sources tui --require-pass --output /tmp/gaze-prompts-repo.json
 ```
 
 The session smoke uses private config/credential copies and private Chrome,
 substituting synthesized WAV before the real transcription binding. It exercises
 real TUI and desktop **backends**, not the native desktop renderer or physical microphone.
+Prompt-only mode uses fresh sessions and the configured model for headers, a cell,
+a button, a wider-scope followup, hostile page text, a synthetic stale cursor,
+pasted code and an explicit plugin question. `--repo-folder` enables project rules;
+the default uses a neutral folder. Reports retain answers, captures and browser
+operations; `--plugin-root` can select an isolated committed baseline.
 Historical Phase 0/1 measurements remain in `benchmark/*results.json`; the
 hardcoded `/gaze probe` experiment is removed.
 

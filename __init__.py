@@ -21,6 +21,7 @@ from . import service
 from .browser.cdp_bridge import get_shared_session
 from .cli import _handle_slash_command, _run_cli, _setup_cli
 from .config import GazeConfig
+from .resolver.cursor_context import EVIDENCE_RULES, TOOL_RULES
 from .resolver.temporal_aligner import has_deictic_pronoun
 from .server import get_shared_server
 from .tools import ALL_TOOLS, check_gaze_requirements
@@ -45,20 +46,12 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
 
     try:
         res = service.resolve_now(session, utterance=text)
-        if res.get("ok") is False:
-            return None
-        if res.get("mode") == "hover":
-            return {"context": res["context"]}
-        ranked = res.get("ranked") or []
-        if res.get("ok") is False or not ranked:
-            return None
-        context_block = (
-            f"{res.get('context', '[gaze_ref]')}\n"
-            f"Utterance: {text}\n"
-            f"Intent: {res.get('intent_class')} | Decision: {res.get('decision')}\n"
-            "Use gaze_highlight to display the answer or gaze_choose to confirm an action."
-        )
-        return {"context": context_block}
+        if res.get("mode") == "hover" and res.get("ok"):
+            handles = list(dict.fromkeys(p["id"] for p in res.get("pointed", [])
+                                         if p.get("available") and p.get("id")))
+            if handles:
+                session.actions.highlight(handles, res["resolution_id"])
+        return {"context": res["context"]} if res.get("context") else None
     except Exception as exc:
         logger.debug("hermes-gaze pre_llm_call resolution skipped: %s", exc)
         return None
@@ -67,6 +60,8 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
 def register(ctx: Any) -> None:
     """Entry point invoked by Hermes PluginManager."""
     cfg = GazeConfig.from_ctx(ctx)
+    rules = EVIDENCE_RULES + TOOL_RULES
+    ctx.register_system_prompt_section("hermes_gaze", rules, position="after_memory", max_chars=800)
 
     session = get_shared_session()
     session.cdp_http_url = cfg.cdp_url
@@ -108,8 +103,10 @@ def register(ctx: Any) -> None:
     service.set_voice_turns(turns)
 
     def pre_llm_call(**kwargs: Any) -> Any:
-        result = turns.pre(**kwargs)
-        return result if result is not None else _on_pre_llm_call(**kwargs)
+        with turns.lock:
+            if turns.binding and turns.binding["session_id"] == kwargs.get("session_id"):
+                return turns.pre(**kwargs)
+        return _on_pre_llm_call(**kwargs)
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
         if raw_args.strip() in ("connect", "disconnect"):

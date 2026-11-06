@@ -5,6 +5,7 @@ import threading
 import unittest
 
 from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
+from hermes_gaze.resolver.cursor_context import build_context
 
 
 class BrowserActions:
@@ -79,7 +80,8 @@ class TestSnapshotActions(unittest.TestCase):
         self.browser = BrowserActions()
         self.session._cdp = self.browser
         self.payload = {"ok": True, "snapshot_id": "snapshot-1", "handles": {h: {"label": n["label"]}
-                       for h, n in self.browser.nodes.items()}, "utterance": "click this", "context": "<page_data>export</page_data>"}
+                       for h, n in self.browser.nodes.items()}, "utterance": "click this",
+                        "context": build_context(["Export CSV"], "click this", "button Export CSV (@export)")}
         self.rid = self.session.store_hover_snapshot(self.payload)
         self.actions = self.session.actions
 
@@ -187,12 +189,17 @@ class TestSnapshotActions(unittest.TestCase):
     def test_activation_failure_and_capture_copy_and_context_bound(self):
         self.payload["handles"].clear()
         self.assertTrue(self.actions.click("@export", self.rid)["executed"])
-        payload = {**self.payload, "snapshot_id": "expired", "context": "x" * 7000}
+        payload = {**self.payload, "snapshot_id": "expired"}
         rid = self.session.store_hover_snapshot(payload)
         self.assertLessEqual(len(payload["context"]), 6000)
-        self.assertTrue(payload["context"].startswith(f"Resolution: {rid}\n"))
+        self.assertIn(f"\nResolution: {rid}\n", payload["context"])
         self.assertFalse(self.actions.click("@export", rid)["ok"])
         rid = self.session.store_hover_snapshot({**self.payload, "ok": False})
+        self.assertFalse(self.actions.highlight(["@export"], rid)["ok"])
+        malformed = {**self.payload, "context": "x" * 7000}
+        rid = self.session.store_hover_snapshot(malformed)
+        self.assertFalse(malformed["ok"])
+        self.assertEqual(malformed["context"], "")
         self.assertFalse(self.actions.highlight(["@export"], rid)["ok"])
 
     def test_resolution_change_serializes_after_inflight_click(self):

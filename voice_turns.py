@@ -10,6 +10,7 @@ import time
 from collections import deque
 from typing import Any
 
+from .resolver.cursor_context import MAX_CONTEXT
 from .resolver.temporal_aligner import has_deictic_pronoun
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,6 @@ class VoiceTurns:
     MAX_PENDING = 8
     MAX_TEXT = 12000
     MAX_SNAPSHOT_BYTES = 262144
-    MAX_CONTEXT = 6000
 
     def __init__(self, ctx: Any, session: Any) -> None:
         self.ctx = ctx
@@ -30,7 +30,6 @@ class VoiceTurns:
         self.binding: dict[str, str] | None = None
         self.pending: list[dict[str, Any]] = []
         self.active: dict[str, Any] | None = None
-        self.last_snapshot: dict[str, Any] | None = None
         self.seen_turns: deque[tuple[str, str]] = deque(maxlen=128)
         self.sequence = 0
         self.closed = False
@@ -91,7 +90,6 @@ class VoiceTurns:
         self.binding = None
         self.pending.clear()
         self.active = None
-        self.last_snapshot = None
         self._event(run, "error", error="Chrome voice disconnected. Run /gaze connect to reconnect.")
         self.session.clear_hover_snapshot()
 
@@ -112,10 +110,12 @@ class VoiceTurns:
             try:
                 if not isinstance(snapshot, dict) or len(json.dumps(snapshot).encode()) > self.MAX_SNAPSHOT_BYTES:
                     raise ValueError("Cursor evidence is too large or invalid.")
+                context = snapshot.get("context") or ""
+                if not isinstance(context, str) or len(context) > MAX_CONTEXT:
+                    raise ValueError("Cursor context is too large or invalid.")
                 frozen = copy.deepcopy(snapshot)
             except (TypeError, ValueError) as exc:
                 return {"ok": False, "error": str(exc)}
-            frozen["context"] = str(frozen.get("context") or "")[:self.MAX_CONTEXT]
             frozen["utterance"] = text
             run = self._new_run(text, frozen)
             self.pending.append(run)  # Must exist before inject_message can synchronously fire pre.
@@ -138,7 +138,6 @@ class VoiceTurns:
                     self.pending.remove(run)
                 if self.active is run:
                     self.active = None
-                    self.last_snapshot = None
                 run["finished"] = True
                 if visible:
                     self._event(run, "error", error=error)
@@ -170,27 +169,31 @@ class VoiceTurns:
                     except Exception as exc:
                         logger.debug("Typed cursor capture failed", exc_info=True)
                         snapshot = {"context": "", "error": str(exc)}
-                elif self.last_snapshot is not None:
-                    snapshot = copy.deepcopy(self.last_snapshot)
                 else:
-                    return None
+                    snapshot = {}
                 run = self._new_run(user_message, snapshot)
             self.active = run
             run["turn_id"] = turn_id
             snapshot = run["snapshot"]
             snapshot["utterance"] = user_message
-            try:
-                if snapshot.get("mode") == "simulated":
-                    run["resolution_id"] = self.session.resolution_id
-                else:
-                    run["resolution_id"] = self.session.store_hover_snapshot(snapshot)
-            except Exception as exc:
-                logger.debug("Cursor evidence activation failed", exc_info=True)
-                run["finished"] = True
-                self._event(run, "error", error=f"Cursor evidence activation failed: {exc}")
-                return None
-            context = str(snapshot.get("context") or "")[:self.MAX_CONTEXT]
-            self.last_snapshot = copy.deepcopy(snapshot)
+            context = str(snapshot.get("context") or "")
+            run["resolution_id"] = self.session.resolution_id
+            if context:
+                try:
+                    if snapshot.get("mode") != "simulated":
+                        run["resolution_id"] = self.session.store_hover_snapshot(snapshot)
+                        handles = list(dict.fromkeys(p["id"] for p in snapshot.get("pointed", [])
+                                                     if p.get("available") and p.get("id")))
+                        if handles:
+                            result = self.session.actions.highlight(handles, run["resolution_id"])
+                            if not result.get("ok"):
+                                logger.debug("Automatic pointer highlight failed: %s", result.get("error"))
+                except Exception as exc:
+                    logger.debug("Cursor evidence activation failed", exc_info=True)
+                    run["finished"] = True
+                    self._event(run, "error", error=f"Cursor evidence activation failed: {exc}")
+                    return None
+                context = str(snapshot.get("context") or "")
             self._event(run, "thinking")
             return {"context": context} if context else None
 
