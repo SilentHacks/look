@@ -19,6 +19,8 @@ class Chrome:
         self.resolution_id += 1
         snapshot['context'] = stamp_resolution(snapshot['context'], self.resolution_id)
         self.stored.append(copy.deepcopy(snapshot))
+        snapshot['resolution_id'] = self.resolution_id
+        self.last_hover_snapshot = copy.deepcopy(snapshot)
         return self.resolution_id
 
     def clear_hover_snapshot(self):
@@ -277,6 +279,29 @@ class VoiceTurnsTests(unittest.TestCase):
             self.assertIn('Covered by consent gate ' + price, context)
         self.assertLessEqual(len(context), 6000)
         stamp_resolution(context, 999)
+
+    def test_saved_comparison_uses_only_current_capture_identities_in_same_document(self):
+        from unittest.mock import patch
+
+        def saved(name, document, handles):
+            return {**snapshot(name), "browser_target": "tab", "browser_document": document,
+                    "top": {"id": name, "cell": {"row_handle": name + "-row"}},
+                    "handles": {h: {} for h in handles},
+                    "scope_bundles": {"none": [], "pointed": [name], "row": [name + "-row"]}}
+
+        with patch.dict("os.environ", TYPESAFE_API_KEY=""):
+            self.turns.submit("first", saved("@a", "doc", ["@a", "@a-row"]))
+            self.turns.submit("Compare this row with the previous one",
+                              saved("@b", "doc", ["@a", "@a-row", "@b", "@b-row"]))
+            chosen = self.turns.runs[-1]["snapshot"]["scope_bundles"]
+            self.assertEqual(chosen["rows"], ["@a-row", "@b-row"])
+            self.assertEqual(chosen["referents"], ["@a", "@b"])
+            self.turns.submit("Compare this with the previous one",
+                              saved("@c", "replacement", ["@b", "@b-row", "@c", "@c-row"]))
+            self.assertNotIn("referents", self.turns.runs[-1]["snapshot"]["scope_bundles"])
+            self.turns.submit("Compare this with the previous one",
+                              saved("@d", "replacement", ["@d", "@d-row"]))
+            self.assertNotIn("rows", self.turns.runs[-1]["snapshot"]["scope_bundles"])
 
 
 if __name__ == '__main__':

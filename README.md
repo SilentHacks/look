@@ -48,13 +48,18 @@ cursor identities, including two spoken referents. Detached or replaced nodes
 never rematch selectors. Password/payment fields and associated labels are
 filtered before serialization; page text stays inside an escaped untrusted fence.
 
-Fresh hover evidence automatically highlights the pointed handles. After each
-answer, one bounded model call selects the captured answer scope; no tool turn is
-needed. `gaze_highlight(handles=[...], resolution_id=N)` remains available for
-explicit scope changes. Pins follow the original elements through scrolling and
-same-document routes. Full navigation revokes those identities and clears pins.
-Background-tab scope changes fail safely rather than highlighting the focused
-tab; the original pointer highlight remains on its source document.
+Fresh hover evidence highlights the pointed handles. On question acceptance,
+an asynchronous TypeSafe decision selects the intended captured scope, without
+waiting for the answer. Queued items decide from their own frozen evidence;
+older answers never replace a newer question's highlight. Missing keys, disabled
+early selection or failed decisions use the existing post-answer model call.
+A successful `none` leaves the highlight unchanged and skips that fallback.
+`gaze_highlight(handles=[...], resolution_id=N)` remains available for explicit
+scope changes. Pins follow the original elements through scrolling; background
+tabs, replacement documents and superseded requests cannot receive scope changes.
+Saved-item comparisons can offer both targets/rows only when both identities are
+already in the current capture on the same document. Otherwise highlighting stays
+on the selected item's document; comparison evidence can still include both items.
 `gaze_click(handle=..., resolution_id=N)`
 activates a current control. Risky labels/classes, destructive utterances and form
 submissions require a trusted primary mouse click on the Chrome confirmation
@@ -81,6 +86,30 @@ Replay recording is off unless `record_trials: true`; files may contain sensitiv
 browsing evidence but never microphone audio.
 Hermes also persists injected page evidence in `state.db` (`api_content`),
 independently of plugin replay recording.
+
+#### Technical disclosure: early-highlight network use
+
+`early_highlight` defaults to `true`, with `highlight_model: "jev-1.14.0"`.
+With `TYPESAFE_API_KEY` in the Hermes process environment, one HTTPS request goes
+directly to `https://api.typesafe.ai/v1/systemone` per accepted hover question.
+It sends the question (which can itself contain sensitive text), native pointer
+role, referent count, available semantic scopes and frozen static descriptions.
+`highlight_include_page_text` defaults to `false`: no independently collected
+page text, titles, values, URLs, handles, geometry or pointer timestamps are sent.
+Opting in adds the existing escaped, bounded (≤6000-character) captured evidence
+packet, including page text/values, sanitized URLs and short evidence handles.
+No audio, cookies, credentials or live DOM identities are sent in the payload.
+The API key is read only from the environment and used in the Authorization header.
+The 1.5-second decision deadline never waits on answer generation. Returned labels
+map locally to frozen handle arrays and can only highlight, never authorize actions.
+There is no second decision provider. Failure uses the existing configured Hermes
+model and its existing evidence flow; provider retention is not established here.
+
+Hermes loads `~/.hermes/.env`, not this repository's `.env`. To use a key kept only
+in the repository without moving or copying it, export `TYPESAFE_API_KEY` from that
+file into the launching shell's environment, without printing it, and start a new
+Hermes process from that shell. Existing Hermes processes do not inherit later exports.
+
 
 Run `node tests/cursor_context_dom.js` and
 `python3 -m unittest discover -s tests -t .` for deterministic checks.
@@ -204,7 +233,7 @@ The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
    label depends on the launch chain; permission prompting was not triggered
    during the integration check.
 5. Expect the pointed highlight, answer text and captured HTTP(S) deal URL.
-   The post-answer scope can widen without a tool call. Scroll: the outline
+   The intended scope should widen before the answer (post-answer on fallback). Scroll: the outline
    must stay on the same element, disappear offscreen and return with it.
 6. Ask once more, then switch supported tabs while Hermes is answering
    (after releasing Space). The reply should finish in the newly focused

@@ -44,8 +44,8 @@ EVIDENCE_RULES = (
     "Don't mention packet details, @handles, epochs or tool names unless the user asks about them. "
 )
 TOOL_RULES = (
-    "Answer scope is highlighted automatically after the answer. Use gaze_highlight only for an explicit "
-    "highlight request or to change scope before answering; use current handles and resolution_id. "
+    "The intended browser scope is highlighted automatically; a post-answer selector is a fallback. "
+    "Use gaze_highlight only for an explicit highlight request or to change scope; use current handles and resolution_id. "
     "For deferred action tools, first tool_describe(names=['gaze_click']), then tool_call. "
     "Hover actions MUST use gaze_click, never generic browser/JS/terminal tools; simulated actions use gaze_choose. "
     "Only a trusted Chrome click can confirm risky actions; a question is not permission."
@@ -366,8 +366,26 @@ def cursor_result(capture, utterance, words=None, now=None):
             add(f"bounded text (max {block.get('text_limit', 650)} chars): " + str(block["text"])[:650])
     lines.append(f"omitted evidence blocks/lines: {omitted}")
     context = build_context(lines, utterance, pointer_evidence)
+    bundles = {"none": []}
+    if selected:
+        target = selected[-1]
+        bundles["pointed"] = [target["id"]]
+        cell = target.get("cell", {})
+        for name, key in (("row", "row_handle"), ("column", "column_handle"), ("table", "block")):
+            if cell.get(key):
+                bundles[name] = [cell[key]]
+        for group, _ in groups:
+            if any(m.get("id") == target.get("group_item_id") for m in group.get("members", [])):
+                bundles.update(card=[target["group_item_id"]], group=[group["id"]])
+                break
+        if len(selected) > 1:
+            bundles["referents"] = [t["id"] for t in selected]
+            if all(t.get("cell", {}).get("row_handle") for t in selected):
+                bundles["rows"] = list(dict.fromkeys(t["cell"]["row_handle"] for t in selected))
     return {"ok": bool(selected), **({"error": "No available cursor target for the requested time"} if not selected else {}),
             "mode": "hover", "pointed": pointed, "context": context,
+            "scope_bundles": {name: handles for name, handles in bundles.items()
+                              if all(h in capture.get("handles", {}) for h in handles)},
             "page_lines": lines, "pointer_evidence": pointer_evidence,
             "essential_lines": essential + row_facts,
             "snapshot_id": capture.get("snapshot_id"),

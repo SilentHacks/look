@@ -89,6 +89,7 @@ class TestSessionDelivery(unittest.TestCase):
         for index in range(turns.MAX_PENDING + 1):
             self.assertTrue(turns.submit(f"queued {index}", self.snapshot("Explain this"))["ok"])
         epoch = self.session.resolution_id
+        saved = self.session.last_hover_snapshot
         client = mock.Mock()
         client.complete_structured.side_effect = AssertionError("queue overflow must not use fallback")
         with mock.patch.object(service, "_VOICE_TURNS", turns), mock.patch.object(service, "_LLM", client):
@@ -96,7 +97,7 @@ class TestSessionDelivery(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["delivery"], "unavailable")
         self.assertEqual(self.session.resolution_id, epoch)
-        self.assertIsNone(self.session.last_hover_snapshot)
+        self.assertIs(self.session.last_hover_snapshot, saved)
 
     def test_connected_targetless_speech_is_plain_text_without_activating_evidence(self):
         messages = []

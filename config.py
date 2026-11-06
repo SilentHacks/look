@@ -18,6 +18,9 @@ class GazeConfig:
     hotkey: str = "AltRight"  # JS KeyboardEvent.code (e.g. "AltRight", "Backquote", "F8")
     whisper_model: str = "base.en"
     record_trials: bool = False  # Development-only, potentially sensitive browsing evidence.
+    early_highlight: bool = True
+    highlight_model: str = "jev-1.14.0"
+    highlight_include_page_text: bool = False
 
     @classmethod
     def from_ctx(cls, ctx: Any) -> "GazeConfig":
@@ -34,4 +37,7 @@ class GazeConfig:
             hotkey=str(get("hotkey", cls.hotkey) or cls.hotkey),
             whisper_model=str(get("whisper_model", cls.whisper_model) or cls.whisper_model),
             record_trials=bool(get("record_trials", cls.record_trials)),
+            early_highlight=bool(get("early_highlight", cls.early_highlight)),
+            highlight_model=str(get("highlight_model", cls.highlight_model) or cls.highlight_model),
+            highlight_include_page_text=bool(get("highlight_include_page_text", cls.highlight_include_page_text)),
         )

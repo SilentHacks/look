@@ -51,6 +51,7 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
                                          if p.get("available") and p.get("id")))
             if handles:
                 session.actions.highlight(handles, res["resolution_id"])
+            service.start_question_highlight(session, res)
         return {"context": res["context"]} if res.get("context") else None
     except Exception as exc:
         logger.debug("hermes-gaze pre_llm_call resolution skipped: %s", exc)
@@ -110,7 +111,11 @@ def register(ctx: Any) -> None:
             else:
                 result = _on_pre_llm_call(**kwargs)
             snapshot = session.last_hover_snapshot
-            if result and snapshot and result.get("context") == snapshot.get("context"):
+            if turns.active:
+                early = turns.active["snapshot"].get("early_highlight")
+                if early and result:
+                    snapshot = early.snapshot
+            if result and snapshot and (snapshot.get("early_highlight") or result.get("context") == snapshot.get("context")):
                 key = (kwargs.get("session_id", ""), kwargs.get("turn_id", ""))
                 answer_snapshots[key] = snapshot
                 while len(answer_snapshots) > 128:

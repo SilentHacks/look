@@ -105,13 +105,17 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 - **Hover snapshots are immutable server-owned evidence.** Activation bumps the
   epoch, invalidates simulated choose/pending confirmations, stamps `Resolution`
   into the bounded context, and activates the browser's captured identity map.
-  Queued voice snapshots activate only in the matching session/text pre-hook.
+  Inbox snapshots activate read-only on question acceptance so queued targets can
+  highlight early; admission never reactivates an older item's decision snapshot.
   Explain checks the saved snapshot before and after the call; hook context is
   returned verbatim, including the current epoch.
   Fresh hover evidence highlights its available pointer handles automatically.
-  After an answer, one bounded `ctx.llm` call selects the evidenced answer scope;
-  saved snapshot identity, current epoch and captured handles are checked again
-  before highlighting. No highlight protocol markers enter the answer or transcript.
+  An asynchronous TypeSafe decision selects intended scope at question acceptance,
+  with a 1.5-second deadline and page evidence opt-in (off by default). Only static
+  described scope labels cross that boundary otherwise; identities map locally.
+  Failed/disabled/no-key decisions alone use the existing post-answer `ctx.llm`
+  selector; successful `none` does not. Saved identity, epoch, foreground document
+  and supersession checks guard application. No protocol tokens enter answers.
   `gaze_highlight` remains for explicit/manual scope changes. Inbox research is
   read-only, including recalled items and follow-ups; clicks require fresh manual
   pointing. A new capture revokes pending approval immediately.

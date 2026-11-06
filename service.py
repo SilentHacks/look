@@ -330,10 +330,43 @@ def explain_element(utterance: str, context: str, llm: Any = None) -> str:
     return text
 
 
-def highlight_answer_scope(session: Any, snapshot: dict[str, Any], answer: str, llm: Any = None) -> dict[str, Any]:
-    """Select answer scope without putting protocol tokens into any user-visible stream."""
+def start_question_highlight(session, snapshot, *, read_only=False, display=True):
+    """Activate only on user acceptance, never when an old queued answer is admitted."""
+    from .early_highlight import EarlyHighlight
+
+    if snapshot.get("mode") != "hover" or not snapshot.get("ok") or not snapshot.get("scope_bundles"):
+        return
+    if read_only:
+        snapshot["actions_allowed"] = False
+    if display:
+        try:
+            saved = getattr(session, "last_hover_snapshot", None)
+            if not (saved and snapshot.get("resolution_id") == session.resolution_id and
+                    saved.get("snapshot_id") == snapshot.get("snapshot_id") and
+                    saved.get("context") == snapshot.get("context") and
+                    saved.get("actions_allowed") == snapshot.get("actions_allowed")):
+                session.store_hover_snapshot(snapshot)
+                saved = session.last_hover_snapshot
+        except Exception:
+            # Browser loss must never reject an accepted question.
+            saved = snapshot
+    else:
+        saved = snapshot
+    state = EarlyHighlight(session, saved, _CONFIG or GazeConfig(), highlight_answer_scope)
+    saved["early_highlight"] = state
+    snapshot["early_highlight"] = state
+
+
+def highlight_answer_scope(session: Any, snapshot: dict[str, Any], answer: str, llm: Any = None,
+                           *, _fallback=False) -> dict[str, Any]:
+    """Use the early decision; select post-answer scope only if that decision failed."""
+    early = snapshot.get("early_highlight")
+    if early is not None and not _fallback:
+        return early.after_answer(answer)
     client = llm if llm is not None else _LLM
     rid = snapshot.get("resolution_id")
+    if early is not None and early.superseded:
+        return {"ok": False, "error": "superseded question"}
     if (client is None or not answer or snapshot.get("mode") != "hover" or
             session.last_hover_snapshot is not snapshot or session.resolution_id != rid):
         return {"ok": False, "error": "No current answer snapshot"}
@@ -397,7 +430,9 @@ def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": notice, "delivery": "unavailable"}
     session = get_shared_session()
     snapshot["actions_allowed"] = False
-    session.store_hover_snapshot(snapshot)
+    start_question_highlight(session, snapshot, read_only=True)
+    if snapshot.get("mode") != "hover":
+        session.store_hover_snapshot(snapshot)
     saved = session.last_hover_snapshot
     try:
         explanation = explain_element(snapshot["utterance"], snapshot["context"])
@@ -407,7 +442,8 @@ def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     if session.last_hover_snapshot is not saved:
         return {"ok": False, "error": "stale resolution"}
     highlight_answer_scope(session, saved, explanation)
-    return {**snapshot, "delivery": "one_shot", "message": notice, "explanation": explanation,
+    return {**{k: v for k, v in snapshot.items() if k != "early_highlight"},
+            "delivery": "one_shot", "message": notice, "explanation": explanation,
             "needs_explain": False, "session_connected": False}
 
 

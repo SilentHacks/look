@@ -113,6 +113,9 @@ class VoiceTurns:
         return next((i for i in self.items if i["item_id"] == item_id), None)
 
     def _new_run(self, text, snapshot, item_id):
+        current = getattr(self.session, "last_hover_snapshot", None) or {}
+        if current.get("early_highlight"):
+            current["early_highlight"].superseded = True
         self.sequence += 1
         request = secrets.token_hex(12)
         run = dict(request_id=request, sequence=self.sequence, item_id=item_id,
@@ -123,6 +126,31 @@ class VoiceTurns:
         self.runs.append(run)
         self.pending.append(run)
         return run
+
+    def _start_highlight(self, run):
+        from .service import start_question_highlight
+
+        if run.get("snapshot", {}).get("early_highlight"):
+            return
+        item = self._item(run["item_id"])
+        if not item["evidence_ready"]:
+            return
+        snapshot = copy.deepcopy(run["snapshot"])
+        snapshot.update(utterance=run["utterance"], context=self._context(run))
+        previous = self.items[item["capture_order"] - 2]["snapshot"] if item["capture_order"] > 1 else None
+        if (previous and snapshot.get("browser_document") and
+                all(snapshot.get(key) == previous.get(key) for key in ("browser_target", "browser_document"))):
+            # Reuse only identities also frozen in THIS capture's registry. Never merge or rematch DOM.
+            targets = [previous.get("top", {}), snapshot.get("top", {})]
+            for name, handles in (
+                    ("referents", [t.get("id") for t in targets]),
+                    ("rows", [t.get("cell", {}).get("row_handle") for t in targets])):
+                if len(set(handles)) == 2 and all(h in snapshot.get("handles", {}) for h in handles):
+                    snapshot["scope_bundles"][name] = handles
+                    snapshot["decision_referents"] = 2
+        start_question_highlight(self.session, snapshot, read_only=True,
+                                 display=run["sequence"] == self.sequence)
+        run["snapshot"] = snapshot
 
     def capture(self, snapshot, *, transcribing=False, item_id=""):
         """Reserve capture order before ASR. A transcribing head blocks later admission."""
@@ -159,6 +187,8 @@ class VoiceTurns:
             if transcribing:
                 run["status"] = "transcribing"
                 run["utterance"] = ""
+            else:
+                self._start_highlight(run)
             self.publish()
             return {"ok": True, "item_id": item_id, "request_id": run["request_id"],
                     "sequence": run["sequence"], "delivery": "session", "status": run["status"]}
@@ -195,6 +225,7 @@ class VoiceTurns:
                        error="",
                        wire=f"[Browsing inbox {run['item_id']}; request {run['request_id']}]\n{text}")
             run.pop("transcribe", None)
+            self._start_highlight(run)
             self.publish()
         self._pump()
         return {"ok": True, "delivery": "session", "request_id": request_id}
@@ -211,6 +242,7 @@ class VoiceTurns:
                 run["followup"] = True
                 self.session.actions.invalidate()
                 result = {"ok": True, "delivery": "session", "request_id": run["request_id"]}
+                self._start_highlight(run)
                 self.publish()
             else:
                 result = self.capture({**snapshot, "utterance": text})
@@ -234,7 +266,9 @@ class VoiceTurns:
                         self.paused = True
                         self._event(run, "failed", error="The original capture has no transcribed evidence.")
                         return
-                    run["snapshot"] = copy.deepcopy(item["snapshot"])
+                    if not run["snapshot"].get("early_highlight"):
+                        run["snapshot"] = copy.deepcopy(item["snapshot"])
+                self._start_highlight(run)
                 self.pending.pop(0)
                 self.active = run
                 key = self.binding["session_key"]
@@ -257,10 +291,18 @@ class VoiceTurns:
                 return {"ok": False, "error": "Reconnect with /gaze connect before resuming"}
             item = self._item(item_id)
             if action == "select" and item:
+                for run in self.runs:
+                    early = run["snapshot"].get("early_highlight")
+                    if early and run["item_id"] != item_id:
+                        early.superseded = True
                 self.selected = item_id
                 item["unread"] = False
             elif action == "new":
                 self.selected = ""
+                for run in self.runs:
+                    early = run["snapshot"].get("early_highlight")
+                    if early:
+                        early.superseded = True
             elif action == "resume":
                 self.paused = False
             elif action in ("retry", "skip") and item:
@@ -283,6 +325,7 @@ class VoiceTurns:
                 if action == "retry":
                     retry = self._new_run(run["utterance"], copy.deepcopy(run["snapshot"]), item_id)
                     retry["followup"] = run.get("followup", False)
+                    retry["snapshot"].pop("early_highlight", None)
                     run["status"] = "retried"
                     self.pending.remove(retry)
                     self.pending.insert(0, retry)
@@ -358,13 +401,15 @@ class VoiceTurns:
                                                          if p.get("available") and p.get("id")))
                             if handles:
                                 self.session.actions.highlight(handles, self.session.resolution_id)
+                            from .service import start_question_highlight
+                            start_question_highlight(self.session, snapshot)
                         return {"context": snapshot["context"]}
                 return None
             run["turn_id"] = turn_id
             snapshot = copy.deepcopy(run["snapshot"])
             snapshot["context"] = self._context(run)
             snapshot["actions_allowed"] = False
-            if snapshot.get("context"):
+            if snapshot.get("context") and not snapshot.get("early_highlight"):
                 try:
                     run["resolution_id"] = self.session.store_hover_snapshot(snapshot)
                     handles = list(dict.fromkeys(p["id"] for p in snapshot.get("pointed", [])

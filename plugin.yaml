@@ -60,3 +60,15 @@ config_schema:
     type: bool
     default: false
     description: "Development only: write local replay evidence. May contain sensitive page text; never audio."
+  early_highlight:
+    type: bool
+    default: true
+    description: "Select intended scope immediately through TypeSafe using TYPESAFE_API_KEY; failure or no key uses the existing post-answer model."
+  highlight_model:
+    type: str
+    default: "jev-1.14.0"
+    description: "TypeSafe decision model for early highlights (direct TypeSafe API only)."
+  highlight_include_page_text:
+    type: bool
+    default: false
+    description: "Opt in to sending bounded captured page evidence to TypeSafe. Otherwise only the question, pointer structure and static scope descriptions are sent."
