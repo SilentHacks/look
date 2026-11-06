@@ -42,6 +42,7 @@ class RawInputStream:
             data = PCM[pos:pos + chunk] or b"\\0" * chunk
             data = data + b"\\0" * (chunk - len(data))
             pos += chunk
+            open(os.environ["GAZE_FAKE_SPEECH"] + ".log", "a").write(f"{pos} {time.time()-start:.2f}\\n")
             self.callback(data, chunk // 2, SimpleNamespace(currentTime=time.time(), inputBufferAdcTime=time.time()), None)
             time.sleep(chunk / 2 / 16000)
     def start(self):
@@ -282,7 +283,7 @@ def run(args):
             for line in args.env_file.read_text().splitlines():
                 if line.startswith("TYPESAFE_API_KEY="):
                     env["TYPESAFE_API_KEY"] = line.split("=", 1)[1].strip().strip("\"'")
-        chrome = subprocess.Popen([CHROME, *(["--headless=new"] if args.headless else []), "--no-first-run", "--no-default-browser-check",
+        chrome = subprocess.Popen([CHROME, *(["--headless=new", "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"] if args.headless else []), "--no-first-run", "--no-default-browser-check",
                                    f"--remote-debugging-port={port}", f"--user-data-dir={temp / 'chrome'}", "--window-size=1440,900", "about:blank"],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
@@ -292,7 +293,12 @@ def run(args):
             except Exception:
                 time.sleep(.2)
         with (temp / "backend.log").open("w+") as log:
-            rpc = Rpc([sys.executable, "-m", "tui_gateway.entry"], env, log)
+            # Hermes's bootstrap rewrites sys.path, so the stub must already be in sys.modules.
+            # Without this the backend opens the real microphone.
+            launcher = (f"import sys,runpy;sys.path.insert(0,{str(temp / 'stub')!r});import sounddevice;"
+                        "assert sounddevice.__file__.endswith('stub/sounddevice.py');"
+                        "sys.argv=['tui_gateway.entry'];runpy.run_module('tui_gateway.entry',run_name='__main__',alter_sys=True)")
+            rpc = Rpc([sys.executable, "-c", launcher], env, log)
             rpc.wait(lambda f: f.get("params", {}).get("type") == "gateway.ready", 240)
             sid = rpc.call("session.create", source="tui", cwd=str(temp), title="Companion UI")["session_id"]
             rpc.call("prompt.submit", session_id=sid, text="Reply with Ready.")
@@ -310,6 +316,8 @@ def run(args):
     finally:
         if args.keep_log and (temp / "backend.log").exists():
             shutil.copy2(temp / "backend.log", out / "backend.log")
+        if args.keep_log and (temp / "speech.pcm.log").exists():
+            shutil.copy2(temp / "speech.pcm.log", out / "stub-audio.log")
         if rpc:
             try:
                 rpc.proc.stdin.close()
@@ -420,11 +428,13 @@ def scenario(flow, tab, rpc, sid, args):
     target = flow.rect(t(6))
     flow.note("click scrolls back and relights", 0 < target["y"] < 900 and tab.debug()["lit"] >= 1, target)
     # ---------- follow-up by holding Space, through real ASR ----------
+    pressed = time.monotonic()
     flow.key("keyDown", "Space", " ", 32)
-    time.sleep(.5)
-    flow.shot("10-follow-up-listening")
+    flow.until(lambda: tab.debug()["talk"]["micReady"], 10, "Listening")
+    print("Listening after", round(time.monotonic() - pressed, 3), flush=True)
     flow.note("follow-up label on the card", "Asking more" in (tab.panel("pill", 'document.getElementById("pill")?.textContent') or ""), tab.debug()["hold"])
-    time.sleep(1.2)
+    flow.shot("10-follow-up-listening")
+    time.sleep(max(0, 2.0 - (time.monotonic() - pressed)))
     flow.key("keyUp", "Space", " ", 32)
     d0 = len(tab.debug()["items"])
     item = flow.until(lambda: (x if len((x := tab.debug()["items"][2])["status"]) == 2 and x["status"][-1] in ("complete", "failed", "interrupted") else None), 150, "follow-up")
@@ -447,10 +457,13 @@ def scenario(flow, tab, rpc, sid, args):
     time.sleep(.3)
     # ---------- Try again: interrupt a real turn ----------
     flow.typed(t(9), "Write three long paragraphs about what this story means for the industry.")
+    before = len(tab.debug()["items"])
     flow.enter()
-    n = len(tab.debug()["items"]) - 1
-    flow.until(lambda: tab.debug()["items"][n]["status"][-1] == "streaming", 120, "streaming to interrupt")
-    time.sleep(1.2)
+    flow.until(lambda: len(tab.debug()["items"]) > before, 15, "new item")
+    n = before
+    flow.until(lambda: tab.debug()["items"][n]["status"][-1] in ("thinking", "streaming", "complete", "failed"), 60, "turn started")
+    print("interrupting at", tab.debug()["items"][n]["status"], tab.debug()["errors"][-1:], flush=True)
+    time.sleep(.5)
     print(rpc.call("session.interrupt", session_id=sid), flush=True)
     flow.until(lambda: tab.debug()["items"][n]["status"][-1] in ("interrupted", "failed", "complete"), 60, "interrupted")
     time.sleep(.8)
@@ -471,6 +484,12 @@ def scenario(flow, tab, rpc, sid, args):
     setup_page(tab, "https://www.woot.com/")
     cards = tab.main("""(()=>{const out=[];for(const e of document.querySelectorAll('a')){const r=e.getBoundingClientRect();
       if(r.width>120&&r.height>120&&r.width<500&&r.top>30&&r.bottom<innerHeight-160&&e.querySelector('img'))out.push({x:r.left+r.width/2,y:r.top+r.height/2})}return out})()""") or []
+    print("deal cards found:", len(cards), flush=True)
+    if len(cards) < 2:
+        # Deal sites may show a bot check or banner to a private browser; any real page proves this.
+        setup_page(tab, "https://en.wikipedia.org/wiki/Hermes")
+        cards = tab.main("""(()=>{const out=[];for(const e of document.querySelectorAll('.mw-parser-output > p')){const r=e.getBoundingClientRect();
+          if(r.height>40&&r.top>60&&r.bottom<innerHeight-40)out.push({x:r.left+60,y:r.top+12})}return out})()""") or []
     if len(cards) >= 2:
         flow.move(cards[0]["x"], cards[0]["y"])
         time.sleep(.2)

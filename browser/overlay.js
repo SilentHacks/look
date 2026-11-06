@@ -1298,7 +1298,10 @@
     layout();
   }
   function estimateChars(text) { return Math.min(innerHeight - 2 * MARGIN, 96 + Math.ceil(text.length / 48) * 19.3); }
-  function estimateH(item) { return estimateChars(item.turns.map(t => t.a).join("")); }
+  function estimateH(item) {
+    // Questions and notices take room too, or a card near the bottom edge runs out of it.
+    return estimateChars(item.turns.map(t => t.q + t.a).join("") + (item.notice ? " ".repeat(96) : ""));
+  }
   function coversTargets(item, pos, h) {
     const W = cardWidth();
     const rect = {left: pos.x, top: pos.y, right: pos.x + W, bottom: pos.y + h};
@@ -1768,6 +1771,7 @@
   // ---------- typed questions: private input, in the frame until sent ----------
   function openComposer() {
     if (S.hold) return;
+    if (S.coachTimer) { clearTimeout(S.coachTimer); S.coachTimer = 0; if (S.pillMode === "coach") hidePill(true); }
     const open = S.view === "answer" ? current() : null;
     const follow = open && (S.hoverCard || S.pointer.moved < FOLLOW_UP_PX) ? open : null;
     if (!follow) setTargetLocked(true);
@@ -2786,7 +2790,7 @@
         items: S.items.map(i => ({subject: i.subject, archived: i.archived, presented: i.presented, status: i.turns.map(t => t.status)})),
         retreatInMs: S.retreatAt ? Math.round(S.retreatAt - performance.now()) : null,
         errors: (inbox?.items || []).flatMap(i => i.conversation.map(r => r.error).filter(Boolean)),
-        talk: {spaceHeld, armed: S.keyArmed, listening: isListening, focused: document.hasFocus(), nonce: !!_intentNonce, ready: S.ready}};
+        talk: {micReady: S.micReady, spaceHeld, armed: S.keyArmed, listening: isListening, focused: document.hasFocus(), nonce: !!_intentNonce, ready: S.ready}};
     },
     Configure(opts) {
       Object.assign(state, opts || {});

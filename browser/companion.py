@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -104,12 +105,29 @@ class Companion:
                         with self._lock:
                             self._tabs[key] = tab
                     if not tab.is_connected:
-                        tab.connect()
+                        self._attach(tab)
+                        continue
                     self._display_pending(tab)
                     tab.flush_replies()
             except Exception:
                 logger.debug("Chrome tab discovery unavailable", exc_info=True)
             self._stop.wait(.25)
+
+    def _attach(self, tab: CdpSession) -> None:
+        """A page that won't load must not hold up every other tab; retry it now and then."""
+        now = time.monotonic()
+        if getattr(tab, "_attaching", False) or now < getattr(tab, "_attach_after", 0.):
+            return
+        tab._attaching = True
+
+        def run() -> None:
+            try:
+                tab.connect()
+            finally:
+                tab._attaching = False
+                tab._attach_after = time.monotonic() + 2.
+
+        threading.Thread(target=run, name="hermes-gaze-attach", daemon=True).start()
 
     def _dispatch(self, key: str, intent: dict, reply) -> None:
         if self._handler is None:

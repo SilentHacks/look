@@ -450,8 +450,13 @@ class CdpSession:
         elif method == "Page.navigatedWithinDocument":
             if params.get("frameId") == self._main_frame_id:
                 self._route_id += 1
-                asyncio.ensure_future(self._eval_coro(
-                    "window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.))
+                asyncio.ensure_future(self._revoke_route_actions())
+
+    async def _revoke_route_actions(self) -> None:
+        try:
+            await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.)
+        except Exception:
+            logger.debug("Route revocation met a navigating document", exc_info=True)
 
     async def _on_new_context(self, force: bool = False) -> bool:
         """Re-register the intent binding + re-inject the overlay in a new main-frame context.

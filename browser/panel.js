@@ -431,10 +431,14 @@
         if (m.canRead) {
           const read = h('button', 'act', m.reading ? 'Stop reading' : 'Read aloud');
           read.dataset.act = 'read';
-          const always = h('button', 'act toggle', m.autoRead ? 'Always read: on' : 'Always read');
-          always.dataset.act = 'autoread';
-          always.setAttribute('aria-pressed', String(!!m.autoRead));
-          actions.append(read, always);
+          actions.append(read);
+          // The long "where it went" words need the room; the setting is on every other card.
+          if (!m.item.gone && !m.item.lost) {
+            const always = h('button', 'act toggle', m.autoRead ? 'Always read: on' : 'Always read');
+            always.dataset.act = 'autoread';
+            always.setAttribute('aria-pressed', String(!!m.autoRead));
+            actions.append(always);
+          }
         }
       }
       const close = h('button', 'act quiet', 'Dismiss');

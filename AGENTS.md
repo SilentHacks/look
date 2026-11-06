@@ -14,7 +14,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `__init__.py` | Thin registration of six tools, context/stream/final/turn-end hooks, `/gaze` session connection, CLI and skill. |
 | `tools.py` | Schemas/thin handlers for `gaze_resolve`, simulated-only `gaze_choose`, snapshot `gaze_highlight`, guarded `gaze_click`, calibration and benchmark. |
 | `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
-| `voice_turns.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen item evidence, exact request/session/turn matching and versioned UI state. |
+| `voice_turns.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen item evidence, exact request/session/turn matching and versioned UI state, including which answers have been shown or retreated and the one-time hints. |
 | `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
 | `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process, ~65ms) → `parakeet-mlx` (~180ms) → `faster-whisper` (the only backend on Linux). `record_microphone`, `MAX_AUDIO_BYTES`. |
@@ -22,9 +22,11 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
-| `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer for recall; evidence, actions and non-inbox replies retain captured ownership. |
-| `browser/overlay.js` | DOM collector and captured identities, vermilion proof geometry, source-attached Errata notes; private control tree stays detached and is mirrored through CDP. |
-| `browser/panel.js` | Errata renderer in a script-disabled, opaque-origin sandbox iframe; preserves private focus/scroll during streaming. Trusted events return only through its CDP context. |
+| `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer; evidence, actions and non-inbox replies retain captured ownership. Opens validated links and brings a source tab forward. |
+| `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |
+| `browser/panel.js` | Card stack and capsule renderer in two script-disabled, opaque-origin sandbox iframes. All words and the voice-level bars live here. Trusted events return only through its CDP context. |
+| `browser/markdown.js` | PURE allow-list markdown parser for answers, loaded into the frames and into node tests. No DOM, no HTML passthrough, no images, no hrefs. |
+| `naming.py` | PURE plain-language strings: card names, one-sentence errors, speech text and link validation. |
 | `microphone.py` | Single-owner native capture; closes on release, cancellation, definite focus/document loss, device error, disconnect or the native 30-second deadline. Chrome checks cannot block the native deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
@@ -58,20 +60,47 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   controls and confirmation require trusted UI input before crossing this bridge.
 - **Closed shadow DOM alone is not a privacy boundary.** Earlier page listeners can
   read typed keys and `getSelection()` can expose selected shadow text. Private UI
-  lives in an opaque-origin, script-disabled sandbox iframe, initialized only by
+  lives in opaque-origin, script-disabled sandbox iframes, initialized only by
   CDP; no `postMessage`, origin HTTP endpoint, extension, or page script runs there.
-  Its main-world control tree is detached, not website DOM. Only non-private
-  highlight geometry enters the website's closed shadow tree. The host uses the
-  top layer; tampered visibility/transforms reject UI input. Sites can still remove
-  or hide the host (denial of service), not read its private content or mint input.
-- **Errata is transient, private, and silent by default.** Q recalls notes; the configured
-  lock shortcut opens private typing, Space captures, Escape dismisses. Only an unread
-  count remains idle. Website DOM receives geometry only, never folios, labels or answers.
-  System Georgia/Courier references require no bundled fonts or network requests.
-  Inbox `speak` resolves server-owned item/request text, never client-supplied speech.
-  macOS `/usr/bin/say` receives text on stdin; one cancellable worker owns playback.
-  `auto_speak` is an explicit runtime toggle, initially off; disconnect cancels playback.
-  Completion may mark unread but must not select a note or announce its arrival.
+  Only text-free geometry enters the website's closed shadow tree: rings and glass
+  plates. Plate and hit-area heights are rounded to 24px steps and capsule widths to
+  16px, so the exact length of an answer is not exposed. Voice level goes straight
+  from Python to the capsule frame and never touches the main world. The host uses
+  the top layer and re-raises when a site dialog or popover opens. Tampered
+  visibility/transforms reject UI input. Sites can still remove or hide the host
+  (denial of service), not read its private content or mint input. They can observe
+  the frame's coarse rectangle by hit testing, and that focus sits in a frame.
+- **Canvas does not render in a scripts-disabled document.** Chrome shows fallback
+  content. The waveform is DOM bars; do not move it back to a canvas in the frame.
+- **The look is the approved prototype, one material: glass.** Nothing on screen when
+  idle, apart from a one-time first hint. Plain words, no icons, numbers or lock.
+  `prefers-reduced-transparency` still gets a solid surface, as an accessibility
+  setting, not a choice. Timers do not fire in the frames: timing lives in the main
+  isolated world or CSS, and streaming is pushed over CDP.
+- **Answers are untrusted content, rendered through an allow-list.** Never put model or
+  page text through `innerHTML`. No images, no remote resources, no `<a>` or href in the
+  frames: a link is a span, opened by Python after `safe_link` from a trusted click, and
+  it shows its host. Mid-stream, half-finished markup waits offstage rather than flashing
+  raw markers. DOM updates patch in place so private focus, selection and scroll survive.
+  Answers cannot supply confirmations or controls.
+- **Stack state is Python's.** `presented`, `archived`, names, hints and read-aloud state
+  come in the inbox, so they follow navigation and tabs; springs and placement are local.
+  The first answer that has started and not been shown comes forward by itself. Each gets
+  its turn of `answer_turn_seconds` (12s default, longer by reading speed; hover holds),
+  then the next unseen one, then the stack retreats. Esc answers for everything settled.
+- **What Space asks.** On the card, or moved under 90px since asking, is a follow-up;
+  pointed elsewhere is a new question. A hold that began on the card stays on it until
+  the pointer travels 90px, because the card stops taking hover while talking.
+- **A quick Space tap is the website's.** Under 130ms it is replayed as real trusted
+  input over CDP, so media sites keep their behaviour. Holds under 220ms cancel silently.
+- **Everything lit counts.** The capture lists what was lit (`lit`) and the resolver adds
+  those to `pointed`, after any spoken-word anchors. Names use bounded `safeText` only.
+  Model-written names come from a side call only while nothing is queued, so they cannot
+  delay an answer or spend its quota; they pass `model_name` and never enter a turn.
+- **Inbox `speak` resolves server-owned item/request text, never client-supplied speech.**
+  It speaks `speech_text`, no markup characters. macOS `/usr/bin/say` receives text on
+  stdin; one cancellable worker owns playback. `auto_speak` is an explicit runtime toggle,
+  initially off; disconnect cancels playback.
 - **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
   `audio_epoch` (the first native input buffer's ADC wall-clock epoch for Chrome,
   `time.time()` before `record_microphone` on the tool path) and shifts each word.
@@ -109,7 +138,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 - **Resolution epoch guards `choose`.** Every resolution bumps
   `session.resolution_id`; a `choose` intent carrying a mismatched `resolution_id`
   gets `"stale resolution"`. Never accept a choose without the epoch check — a stale
-  Lens card would click whatever now sits at that index.
+  choice would click whatever now sits at that index.
 - **Hover snapshots are immutable server-owned evidence.** Activation bumps the
   epoch, invalidates simulated choose/pending confirmations, stamps `Resolution`
   into the bounded context, and activates the browser's captured identity map.
@@ -180,12 +209,16 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   The companion caches the full inbox in Python and delivers only to the focused
   tab's detached renderer and protected iframe, including recall after navigation.
   No answer content or unread text enters the page DOM or background renderers.
+  During a navigation frames can be missing: `_on_new_context` is serialized and retried,
+  because a half-armed page would swallow keys with nowhere to send them.
   Non-inbox replies still wait for their captured source document to be foreground.
   Inbox events (`type: inbox`, `version: 1`) replace UI state by increasing `revision`:
   connection/capture state/paused/selected item plus items with capture order, target/source,
   unread and expired action state, and request conversations with question, text,
   status/error/queue position. No DOM identities appear in this UI interface.
-  Completion marks unread but never changes selection or announces an answer.
+  Completion marks an answer unread unless its card is open. It may bring the card forward,
+  silently. Python sends raw `error` and a `plain_error` sentence; the UI shows only the sentence.
+  Asking again with nothing waiting clears a pause, unless the host refused injection.
   Post-answer scope selection uses the same foreground/source-document guard as
   other snapshot operations. A background source keeps its existing pointer
   highlight; it cannot transfer that highlight to the newly focused tab.
@@ -217,6 +250,10 @@ python3 -m unittest tests.test_service_intents   # one module
 python3 -m py_compile tests/*.py service.py tools.py
 node --check browser/overlay.js                  # JS syntax check
 ruff check                                        # if ruff is installed
+.venv/bin/python tests/trust_boundaries_chrome.py    # private Chrome; includes the patched-API page
+.venv/bin/python tests/recording_hold_chrome.py
+# whole flow on a real Hermes backend, serial, free model; run with the Hermes venv's Python:
+# HERMES_DISABLE_LAZY_INSTALLS=1 <venv>/bin/python benchmark/probe_companion_ui.py --out DIR --headless
 # accuracy table — benchmark has package-relative imports, so load the tests shell first:
 python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_benchmark_suite, format_benchmark_markdown; print(format_benchmark_markdown(run_benchmark_suite()))"
 ```
