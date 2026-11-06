@@ -262,6 +262,10 @@ def cursor_result(capture, utterance, words=None, now=None):
         fact = f"POINTED {target.get('id')} {str(target.get('role', ''))[:40]} {str(target.get('label', ''))[:100]}"
         essential.append(fact)
         add(fact)
+        if target.get("surface"):
+            fact = "Surface: " + str(target["surface"])[:300]
+            essential.append(fact)
+            add(fact)
         if target.get("cell"):
             cell = target["cell"]
             fact = (f"pointed cell value {str(cell.get('value', ''))[:120]}; "
@@ -286,6 +290,7 @@ def cursor_result(capture, utterance, words=None, now=None):
             else:
                 add_urls(block)
     groups = []
+    peer_urls = []
     pointed_items = {target.get("group_item_id") for target in selected}
     for block in blocks:
         if block.get("kind") != "group":
@@ -315,17 +320,24 @@ def cursor_result(capture, utterance, words=None, now=None):
                                        limits=(300, 160, 100, 70, 48, 32, 16, 8, 0)))
             members_left -= 1
             if member.get("id") not in pointed_items:
-                add_urls(member)
+                peer_urls.append(member)
         add(f"{group.get('id')} omitted items: {max(0, total - written)}; "
             f"offscreen items: {group.get('offscreen_items', 0)}")
+    peer_rows_left = sum(min(len(rows), max(0, 12 - kept[block["id"]])) for block, _, rows in tables)
     for block, _, rows in tables:
+        rows = sorted(rows, key=lambda row: not row.get("in_view", False))
         for row in rows[:max(0, 12 - kept[block["id"]])]:
             kept[block["id"]] += bool(add_values(f"row {row.get('index')} {row.get('id', '')}: ",
-                                                row.get("cells", []), 1800))
-            add_urls(row)
+                                                row.get("cells", []),
+                                                min(1800, max(0, remaining() - 200) // max(1, peer_rows_left))))
+            peer_rows_left -= 1
+        peer_urls.extend(rows[:max(0, kept[block["id"]] - 1)])
         add(f"omitted rows: {max(0, int(block.get('total_rows', 0)) - kept[block['id']])}")
         if block.get("omitted_columns"):
             add(f"omitted columns per row: {block['omitted_columns']}; pointed column is described separately")
+    # Comparison facts across all collections precede peer destinations.
+    for item in peer_urls:
+        add_urls(item)
     for control in capture.get("controls", [])[:12]:
         if isinstance(control, dict) and not control.get("sensitive"):
             add(f"control {control.get('id')}: {str(control.get('label', ''))[:100]}")

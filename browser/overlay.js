@@ -594,7 +594,9 @@
   }
   const sensitiveSelector = 'input[type="password"],[autocomplete^="cc-"],[autocomplete="current-password"],[autocomplete="new-password"],[name*="card" i],[name*="payment" i],[name*="cvv" i],[name*="cvc" i],[name^="cc-" i],[id*="card" i],[id*="payment" i],[id*="cvv" i],[id*="cvc" i],[id^="cc-" i]';
   function sensitive(el) {
-    const field = el && el.closest("input,textarea,select,[contenteditable]");
+    let field = el && el.closest("input,textarea,select,[contenteditable]");
+    for (let host = el?.getRootNode?.().host; !field && host; host = host.getRootNode?.().host)
+      field = host.closest("input,textarea,select,[contenteditable]");
     if (!field) return false;
     const tokens = (field.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
     return field.matches(sensitiveSelector) ||
@@ -624,19 +626,20 @@
   function safeText(el, max = 160, excluded = null) {
     if (!el) return "";
     if (sensitive(el)) return "[redacted]";
-    if (el.matches("input,textarea,select,[contenteditable]")) return "";
-    if (el.matches("label") && el.htmlFor && sensitive(document.getElementById(el.htmlFor))) return "[redacted]";
+    for (let node = el; node; node = node.getRootNode?.().host)
+      if (node.closest("input,textarea,select,[contenteditable]")) return "";
+    if (el.matches("label") && el.htmlFor && sensitive(el.getRootNode?.().getElementById?.(el.htmlFor) || document.getElementById(el.htmlFor))) return "[redacted]";
     if (!rendered(el) && getComputedStyle(el).display !== "contents") return "";
     // Never read field values, labels/attributes, or ancestor innerText wholesale.
     const parts = [];
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    const walker = document.createTreeWalker(el.shadowRoot || el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         if (node.nodeType === 1 && (excluded?.has(node) ||
             node.matches('input,textarea,select,[contenteditable],script,style,#hermes-gaze-root') || sensitive(node) ||
             !rendered(node) && getComputedStyle(node).display !== "contents"))
           return NodeFilter.FILTER_REJECT;
         if (node.nodeType === 1 && node.matches("label") && node.htmlFor &&
-            sensitive(document.getElementById(node.htmlFor))) return NodeFilter.FILTER_REJECT;
+            sensitive(node.getRootNode?.().getElementById?.(node.htmlFor) || document.getElementById(node.htmlFor))) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -649,7 +652,7 @@
     return parts.join(" ").slice(0, max);
   }
   function safeLabel(el, max = 100, excluded = null) {
-    if (sensitive(el) || (el.matches("label") && el.htmlFor && sensitive(document.getElementById(el.htmlFor))))
+    if (sensitive(el) || (el.matches("label") && el.htmlFor && sensitive(el.getRootNode?.().getElementById?.(el.htmlFor) || document.getElementById(el.htmlFor))))
       return "[redacted]";
     return (el.getAttribute("aria-label") || el.getAttribute("title") || safeText(el, max, excluded)).slice(0, max);
   }
@@ -659,9 +662,9 @@
     for (const link of candidates.slice(0, 120)) {
       if (!link || links.length >= 3) continue;
       let excluded = false;
-      for (let node = link; node; node = node.parentElement) {
+      for (let node = link; node; node = node.parentElement || node.getRootNode?.().host) {
         if (sensitive(node) || node.matches("input,textarea,select,[contenteditable],#hermes-gaze-root") ||
-            node.matches("label") && node.htmlFor && sensitive(document.getElementById(node.htmlFor))) {
+            node.matches("label") && node.htmlFor && sensitive(node.getRootNode?.().getElementById?.(node.htmlFor) || document.getElementById(node.htmlFor))) {
           excluded = true;
           break;
         }
@@ -685,8 +688,14 @@
   }
   function hitNode(x, y) {
     if (typeof x !== "number" || typeof y !== "number") return null;
-    const el = document.elementFromPoint(x, y);
-    return el && !el.closest("#hermes-gaze-root") ? el : null;
+    let el = document.elementFromPoint(x, y);
+    if (el?.closest("#hermes-gaze-root")) return null;
+    for (let depth = 0; el?.shadowRoot && depth < 16; depth++) {
+      const inner = el.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === el) break;
+      el = inner;
+    }
+    return el;
   }
   function rememberHit(el, now = Date.now() / 1000) {
     const id = el ? cursorId(el) : null;
@@ -706,17 +715,34 @@
     const r = el.getBoundingClientRect();
     const hidden = sensitive(el);
     const visible = el.isConnected && rendered(el);
+    let covering = null;
+    for (let node = el; node && node !== document.body; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (node.matches("dialog,[role=dialog],[aria-modal=true]") ||
+          ["fixed", "sticky"].includes(style.position) && node.getBoundingClientRect().width > window.innerWidth / 2) {
+        covering = node;
+        break;
+      }
+    }
+    const surface = el.matches("iframe,frame") ?
+      "Pointer is on an embedded frame; its content was not read. Underlying page content is covered at the pointer." :
+      covering ? "Pointer is on an overlay/dialog or wide fixed/sticky surface; underlying page content may be covered." :
+      el.matches("canvas,object,embed") || el.tagName.includes("-") && !el.shadowRoot && !safeText(el) ?
+        "Embedded or closed component content was not readable." : "";
     return { id: cursorId(el), available: visible && !hidden,
       ...(hidden ? { sensitive: true, reason: "sensitive target redacted" } :
         !visible ? { reason: "target not rendered" } : {}),
       tag: el.tagName.toLowerCase(), role: (el.getAttribute("role") || el.tagName.toLowerCase()).slice(0, 40),
       label: hidden ? "[redacted]" : visible ? safeLabel(el, 100) : "",
+      ...(surface ? { surface } : {}),
       ...(!hidden && visible ? { urls: safeLinks(el) } : {}),
       selector: hidden ? "" : buildSelector(el).slice(0, 350),
       rect_vp: [r.left, r.top, r.width, r.height],
       rect_doc: [r.left + scrollX, r.top + scrollY, r.width, r.height], block_ids: [] };
   }
   function captureCursorContext() {
+    if (!state.armed && typeof state.pointerX === "number" && !cursorOverHud)
+      rememberHit(hitNode(state.pointerX, state.pointerY));
     clearActionConfirmation();
     const snapshotId = `${snapshotInstance}:${++snapshotSerial}`;
     const identities = new Map();
@@ -756,6 +782,10 @@
         const item = unwrap(branch);
         const collection = parent.matches("ul,ol,[role=list],[role=group],[role=grid]") ||
           ["flex", "inline-flex", "grid", "inline-grid"].includes(getComputedStyle(parent).display);
+        const itemClass = branch.getAttribute("class");
+        const repeatedLinks = branch.matches("div") && itemClass && branch.querySelector("a[href]") &&
+          [...parent.children].slice(0, 128).filter(child => child.tagName === branch.tagName &&
+            child.getAttribute("class") === itemClass && child.querySelector("a[href]")).length >= 3;
         let group = groups.get(parent);
         if (!group) {
           const items = [];
@@ -767,10 +797,11 @@
                 node.matches("section,main,aside,nav,header,footer,form,[role=region]")) continue;
             const r = node.getBoundingClientRect();
             if (r.width > 0 && r.height > 0 && (node.matches("article,li,[role=listitem],.card") ||
-                collection && ownHeading(node))) items.push(node);
+                collection && ownHeading(node) || repeatedLinks && child.tagName === branch.tagName &&
+                child.getAttribute("class") === itemClass && node.querySelector("a[href]"))) items.push(node);
           }
           if (items.length >= 2 && (items.includes(item) || scanned > 128 &&
-              rendered(item) && (item.matches("article,li,[role=listitem],.card") || collection && ownHeading(item)))) {
+              rendered(item) && (item.matches("article,li,[role=listitem],.card") || collection && ownHeading(item) || repeatedLinks))) {
             if (!items.includes(item)) items.push(item);
             const excluded = new Set(items);
             let owner = parent, label = "";
@@ -788,7 +819,7 @@
           }
         }
         if (group && (group.items.includes(item) || rendered(item) &&
-            (item.matches("article,li,[role=listitem],.card") || collection && ownHeading(item)))) {
+            (item.matches("article,li,[role=listitem],.card") || collection && ownHeading(item) || repeatedLinks))) {
           if (!group.items.includes(item)) group.items.push(item);
           group.pointed.add(item);
           const peers = group.items.filter(node => !group.pointed.has(node));
@@ -821,6 +852,16 @@
       capture.targets.push(target);
       if (!target.available) continue;
       handle(el);
+      // A frame is the actual hit, not the page behind it. Never collect its page ancestors.
+      if (el.matches("iframe,frame,canvas,object,embed")) continue;
+      if (target.surface) {
+        const surface = el.closest("dialog,[role=dialog],[aria-modal=true]") || el;
+        const bid = handle(surface);
+        target.block_ids.push(bid);
+        blocks.set(bid, { id: bid, kind: "surface", label: safeLabel(surface, 80),
+          text: safeText(surface, 650), text_limit: 650 });
+        continue;
+      }
       const cell = el.closest("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]");
       let table = el.closest("table,[role=grid]");
       if (table && !table.matches("table") && !table.querySelector("tr,[role=row]")) table = null;
@@ -886,12 +927,16 @@
             header: header ? `${handle(header)} ${safeText(header, 60)}` : "",
             column_handle: capture.handles[`${bid}:column:${column + 1}`] ? `${bid}:column:${column + 1}` : null };
         }
-        const indices = block._rows.length <= 12 ? block._rows.map((_, i) => i) : [ri];
+        const peers = block._rows.map((node, index) => ({ node, index }))
+          .filter(({ index }) => index !== ri)
+          .sort((a, b) => Number(inView(b.node)) - Number(inView(a.node)) ||
+            Math.abs(a.index - ri) - Math.abs(b.index - ri));
+        const indices = [ri, ...peers.slice(0, 11).map(({ index }) => index)];
         for (const i of indices) if (i >= 0 && block.rows.length < 64 && !block._seen.has(i)) {
           block._seen.add(i);
           const node = block._rows[i];
-          block.rows.push({ id: handle(node), index: i + 1, urls: safeLinks(node),
-            cells: block._cells(node).map(c => safeText(c, 70)) });
+          block.rows.push({ id: handle(node), index: i + 1, urls: safeLinks(node), in_view: inView(node),
+            cells: block._cells(node).map(c => safeText(c, 160)) });
         }
       }
       const group = !table && captureGroup(el);
@@ -917,9 +962,11 @@
     const controls = document.querySelectorAll('button,a,input,select,[role=button]');
     for (let i = 0; i < controls.length && i < 120 && capture.controls.length < 12; i++) {
       const el = controls[i];
-      if (el.closest("#hermes-gaze-root") || sensitive(el)) continue;
+      if (el.closest("#hermes-gaze-root") || sensitive(el) || !rendered(el) || !inView(el)) continue;
       const r = el.getBoundingClientRect();
-      if (r.width && r.height) { handle(el); capture.controls.push(cursorMetadata(el)); }
+      const top = hitNode(Math.max(0, r.left) + Math.min(r.width, window.innerWidth - Math.max(0, r.left)) / 2,
+        Math.max(0, r.top) + Math.min(r.height, window.innerHeight - Math.max(0, r.top)) / 2);
+      if (top && el.contains(top)) { handle(el); capture.controls.push(cursorMetadata(el)); }
     }
     capture.omitted_controls = Math.max(0, controls.length - capture.controls.length);
     identities.actionUrl = location.href;

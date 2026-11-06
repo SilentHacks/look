@@ -101,7 +101,7 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   window: { listeners: {}, innerWidth: 1200, innerHeight: 800,
     addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
     dispatchEvent(event) { for (const handler of this.listeners[event.type] || []) handler(event); } },
-  getComputedStyle: node => ({ display: node.style.display || 'block' }),
+  getComputedStyle: node => ({ display: node.style.display || 'block', position: node.style.position || 'static' }),
   location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
   shadow, hudReply, lockLabel, tuckSummary, pinsLayer: element('div'), lensLayer: element('div'),
@@ -111,7 +111,7 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   _emit: intent => intents.push(intent), cancelListening() {} });
 const start = source.indexOf('  const cursorIds =');
 const end = source.indexOf('  function updateLiveInspector', start);
-vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent, revokeActionAuthority };', context);
+vm.runInContext(source.slice(start, end) + '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent, revokeActionAuthority };', context);
 const replyStart = source.indexOf('  function onIntentResult');
 const replyEnd = source.indexOf('  function formatRoleDisplayName', replyStart);
 vm.runInContext(source.slice(replyStart, replyEnd) + '\nthis.onIntentResult = onIntentResult;', context);
@@ -137,6 +137,102 @@ test('deal links resolve absolutely without schemes, sensitive labels or unbound
   for (const secret of ['SECRET', 'TOKEN', 'FRAGMENT']) assert.ok(!JSON.stringify(evidence).includes(secret));
   assert.ok(!JSON.stringify(evidence).includes('/SECRET'));
   assert.ok(!JSON.stringify(evidence).includes('javascript:'));
+});
+
+test('embedded consent hit is not replaced with covered page text; dismissal reveals the real item', () => {
+  const deal = element('a', [text('Public offer')], { href: '/offer' });
+  const frame = element('iframe', [], { title: 'Consent message' });
+  element('div', [element('p', [text('COVERED_PAGE_SECRET')]), frame]);
+  hit = frame;
+  api.rememberHit(api.hitNode(10, 20));
+  const covered = api.captureCursorContext();
+  const target = covered.targets.find(t => t.id === covered.history.at(-1).id);
+  assert.equal(target.tag, 'iframe');
+  assert.match(target.surface, /content was not read.*covered/);
+  assert.equal(target.block_ids.length, 0);
+  assert.ok(!JSON.stringify(covered).includes('COVERED_PAGE_SECRET'));
+  frame.remove();
+  hit = deal;
+  api.rememberHit(api.hitNode(10, 20));
+  const open = api.captureCursorContext();
+  const current = open.targets.find(t => t.id === open.history.at(-1).id);
+  assert.equal(current.label, 'Public offer');
+  assert.equal(current.surface, undefined);
+});
+
+test('open shadow hit preserves exact internals and root-local sensitive label exclusions', () => {
+  const field = element('input', [], { type: 'password' });
+  const secretLabel = element('label', [text('SHADOW_SECRET')], { for: 'local' });
+  const leaf = element('a', [text('Shadow offer')], { href: '/shadow-offer' });
+  const host = element('offer-card');
+  const root = element('div', [leaf, field, secretLabel]);
+  root.host = host;
+  root.elementFromPoint = () => leaf;
+  root.getElementById = id => id === 'local' ? field : null;
+  for (const node of [leaf, field, secretLabel]) node.getRootNode = () => root;
+  host.shadowRoot = root;
+  hit = host;
+  assert.equal(api.hitNode(10, 20), leaf);
+  assert.equal(api.safeText(host), 'Shadow offer');
+  api.rememberHit(api.hitNode(10, 20));
+  const wire = api.captureCursorContext();
+  const current = wire.targets.find(t => t.id === wire.history.at(-1).id);
+  assert.equal(current.label, 'Shadow offer');
+  assert.ok(!JSON.stringify(wire).includes('SHADOW_SECRET'));
+  host.attrs.contenteditable = '';
+  assert.equal(api.safeText(leaf), '');
+  host.attrs.autocomplete = 'cc-number';
+  assert.equal(api.safeText(leaf), '[redacted]');
+});
+
+test('portalled dialog text stays its own evidence and warns about coverage', () => {
+  const leaf = element('p', [text('Please choose your privacy settings')]);
+  const dialog = element('div', [leaf], { role: 'dialog' });
+  element('article', [element('p', [text('UNRELATED_COVERED_ARTICLE')]), dialog]);
+  api.rememberHit(leaf);
+  const wire = api.captureCursorContext();
+  const current = wire.targets.find(t => t.id === wire.history.at(-1).id);
+  assert.match(current.surface, /overlay\/dialog/);
+  assert.equal(current.label, 'Please choose your privacy settings');
+  const blocks = wire.blocks.filter(b => current.block_ids.includes(b.id));
+  assert.ok(blocks.every(b => !b.text.includes('UNRELATED_COVERED_ARTICLE')));
+});
+
+test('large tables include visible nearby rows rather than only the pointed row', () => {
+  const { rows } = tableFixture(100);
+  rows.forEach((row, i) => { row.rect = { left: 0, top: 2000 + i * 20, width: 500, height: 20 }; });
+  for (let i = 48; i <= 53; i++) rows[i].rect.top = 100 + (i - 48) * 20;
+  api.rememberHit(rows[50].children[1]);
+  const wire = api.captureCursorContext();
+  const current = wire.targets.find(t => t.id === wire.history.at(-1).id);
+  const block = wire.blocks.find(b => b.id === current.cell.block);
+  assert.ok(block.rows.some(row => row.index === 51));
+  assert.deepEqual(Array.from(block.rows.slice(1, 6), row => row.index).sort((a,b) => a-b), [49,50,52,53,54]);
+  assert.equal(block.total_rows, 100);
+  assert.equal(block.rows.length, 12);
+});
+
+test('ordinary repeated linked blocks form a bounded peer collection', () => {
+  const items = ['Offer one £25', 'Offer two £30', 'Offer three £40'].map(value =>
+    element('div', [element('a', [text(value)], { href: '/offer' }), element('p', [text('Terms')])], { class: 'offer-row' }));
+  element('div', items);
+  api.rememberHit(items[1].children[0]);
+  const wire = api.captureCursorContext();
+  const current = wire.targets.find(t => t.id === wire.history.at(-1).id);
+  const group = wire.blocks.find(b => b.id === current.block_ids[0]);
+  assert.equal(group.kind, 'group');
+  assert.equal(group.members.length, 3);
+  assert.ok(group.members.some(m => m.text.includes('Offer three £40')));
+});
+
+test('linked fragments with different structures are not invented as peer offers', () => {
+  const fragments = ['author', 'title', 'comments'].map(name =>
+    element('div', [element('a', [text(name)], { href: '/' + name })], { class: name }));
+  element('div', fragments);
+  api.rememberHit(fragments[1].children[0]);
+  const wire = api.captureCursorContext();
+  const current = wire.targets.find(t => t.id === wire.history.at(-1).id);
+  assert.ok(!wire.blocks.some(b => current.block_ids.includes(b.id) && b.kind === 'group'));
 });
 
 test('live pins track layout and clipped scrolling, stop on detach and do no idle work', () => {
