@@ -105,6 +105,13 @@ as plain text. After compaction, resolving again captures the current cursor, no
 the historical target. `/gaze disconnect` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
 
+The Quiet Signal HUD uses a compact graphite/sage surface with separate target,
+question and answer areas. Drag its header to reposition it; Minimize keeps a
+small expandable header. Explain this, Summarize and Compare submit page-neutral
+questions about the captured target. Pointer/Simulated switches pointing modes;
+Clear dismisses highlights and the reply. Keyboard focus is visible, narrow
+viewports scroll the body, and reduced-motion preferences disable transitions.
+
 The HUD shows listening, transcribing, queued, thinking and completion/error
 states. Without a connected/authorized session, read-only questions can use a
 clearly labeled one-shot call, with no conversation followups or actions. Action

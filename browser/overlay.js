@@ -65,387 +65,179 @@
 
   const style = document.createElement("style");
   style.textContent = `
-    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
-
-    /* Spotlight & Locked Reticle */
+    :host {
+      color-scheme: dark;
+      --surface: #202623;
+      --inset: #151917;
+      --ink: #eef4ef;
+      --muted: #a0b1a7;
+      --accent: #a9dfbd;
+      --line: #3c4841;
+    }
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+    button:disabled { opacity: .5; cursor: wait; }
     .spotlight {
       position: fixed;
       border-radius: 50%;
       pointer-events: none;
       transform: translate(-50%, -50%);
-      border: 2px dashed rgba(99, 102, 241, 0.65);
-      background: radial-gradient(circle, rgba(99, 102, 241, 0.16) 0%, rgba(56, 189, 248, 0.05) 65%, transparent 100%);
-      transition: width 0.14s ease, height 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
-      opacity: 1;
+      border: 1px solid #76b89199;
+      background: #76b8910c;
+      transition: width .14s ease, height .14s ease;
     }
-    .spotlight.armed {
-      border: 2.5px solid #38bdf8;
-      background: radial-gradient(circle, rgba(56, 189, 248, 0.24) 0%, rgba(99, 102, 241, 0.08) 65%, transparent 100%);
-      box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.18), 0 0 28px rgba(56, 189, 248, 0.45);
-    }
+    .spotlight.armed { border: 2px solid var(--accent); background: #a9dfbd18; }
     .spotlight-tag {
       position: absolute;
-      bottom: -24px;
+      bottom: -25px;
       left: 50%;
       transform: translateX(-50%);
-      background: #0f172a;
-      color: #38bdf8;
-      border: 1px solid rgba(56, 189, 248, 0.5);
-      font-family: ui-monospace, SFMono-Regular, monospace;
+      background: var(--inset);
+      color: var(--accent);
+      border: 1px solid var(--line);
       font-size: 10px;
-      font-weight: 700;
-      padding: 2px 7px;
-      border-radius: 999px;
+      padding: 3px 8px;
+      border-radius: 6px;
       white-space: nowrap;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.35);
     }
-
-    /* Pinned Element Highlight Box */
     .pin-box {
       position: fixed;
       pointer-events: none;
-      border: 2.5px solid #6366f1;
-      border-radius: 8px;
-      background: rgba(99, 102, 241, 0.12);
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.28), 0 8px 24px rgba(15, 23, 42, 0.35);
-      transition: all 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+      border: 2px solid #76b891;
+      border-radius: 6px;
+      background: #76b89112;
     }
     .pin-badge {
       position: absolute;
-      top: -12px;
-      left: 8px;
-      background: linear-gradient(135deg, #4f46e5, #0284c7);
-      color: #ffffff;
-      font-family: ui-monospace, SFMono-Regular, monospace;
+      top: -23px;
+      left: 0;
+      background: var(--inset);
+      color: var(--accent);
       font-size: 11px;
-      font-weight: 700;
-      padding: 2px 9px;
-      border-radius: 999px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      font-weight: 600;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       white-space: nowrap;
-      border: 1px solid rgba(255,255,255,0.25);
     }
-
-    /* Semantic Lens Disambiguation Cards */
-    .lens-layer {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-    }
+    .lens-layer { position: fixed; inset: 0; pointer-events: none; }
     .lens-card {
       position: fixed;
-      width: 268px;
-      background: rgba(13, 16, 29, 0.96);
-      backdrop-filter: blur(18px);
-      border: 1.5px solid rgba(99, 102, 241, 0.55);
-      border-radius: 12px;
-      padding: 12px 14px;
-      color: #f8fafc;
+      width: min(268px, calc(100vw - 32px));
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      color: var(--ink);
       pointer-events: auto;
       cursor: pointer;
-      box-shadow: 0 16px 40px rgba(2, 6, 23, 0.65), 0 0 0 1px rgba(255,255,255,0.06);
-      transform: scale(0.92);
+      box-shadow: 0 12px 40px #0004;
+      transform: translateY(4px);
       opacity: 0;
-      transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.15s ease, border-color 0.15s ease;
+      transition: transform .15s ease, opacity .15s ease;
     }
-    .lens-card.open {
-      transform: scale(1);
-      opacity: 1;
-    }
-    .lens-card.primary, .lens-card:hover {
-      border-color: #38bdf8;
-      box-shadow: 0 16px 40px rgba(56, 189, 248, 0.32);
-    }
-    .lens-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-    .lens-key {
-      background: linear-gradient(135deg, #38bdf8, #6366f1);
-      color: #09090b;
-      font-family: ui-monospace, monospace;
-      font-size: 10.5px;
-      font-weight: 800;
-      padding: 2px 8px;
-      border-radius: 6px;
-    }
-    .lens-prob {
-      font-family: ui-monospace, monospace;
-      font-size: 11px;
-      color: #38bdf8;
-      font-weight: 600;
-    }
-    .lens-title {
-      font-size: 13.5px;
-      font-weight: 700;
-      margin-bottom: 4px;
-      color: #ffffff;
-    }
-    .lens-desc {
-      font-size: 11.5px;
-      color: #cbd5e1;
-      line-height: 1.38;
-    }
-    .dwell-bar {
-      height: 3.5px;
-      background: linear-gradient(90deg, #38bdf8, #818cf8);
-      width: 0%;
-      margin-top: 8px;
-      border-radius: 3px;
-      transition: width 0.05s linear;
-    }
+    .lens-card.open { transform: translateY(0); opacity: 1; }
+    .lens-card.primary, .lens-card:hover { border-color: var(--accent); }
+    .lens-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .lens-key { background: var(--accent); color: var(--inset); padding: 3px 8px; border-radius: 5px; font-size: 11px; }
+    .lens-prob { font-size: 11px; color: var(--muted); }
+    .lens-title { font-size: 14px; font-weight: 600; margin: 0 0 6px; overflow-wrap: anywhere; }
+    .lens-desc { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+    .lens-card .ctrl-btn { margin: 8px 6px 0 0; }
+    .lens-card[role="dialog"] { border-color: #c7a66d; }
+    .lens-card[role="dialog"] button:first-of-type { background: #dfc18e; color: #241d12; }
+    .dwell-bar { height: 3px; background: var(--accent); width: 0%; margin-top: 12px; border-radius: 3px; }
 
-    /* Floating, Draggable, Tuckable Hermes Gaze Plugin HUD */
+    /* Quiet Signal: one compact surface, with target and answer kept distinct. */
     .hud-shell {
       position: fixed;
       right: 24px;
       bottom: 24px;
-      width: 488px;
+      width: 420px;
       max-width: calc(100vw - 32px);
-      background: rgba(13, 16, 28, 0.95);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1.5px solid rgba(99, 102, 241, 0.6);
-      border-radius: 14px;
-      color: #f8fafc;
-      box-shadow: 0 22px 50px rgba(2, 6, 23, 0.65), 0 0 0 1px rgba(56, 189, 248, 0.22);
+      max-height: calc(100dvh - 32px);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      color: var(--ink);
+      box-shadow: 0 16px 56px #0004, 0 2px 8px #0002;
       pointer-events: auto;
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      transition: width 0.2s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.2s ease, opacity 0.2s ease;
       user-select: none;
+      font-size: 12px;
+      line-height: 1.5;
     }
-    .hud-shell.tucked {
-      width: auto;
-      min-width: 260px;
-      border-radius: 999px;
-    }
-
-    /* Distinct Plugin Top Accent Ribbon & Drag Bar */
+    .hud-shell.tucked { width: auto; }
     .hud-dragbar {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 9px 13px;
-      background: linear-gradient(90deg, rgba(79, 70, 229, 0.38) 0%, rgba(14, 165, 233, 0.25) 100%);
-      border-bottom: 1px solid rgba(99, 102, 241, 0.35);
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
       cursor: grab;
-      gap: 8px;
-      white-space: nowrap;
+      gap: 12px;
+      flex-shrink: 0;
     }
     .hud-dragbar:active { cursor: grabbing; }
-    .hud-shell.tucked .hud-dragbar {
-      border-bottom: none;
-      padding: 8px 14px;
-    }
-
-    .plugin-identity {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      color: #e0e7ff;
-      white-space: nowrap;
-    }
-    .drag-grip {
-      color: #818cf8;
-      font-size: 14px;
-      line-height: 1;
-    }
-    .plugin-pill {
-      font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 9.5px;
-      font-weight: 700;
-      text-transform: uppercase;
-      padding: 2px 6px;
-      border-radius: 4px;
-      background: rgba(56, 189, 248, 0.2);
-      color: #38bdf8;
-      border: 1px solid rgba(56, 189, 248, 0.4);
-      white-space: nowrap;
-    }
-
-    .hud-controls {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      white-space: nowrap;
-    }
+    .hud-shell.tucked .hud-dragbar { border-bottom: none; }
+    .plugin-identity { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; }
+    .drag-grip { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+    .plugin-pill { display: none; }
+    .tucked .plugin-pill { display: block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; font-weight: 400; color: var(--muted); }
+    .tucked #hg-mode-btn, .tucked #hg-clear-btn { display: none; }
+    .hud-controls { display: flex; align-items: center; gap: 4px; }
     .ctrl-btn {
-      background: rgba(30, 41, 59, 0.85);
-      color: #cbd5e1;
-      border: 1px solid rgba(148, 163, 184, 0.3);
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid transparent;
       border-radius: 6px;
-      padding: 4px 8px;
+      min-height: 30px;
+      padding: 4px 7px;
       font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
       white-space: nowrap;
-      transition: all 0.12s;
     }
-    .ctrl-btn:hover {
-      background: rgba(51, 65, 85, 0.95);
-      color: #ffffff;
-      border-color: #38bdf8;
+    .ctrl-btn:hover, .chip:hover { background: #a9dfbd12; color: var(--ink); }
+    .ctrl-btn.active { color: var(--accent); border-color: var(--line); }
+    .hud-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; }
+    .hud-shell.tucked .hud-body { display: none; }
+    .target-bar { display: flex; align-items: center; gap: 12px; }
+    .target-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+    .target-state-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; color: var(--muted); overflow-wrap: anywhere; }
+    .target-bar.locked .target-state-label { color: var(--accent); }
+    .target-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .target-sub { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; max-height: 48px; overflow-y: auto; }
+    #hg-lock-btn { background: var(--inset); color: var(--ink); padding: 5px 10px; }
+    .chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font-size: 11px; }
+    .hud-input-row { display: flex; gap: 5px; align-items: center; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 5px; }
+    .hud-input-row:focus-within { border-color: var(--accent); }
+    .hud-input { flex: 1; min-width: 0; width: 0; background: transparent; border: none; padding: 7px 5px; color: var(--ink); font-size: 12px; user-select: text; }
+    .hud-input::placeholder { color: var(--muted); }
+    .hud-input:focus-visible { outline-offset: 0; border-radius: 4px; }
+    .hud-btn { background: var(--accent); color: var(--inset); border: 1px solid transparent; border-radius: 6px; padding: 7px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .hud-btn:hover { filter: brightness(1.08); }
+    #hg-mic-btn { background: var(--surface); color: var(--ink); }
+    #hg-mic-btn.listening { background: #783c3c; color: #fff; border-color: #edaaaa; }
+    .hud-reply { font-size: 13px; color: var(--ink); line-height: 1.65; border-top: 1px solid var(--line); padding-top: 14px; max-height: 230px; overflow-y: auto; overflow-wrap: anywhere; user-select: text; }
+    #gaze-explanation-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .hud-help { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+    .hud-help strong { font-weight: 500; color: var(--ink); }
+    @media (max-width: 480px) {
+      .hud-shell { right: 16px; bottom: 16px; }
+      .hud-dragbar { padding: 10px 12px; gap: 6px; }
+      .hud-body { padding: 12px; }
+      .plugin-identity { font-size: 12px; }
+      .ctrl-btn { padding: 4px 5px; }
     }
-    .ctrl-btn.active {
-      background: rgba(56, 189, 248, 0.22);
-      color: #38bdf8;
-      border-color: rgba(56, 189, 248, 0.6);
-    }
-
-    /* Body inside HUD */
-    .hud-body {
-      padding: 12px 14px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    .hud-shell.tucked .hud-body {
-      display: none;
-    }
-
-    /* Live Target Inspector Bar */
-    .target-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: rgba(2, 6, 23, 0.65);
-      border: 1px solid rgba(99, 102, 241, 0.35);
-      border-radius: 8px;
-      padding: 7px 10px;
-      gap: 8px;
-    }
-    .target-bar.locked {
-      border-color: #38bdf8;
-      background: rgba(14, 165, 233, 0.14);
-    }
-    .target-info {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-      flex: 1;
-    }
-    .target-state-label {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #94a3b8;
-    }
-    .target-bar.locked .target-state-label {
-      color: #38bdf8;
-    }
-    .target-name {
-      font-size: 12.5px;
-      font-weight: 600;
-      color: #f8fafc;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .target-sub {
-      font-family: ui-monospace, monospace;
-      font-size: 10.5px;
-      color: #94a3b8;
-    }
-
-    /* Quick Action Chips */
-    .chips-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-    .chip {
-      background: rgba(30, 41, 59, 0.75);
-      color: #e2e8f0;
-      border: 1px solid rgba(99, 102, 241, 0.35);
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 11px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.12s;
-    }
-    .chip:hover {
-      background: rgba(79, 70, 229, 0.35);
-      border-color: #38bdf8;
-      color: #ffffff;
-    }
-
-    /* Input Row */
-    .hud-input-row {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .hud-input {
-      flex: 1;
-      background: rgba(2, 6, 23, 0.8);
-      border: 1px solid rgba(148, 163, 184, 0.35);
-      border-radius: 8px;
-      padding: 7px 11px;
-      color: #f8fafc;
-      font-size: 12.5px;
-      outline: none;
-      user-select: text;
-    }
-    .hud-input:focus {
-      border-color: #38bdf8;
-      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
-    }
-    @keyframes mic-pulse {
-      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-      70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-    }
-    .hud-btn {
-      background: linear-gradient(135deg, #38bdf8, #6366f1);
-      color: #09090b;
-      border: none;
-      border-radius: 8px;
-      padding: 7px 13px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: all 0.12s ease;
-    }
-    .hud-btn:hover { opacity: 0.92; }
-    .hud-btn.listening {
-      background: #ef4444 !important;
-      color: #ffffff !important;
-      animation: mic-pulse 1.2s infinite;
-    }
-
-    /* Reply / Output Drawer */
-    .hud-reply {
-      font-size: 12px;
-      color: #e2e8f0;
-      line-height: 1.48;
-      background: rgba(2, 6, 23, 0.6);
-      border: 1px solid rgba(148, 163, 184, 0.22);
-      border-radius: 8px;
-      padding: 9px 11px;
-      max-height: 230px;
-      overflow-y: auto;
-      user-select: text;
-    }
-    #gaze-explanation-text {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-    .hud-help {
-      font-size: 10.5px;
-      color: #94a3b8;
-      display: flex;
-      justify-content: space-between;
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; animation: none !important; }
     }
   `;
   shadow.appendChild(style);
@@ -476,43 +268,43 @@
   hud.innerHTML = `
     <div class="hud-dragbar" id="hg-dragbar" title="Drag to move the Hermes Gaze HUD anywhere">
       <div class="plugin-identity">
-        <span class="drag-grip">⠿</span>
-        <span>☤ HERMES GAZE</span>
-        <span class="plugin-pill" id="hg-tuck-summary">PLUGIN HUD</span>
+        <span class="drag-grip" aria-hidden="true"></span>
+        <span>Hermes Gaze</span>
+        <span class="plugin-pill" id="hg-tuck-summary">Ready</span>
       </div>
       <div class="hud-controls">
-        <button class="ctrl-btn" id="hg-mode-btn" title="Switch between Precise Pointer (σ=${state.hoverSigmaPx}px) and Simulated Noisy Eye Gaze (σ=${state.sigmaPx}px)">🎯 Hover (σ=${state.hoverSigmaPx}px)</button>
-        <button class="ctrl-btn" id="hg-clear-btn" title="Clear pins & lens overlays (Esc)">Clear</button>
-        <button class="ctrl-btn" id="hg-tuck-btn" title="Tuck or expand the plugin HUD">_ Tuck</button>
+        <button class="ctrl-btn" id="hg-mode-btn" title="Switch between precise pointer and simulated noisy gaze">Pointer</button>
+        <button class="ctrl-btn" id="hg-clear-btn" title="Clear highlights and reply (Esc)">Clear</button>
+        <button class="ctrl-btn" id="hg-tuck-btn" aria-expanded="true" aria-controls="hg-body" title="Minimize or expand Hermes Gaze">Minimize</button>
       </div>
     </div>
-    <div class="hud-body">
+    <div class="hud-body" id="hg-body">
       <div class="target-bar" id="hg-target-bar">
         <div class="target-info">
-          <div class="target-state-label" id="hg-lock-label">🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)</div>
-          <div class="target-name" id="hg-target-name">Move cursor over any page element...</div>
-          <div class="target-sub" id="hg-target-sub">—</div>
+          <div class="target-state-label" id="hg-lock-label" role="status">Following cursor</div>
+          <div class="target-name" id="hg-target-name">Point at something on the page</div>
+          <div class="target-sub" id="hg-target-sub">Your page, in context</div>
         </div>
-        <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">🔒 Lock (${hotkeyLabel()})</button>
+        <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">Lock</button>
       </div>
 
       <div class="chips-row">
-        <button class="chip" data-prompt="What happens if I press this?">❓ What does this do?</button>
-        <button class="chip" data-prompt="Click this">⚡ Click this</button>
-        <button class="chip" data-prompt="Export these results and chart Spend vs ROAS">📊 Export &amp; chart table</button>
+        <button class="chip" data-prompt="What does this do?">Explain this</button>
+        <button class="chip" data-prompt="Summarize this">Summarize</button>
+        <button class="chip" data-prompt="Compare these">Compare</button>
       </div>
 
       <div class="hud-input-row">
-        <input class="hud-input" id="hg-input" placeholder="Point & speak or ask: 'What happens if I press this?'..." />
-        <button class="hud-btn" id="hg-mic-btn" style="background:rgba(239,68,68,0.22);border:1px solid rgba(239,68,68,0.5);color:#fca5a5;" title="Click to speak or hold Spacebar (Push-to-Talk)">🎙️ Speak</button>
-        <button class="hud-btn" id="hg-send">Resolve</button>
+        <input class="hud-input" id="hg-input" aria-label="Ask Hermes about the page" placeholder="Ask about this…" />
+        <button class="hud-btn" id="hg-mic-btn" title="Click to speak or hold Space">Speak</button>
+        <button class="hud-btn" id="hg-send" title="Send question">Ask</button>
       </div>
 
       <div class="hud-reply" id="hg-reply" style="display:none;"></div>
 
       <div class="hud-help">
-        <span id="hg-hotkey-tip">Tip: Hold <strong>Spacebar</strong> to speak or press <strong>${hotkeyLabel()}</strong> to lock</span>
-        <span>Drag header ⠿ to move</span>
+        <span id="hg-hotkey-tip">Hold <strong>Space</strong> to speak · <strong>${hotkeyLabel()}</strong> to lock</span>
+        <span>Drag header to move</span>
       </div>
     </div>
   `;
@@ -595,21 +387,22 @@
   tuckBtn.addEventListener("click", () => {
     state.tucked = !state.tucked;
     hud.classList.toggle("tucked", state.tucked);
-    tuckBtn.textContent = state.tucked ? "Expand ☤" : "_ Tuck";
+    tuckBtn.textContent = state.tucked ? "Expand" : "Minimize";
+    tuckBtn.setAttribute("aria-expanded", String(!state.tucked));
     if (state.tucked && state.hoveredCandidate) {
-      tuckSummary.textContent = `🎯 ${state.hoveredCandidate.label.slice(0, 18)}`;
+      tuckSummary.textContent = state.hoveredCandidate.label.slice(0, 18);
     } else {
-      tuckSummary.textContent = "PLUGIN HUD";
+      tuckSummary.textContent = "Ready";
     }
   });
 
   // --- Mode Switcher (Hover vs Simulated Noisy Gaze) ---
   function syncModeUI() {
     if (state.mode === "hover") {
-      modeBtn.textContent = `🎯 Hover (σ=${state.hoverSigmaPx}px)`;
+      modeBtn.textContent = "Pointer";
       modeBtn.classList.remove("active");
     } else {
-      modeBtn.textContent = `👁️ Gaze Sim (σ=${state.sigmaPx}px)`;
+      modeBtn.textContent = "Simulated";
       modeBtn.classList.add("active");
     }
     const activeX = state.armed && state.lockedX !== null ? state.lockedX : state.pointerX;
@@ -633,11 +426,11 @@
 
   function refreshHotkeyLabels() {
     if (!state.armed) {
-      lockLabel.textContent = `🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)`;
-      lockBtn.textContent = `🔒 Lock (${hotkeyLabel()})`;
+      lockLabel.textContent = "Following cursor";
+      lockBtn.textContent = "Lock";
     }
     const tip = hud.querySelector("#hg-hotkey-tip");
-    if (tip) tip.innerHTML = `Tip: Hold <strong>Spacebar</strong> to speak or press <strong>${escapeHtml(hotkeyLabel())}</strong> to lock`;
+    if (tip) tip.innerHTML = `Hold <strong>Space</strong> to speak · <strong>${escapeHtml(hotkeyLabel())}</strong> to lock`;
   }
 
   // --- Target Lock / Unlock ---
@@ -653,16 +446,16 @@
       state.lockedY = state.pointerY;
       spotlight.classList.add("armed");
       targetBar.classList.add("locked");
-      lockLabel.textContent = `🔒 TARGET LOCKED (${triggerSource}) — Safe to move mouse to HUD`;
-      lockBtn.textContent = "🔓 Unlock";
+      lockLabel.textContent = "Target locked · move freely";
+      lockBtn.textContent = "Unlock";
       lockBtn.classList.add("active");
     } else {
       state.lockedX = null;
       state.lockedY = null;
       spotlight.classList.remove("armed");
       targetBar.classList.remove("locked");
-      lockLabel.textContent = `🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)`;
-      lockBtn.textContent = `🔒 Lock (${hotkeyLabel()})`;
+      lockLabel.textContent = "Following cursor";
+      lockBtn.textContent = "Lock";
       lockBtn.classList.remove("active");
       if (!cursorOverHud && typeof state.pointerX === "number") rememberHit(hitNode(state.pointerX, state.pointerY));
     }
@@ -689,8 +482,8 @@
     spotlight.style.top = `${y}px`;
     const sigmaLabel = state.mode === "hover" ? state.hoverSigmaPx : state.sigmaPx;
     spotlightTag.textContent = state.armed
-      ? `🔒 Locked (σ=${sigmaLabel}px)`
-      : `☤ ${state.mode === "hover" ? "Pointer" : "Gaze Cone"} σ=${sigmaLabel}px`;
+      ? "Target locked"
+      : state.mode === "hover" ? "Pointer" : `Simulated · σ=${sigmaLabel}px`;
   }
 
   // Identities stay in this closure: a selector is metadata, never a historical lookup.
@@ -1206,22 +999,22 @@
   function updateLiveInspector(x, y) {
     if (typeof x !== "number" || typeof y !== "number") {
       state.hoveredCandidate = null;
-      targetName.textContent = "Move cursor over any page element...";
-      targetSub.textContent = "—";
+      targetName.textContent = "Point at something on the page";
+      targetSub.textContent = "Your page, in context";
       return;
     }
     const el = state.armed ? lockedNode : hitNode(x, y);
     const best = el ? cursorMetadata(el) : null;
     state.hoveredCandidate = best;
     if (best) {
-      targetName.textContent = `${best.label} (${formatRoleDisplayName(best.role || best.tag)})`;
-      targetSub.textContent = best.consequence || best.summary || `Role: ${best.role} · [${Math.round(best.rect_vp[0])}, ${Math.round(best.rect_vp[1])}]`;
+      targetName.textContent = best.label || "Page element";
+      targetSub.textContent = best.consequence || best.summary || formatRoleDisplayName(best.role || best.tag);
       if (state.tucked) {
-        tuckSummary.textContent = `🎯 ${best.label.slice(0, 18)}`;
+        tuckSummary.textContent = best.label.slice(0, 18);
       }
     } else {
-      targetName.textContent = "No interactive target under pointer";
-      targetSub.textContent = `Cursor at (${Math.round(x)}, ${Math.round(y)})`;
+      targetName.textContent = "No target under the pointer";
+      targetSub.textContent = "Point at text, a link or a control";
     }
   }
 
@@ -1285,8 +1078,9 @@
     if (state.tucked) {
       state.tucked = false;
       hud.classList.remove("tucked");
-      tuckBtn.textContent = "_ Tuck";
-      tuckSummary.textContent = "PLUGIN HUD";
+      tuckBtn.textContent = "Minimize";
+      tuckBtn.setAttribute("aria-expanded", "true");
+      tuckSummary.textContent = "Ready";
     }
   }
 
@@ -1541,7 +1335,7 @@
     }
   }
 
-  const DEFAULT_PLACEHOLDER = "Point & speak or ask: 'What happens if I press this?'...";
+  const DEFAULT_PLACEHOLDER = "Ask about this…";
   const hudMic = hud.querySelector("#hg-mic-btn");
   let isListening = false;
   let mediaRecorder = null;
@@ -1610,7 +1404,7 @@
 
   function resetMicUiIdle(statusMessage) {
     hudMic.classList.remove("listening");
-    hudMic.textContent = "🎙️ Speak";
+    hudMic.textContent = "Speak";
     hudInput.placeholder = DEFAULT_PLACEHOLDER;
     if (statusMessage) {
       lockLabel.textContent = statusMessage;
@@ -1629,9 +1423,9 @@
     // Do not lock voice: two spoken referents may point to different real nodes.
 
     hudMic.classList.add("listening");
-    hudMic.textContent = "⏹️ Stop";
-    hudInput.placeholder = "🎙️ Listening... Speak your query (e.g. 'What does this button do?')";
-    lockLabel.textContent = "🎙️ RECORDING VOICE... (Speak now, click Stop or release Space)";
+    hudMic.textContent = "Stop";
+    hudInput.placeholder = "Listening…";
+    lockLabel.textContent = "Recording · release Space or click Stop";
     targetBar.classList.add("locked");
 
     try {
@@ -1670,8 +1464,8 @@
         }
 
         hudMic.classList.remove("listening");
-        hudMic.textContent = "⏳ Transcribing...";
-        lockLabel.textContent = "⏳ Transcribing audio locally…";
+        hudMic.textContent = "Wait";
+        lockLabel.textContent = "Transcribing audio locally…";
 
         const reader = new FileReader();
         reader.onload = () => {
@@ -1702,8 +1496,8 @@
     hudMic.classList.remove("listening");
 
     if (mediaRecorder && mediaRecorder.state === "recording") {
-      hudMic.textContent = "⏳ Transcribing...";
-      lockLabel.textContent = "⏳ Transcribing audio locally…";
+      hudMic.textContent = "Wait";
+      lockLabel.textContent = "Transcribing audio locally…";
 
       const elapsed = recordingStartedAt ? performance.now() - recordingStartedAt : 500;
       const tailMs = Math.max(150, Math.min(420, 520 - elapsed));
@@ -2057,8 +1851,9 @@
     if (state.tucked) {
       state.tucked = false;
       hud.classList.remove("tucked");
-      tuckBtn.textContent = "_ Tuck";
-      tuckSummary.textContent = "PLUGIN HUD";
+      tuckBtn.textContent = "Minimize";
+      tuckBtn.setAttribute("aria-expanded", "true");
+      tuckSummary.textContent = "Ready";
     }
     hudReply.style.display = "block";
     hudReply.innerHTML = htmlText;
