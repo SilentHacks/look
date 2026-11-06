@@ -23,6 +23,9 @@ provides_tools:
   - gaze_benchmark
 provides_hooks:
   - pre_llm_call
+  - on_stream_delta
+  - post_llm_call
+  - post_tool_call
 config_schema:
   mode:
     type: str

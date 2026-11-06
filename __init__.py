@@ -99,12 +99,29 @@ def register(ctx: Any) -> None:
             emoji=emoji,
         )
 
-    ctx.register_hook("pre_llm_call", _on_pre_llm_call)
+    # Phase 0 is opt-in: only /gaze probe turns receive its hardcoded fixture.
+    from .phase0 import PhaseZeroProbe
+
+    probe = PhaseZeroProbe(ctx, session)
+
+    def pre_llm_call(**kwargs: Any) -> Any:
+        result = probe.pre(**kwargs)
+        return result if result is not None else _on_pre_llm_call(**kwargs)
+
+    def gaze_command(raw_args: str, **kwargs: Any) -> str:
+        if raw_args.strip().split(maxsplit=1)[:1] == ["probe"]:
+            return probe.command(raw_args.strip()[5:].strip(), **kwargs)
+        return _handle_slash_command(raw_args)
+
+    ctx.register_hook("pre_llm_call", pre_llm_call)
+    ctx.register_hook("on_stream_delta", probe.delta)
+    ctx.register_hook("post_llm_call", probe.post)
+    ctx.register_hook("post_tool_call", probe.tool)
     ctx.register_command(
         "gaze",
-        handler=_handle_slash_command,
+        handler=gaze_command,
         description="Control Hermes Gaze ('Telepathy'): launch demo, switch hover/gaze mode, or run benchmarks.",
-        args_hint="[status|demo|mode|resolve|benchmark]",
+        args_hint="[status|demo|mode|resolve|benchmark|probe]",
     )
     ctx.register_cli_command(
         name="gaze",

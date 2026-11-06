@@ -48,6 +48,49 @@ as potentially sensitive browsing data. Each line is JSON; `record` events ident
 confirmed intended scopes for later replay. Step 1 adds no external model service,
 training pipeline, or automatic scope-selection benchmark.
 
+### Phase 0: Hermes session probe
+
+This opt-in experiment uses a **hardcoded two-row fixture**, not live cursor
+context. Normal `/gaze` resolution is unchanged. In the profile you want to test,
+set `plugins.entries.hermes-gaze.allow_gateway_injection: true` and use in-process
+plugin isolation. Restart Hermes after loading the plugin changes.
+
+```text
+/gaze demo
+/gaze probe start
+/gaze probe status
+/gaze probe followup
+/gaze probe status
+/gaze probe stop
+```
+
+`start` injects an ordinary user message into the calling session. The matching
+hook supplies the fixture and asks the configured model to highlight its table;
+text-stream hooks mirror the answer into Chrome, with a final-response backstop.
+`followup` asks for a random code from the first hook context **without resending
+that context**. Status includes acceptance, hook/stream/tool observations, timing,
+and recall results. `stop` detaches observation; it does not cancel a running turn.
+The commands do not alter consent settings or choose a different model.
+
+For repeatable development checks, run `benchmark/probe_phase0.py --output
+/tmp/gaze-phase0.json` with Python from the Hermes environment. It uses temporary
+private config/credential copies, a separate headless Chrome, synthesized speech
+through the real transcriber, and three initial/follow-up pairs for each backend
+session source (`tui`, `desktop`). It checks actual HUD text and table geometry.
+This tests backend delivery, **not the native desktop renderer or a physical
+microphone**; run the commands above in the app for those live-surface checks.
+
+Recorded observations: [`benchmark/phase0_results.json`](benchmark/phase0_results.json).
+All six controlled initial/follow-up pairs passed on the configured Beam model.
+Hook-only context survived into the next turn without resending it; first answers
+took 2.0–5.1 seconds after injection (ASR excluded). This is integration evidence,
+not a broad model-reliability result; exploratory failures and UI limits are listed
+with the measurements.
+An additional actual TUI run rendered the answer and probe status, with 16.3 seconds
+to first text including tool discovery. Its throwaway harness timed out during
+shutdown; only the rendering observation is claimed. Native Desktop could not
+launch because its packaged app was missing.
+
 ## Quickstart
 
 ```bash

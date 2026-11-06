@@ -1,0 +1,181 @@
+{
+  "model": {
+    "default": "reflection/beam-1.0-501b-a23b:free",
+    "provider": "nous"
+  },
+  "scope": "real TUI/desktop backend sessions over stdio RPC; no renderer automation",
+  "speech": {
+    "source": "macOS synthesized speech, not physical microphone",
+    "text": "Summarize this table in one sentence.",
+    "word_count": 6,
+    "elapsed_s": 3.631662208998023
+  },
+  "surfaces": {
+    "tui": {
+      "trials": [
+        {
+          "checks": {
+            "tools_available": true,
+            "hook": true,
+            "completed": true,
+            "model_called_highlight": true,
+            "correct_highlight": true,
+            "streamed_to_chrome": true,
+            "final_in_chrome": true,
+            "used_fixture": true,
+            "code_not_in_first_answer": true,
+            "followup_recalled_code": true,
+            "followup_without_resend": true
+          },
+          "initial_s": 5.118,
+          "first_delta_s": 4.25,
+          "followup_s": 0.892,
+          "tools": [
+            "gaze_highlight"
+          ],
+          "initial_response": "Oriole leads Finch in both clicks (120 vs 80) and spend ($30 vs $20).\n\nHi \u2014 I'm Hermes. Try `/help` to see available commands. Want me to build a short profile of you so I can be more useful, or skip it for now?"
+        },
+        {
+          "checks": {
+            "tools_available": true,
+            "hook": true,
+            "completed": true,
+            "model_called_highlight": true,
+            "correct_highlight": true,
+            "streamed_to_chrome": true,
+            "final_in_chrome": true,
+            "used_fixture": true,
+            "code_not_in_first_answer": true,
+            "followup_recalled_code": true,
+            "followup_without_resend": true
+          },
+          "initial_s": 2.719,
+          "first_delta_s": 2.518,
+          "followup_s": 0.76,
+          "tools": [
+            "gaze_highlight"
+          ],
+          "initial_response": "Oriole leads Finch in both clicks (120 vs 80) and spend ($30 vs $20)."
+        },
+        {
+          "checks": {
+            "tools_available": true,
+            "hook": true,
+            "completed": true,
+            "model_called_highlight": true,
+            "correct_highlight": true,
+            "streamed_to_chrome": true,
+            "final_in_chrome": true,
+            "used_fixture": true,
+            "code_not_in_first_answer": true,
+            "followup_recalled_code": true,
+            "followup_without_resend": true
+          },
+          "initial_s": 2.279,
+          "first_delta_s": 2.02,
+          "followup_s": 0.772,
+          "tools": [
+            "gaze_highlight"
+          ],
+          "initial_response": "Oriole leads Finch in both clicks (120 vs 80) and spend ($30 vs $20)."
+        }
+      ],
+      "initial_median_s": 2.719
+    },
+    "desktop": {
+      "trials": [
+        {
+          "checks": {
+            "tools_available": true,
+            "hook": true,
+            "completed": true,
+            "model_called_highlight": true,
+            "correct_highlight": true,
+            "streamed_to_chrome": true,
+            "final_in_chrome": true,
+            "used_fixture": true,
+            "code_not_in_first_answer": true,
+            "followup_recalled_code": true,
+            "followup_without_resend": true
+          },
+          "initial_s": 2.686,
+          "first_delta_s": 2.35,
+          "followup_s": 0.97,
+          "tools": [
+            "gaze_highlight"
+          ],
+          "initial_response": "The table lists two campaigns \u2014 Oriole (120 clicks, $30 spend) and Finch (80 clicks, $20 spend) \u2014 with Oriole generating more clicks and higher spend than Finch."
+        },
+        {
+          "checks": {
+            "tools_available": true,
+            "hook": true,
+            "completed": true,
+            "model_called_highlight": true,
+            "correct_highlight": true,
+            "streamed_to_chrome": true,
+            "final_in_chrome": true,
+            "used_fixture": true,
+            "code_not_in_first_answer": true,
+            "followup_recalled_code": true,
+            "followup_without_resend": true
+          },
+          "initial_s": 1.991,
+          "first_delta_s": 1.8,
+          "followup_s": 1.558,
+          "tools": [
+            "gaze_highlight"
+          ],
+          "initial_response": "The table lists two campaigns \u2014 Oriole (120 clicks, $30 spend) and Finch (80 clicks, $20 spend) \u2014 with Oriole generating more clicks and higher spend than Finch."
+        },
+        {
+          "checks": {
+            "tools_available": true,
+            "hook": true,
+            "completed": true,
+            "model_called_highlight": true,
+            "correct_highlight": true,
+            "streamed_to_chrome": true,
+            "final_in_chrome": true,
+            "used_fixture": true,
+            "code_not_in_first_answer": true,
+            "followup_recalled_code": true,
+            "followup_without_resend": true
+          },
+          "initial_s": 2.212,
+          "first_delta_s": 1.87,
+          "followup_s": 0.968,
+          "tools": [
+            "gaze_highlight"
+          ],
+          "initial_response": "The table lists two campaigns \u2014 Oriole (120 clicks, $30 spend) and Finch (80 clicks, $20 spend) \u2014 with Oriole generating more clicks and higher spend than Finch."
+        }
+      ],
+      "initial_median_s": 2.212
+    }
+  },
+  "limitations": [
+    "Three controlled fixture trials per backend source are not a general tool-reliability benchmark.",
+    "Synthesized speech tested the real transcriber; physical microphone capture was not exercised.",
+    "Native desktop launch refused: no packaged app at apps/desktop/release. Desktop backend session delivery was exercised.",
+    "An earlier exploratory run had no visible highlight pin; its model/tool state was not captured, so the cause is unresolved."
+  ],
+  "actual_tui": {
+    "launcher": "hermes --tui --native in a private temporary Hermes home",
+    "answer_rendered": true,
+    "probe_status_rendered": true,
+    "accepted": true,
+    "hook_fired": true,
+    "finished": true,
+    "surface": "local",
+    "tools": [
+      "tool_search",
+      "tool_describe",
+      "gaze_highlight"
+    ],
+    "stream_deltas": 15,
+    "chrome_updates": 9,
+    "first_delta_s": 16.349,
+    "limitation": "The TUI rendered answer and status, but the throwaway harness timed out during shutdown. Detached test resources were cleaned separately. This is a rendering observation, not a clean smoke-process exit."
+  }
+}
