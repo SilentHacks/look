@@ -9,6 +9,7 @@ from unittest import mock
 
 from hermes_gaze import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
+from hermes_gaze.config import GazeConfig
 
 
 class TestScopeContext(unittest.TestCase):
@@ -29,7 +30,8 @@ class TestScopeContext(unittest.TestCase):
                   "candidates": candidates, "page_url": "https://demo.invalid/"}
         with tempfile.TemporaryDirectory() as directory, \
                 mock.patch.object(service, "get_shared_session", return_value=session), \
-                mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"):
+                mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"), \
+                mock.patch.object(service, "_CONFIG", GazeConfig(record_trials=True)):
             result = service.resolve_now(session, utterance="What is this?", pushed=pushed)
             epoch = result["resolution_id"]
             self.assertEqual([s["scope"] for s in result["scopes"]], scopes)

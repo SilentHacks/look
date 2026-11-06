@@ -9,6 +9,7 @@ explanation requests (``explain_element``) via ``ctx.llm``.
 from __future__ import annotations
 
 import base64
+import copy
 import html
 import json
 import logging
@@ -21,15 +22,17 @@ _RECORD_LOCK = threading.Lock()
 
 from .browser.cdp_bridge import GazeSession, get_shared_session
 from .config import GazeConfig
-from .resolver.bayesian_fusion import CandidateElement, resolve_candidates
+from .resolver.bayesian_fusion import CandidateElement, classify_utterance_intent, resolve_candidates
 from .resolver.cursor_context import CONTEXT_INSTRUCTIONS, cursor_result
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
+from .resolver.temporal_aligner import has_deictic_pronoun
 from .voice import MAX_AUDIO_BYTES
 
 logger = logging.getLogger(__name__)
 
 _CONFIG: Optional[GazeConfig] = None
 _LLM: Any = None
+_VOICE_TURNS: Any = None
 
 
 def set_runtime(config: Optional[GazeConfig], llm: Any = None) -> None:
@@ -37,6 +40,11 @@ def set_runtime(config: Optional[GazeConfig], llm: Any = None) -> None:
     global _CONFIG, _LLM
     _CONFIG = config
     _LLM = llm
+
+
+def set_voice_turns(turns: Any) -> None:
+    global _VOICE_TURNS
+    _VOICE_TURNS = turns
 
 
 def _whisper_model_name() -> str:
@@ -51,7 +59,9 @@ def _record_path() -> Path:
     return Path(root) / "replay.jsonl"
 
 
-def _append_record(session: GazeSession, event: Dict[str, Any]) -> str:
+def _append_record(session: GazeSession, event: Dict[str, Any]) -> str | None:
+    if _CONFIG is None or not _CONFIG.record_trials:
+        return None
     path = _record_path()
     with _RECORD_LOCK:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +135,7 @@ def resolve_now(
     llm: Any = None,
     record_voice: bool = False,
     duration_s: float = 2.8,
+    activate: bool = True,
 ) -> Dict[str, Any]:
     """Collect and render exact cursor evidence, or resolve simulated noisy gaze.
 
@@ -170,6 +181,10 @@ def resolve_now(
         payload = cursor_result(capture, utterance, word_timestamps, time.time())
         payload["utterance"] = utterance
         payload["chrome_connected"] = session.is_chrome_reachable()
+        if not activate:
+            if transcription_meta:
+                payload["speech_recognition"] = transcription_meta
+            return payload
         session.store_hover_snapshot(payload)
         session.last_resolution_input = {"cursor_context": capture, "utterance": utterance,
                                          "words": word_timestamps or []}
@@ -181,6 +196,9 @@ def resolve_now(
                 f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])}, {json.dumps(message)});"
                 f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});true"
             )
+        _append_record(session, {"type": "cursor_context", "context": payload["context"],
+                                 "utterance": utterance, "pointed": payload["pointed"],
+                                 "resolution_id": payload["resolution_id"]})
         if transcription_meta:
             payload["speech_recognition"] = transcription_meta
         return payload
@@ -293,7 +311,7 @@ def explain_element(utterance: str, context: str, llm: Any = None) -> str:
             CONTEXT_INSTRUCTIONS +
             "Answer the user's question usefully, including table analysis when relevant. "
             "You cannot execute UI actions. For action requests describe or clarify; never claim execution. "
-            "Do not call tools. Return explanation text only."
+            "Tools are unavailable in this one-shot call: answer directly from the evidence."
         ),
         input=[{"type": "text", "text": f"Utterance: {utterance}"},
                {"type": "text", "text": context}],
@@ -303,6 +321,47 @@ def explain_element(utterance: str, context: str, llm: Any = None) -> str:
     if not text:
         raise RuntimeError("Model returned an empty explanation")
     return text
+
+
+def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Deliver frozen evidence as a real turn; only unconnected questions fall back."""
+    if not snapshot.get("ok"):
+        previous = getattr(_VOICE_TURNS, "last_snapshot", None)
+        if (_VOICE_TURNS is None or not _VOICE_TURNS.connected or not previous or
+                has_deictic_pronoun(snapshot.get("utterance", ""))):
+            return snapshot
+        snapshot = {**copy.deepcopy(previous), "utterance": snapshot["utterance"]}
+    delivery = (_VOICE_TURNS.submit(snapshot["utterance"], snapshot) if _VOICE_TURNS is not None
+                else {"ok": False, "fallback_allowed": True, "error": "No Hermes session connected"})
+    if delivery.get("ok"):
+        try:
+            _append_record(get_shared_session(), {"type": "submitted_turn", "utterance": snapshot["utterance"],
+                                                  "context": snapshot["context"]})
+        except Exception as exc:
+            logger.debug("Accepted voice turn could not be recorded", exc_info=True)
+            # Delivery already happened; reporting rejection here would invite duplicate turns.
+            delivery["record_error"] = str(exc)
+        return delivery
+    if not delivery.get("fallback_allowed"):
+        return {**delivery, "delivery": "unavailable"}
+    notice = (str(delivery.get("error") or "No Hermes session connected") +
+              ". Run /gaze in your Hermes TUI/desktop session to connect. "
+              "One-shot questions only: no conversation follow-ups or actions.")
+    if classify_utterance_intent(snapshot["utterance"]) != "read_only":
+        return {"ok": False, "error": notice, "delivery": "unavailable"}
+    session = get_shared_session()
+    snapshot["actions_allowed"] = False
+    session.store_hover_snapshot(snapshot)
+    saved = session.last_hover_snapshot
+    try:
+        explanation = explain_element(snapshot["utterance"], snapshot["context"])
+    except Exception as exc:
+        logger.debug("One-shot fallback failed", exc_info=True)
+        return {"ok": False, "delivery": "one_shot", "error": f"{notice} Model error: {exc}"}
+    if session.last_hover_snapshot is not saved:
+        return {"ok": False, "error": "stale resolution"}
+    return {**snapshot, "delivery": "one_shot", "message": notice, "explanation": explanation,
+            "needs_explain": False, "session_connected": False}
 
 
 def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None]) -> None:
@@ -315,6 +374,19 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
         return
     itype = str(intent.get("type") or "")
     try:
+        if itype == "submit":
+            snapshot = resolve_now(session, utterance=str(intent.get("utterance") or ""),
+                                   words=intent.get("words"),
+                                   pushed={"cursor_context": intent.get("cursor_context")}, activate=False)
+            reply(submit_snapshot(snapshot))
+            return
+        if itype == "confirm_action":
+            if not isinstance(intent.get("approved"), bool):
+                reply({"ok": False, "error": "confirmation decision is required"})
+                return
+            reply(session.actions.confirm(str(intent.get("action_id") or ""),
+                                          intent.get("resolution_id"), intent["approved"]))
+            return
         if itype == "resolve":
             pushed = {"pointer": intent.get("pointer"), "fixations": intent.get("fixations"),
                       "candidates": intent.get("candidates"), "page_url": intent.get("page_url"),
@@ -365,6 +437,9 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             return
 
         if itype == "record":
+            if _CONFIG is None or not _CONFIG.record_trials:
+                reply({"ok": False, "error": "record_trials development setting is disabled"})
+                return
             if intent.get("resolution_id") is None or int(intent["resolution_id"]) != session.resolution_id or session.last_resolution is None:
                 reply({"ok": False, "error": "stale or missing resolution"})
                 return

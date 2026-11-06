@@ -18,98 +18,88 @@ Raw gaze/pointer tracking suffers from ~80–180 px of spatial jitter and drift�
 
 ## Architecture
 
-- **One resolver, in Python.** All spatial-semantic scoring and the decision policy (`pin_immediate` / `execute_safe` / `open_semantic_lens` / `confirm_destructive`) live in `resolver/bayesian_fusion.py`. `browser/overlay.js` is a *terminal*: it renders the spotlight, pins, HUD, and Semantic Lens, and ships the raw inputs (pointer, fixations, candidates, mic audio) — it never re-implements resolution.
-- **Persistent CDP session.** `browser/cdp_bridge.py` keeps ONE websocket per pinned Chrome tab on a dedicated worker loop and registers `Runtime.addBinding("__hermesGazeIntent")`. Overlay → Python traffic is JSON intents (`resolve`, `scope`, `record`, `choose`, `explain`, `transcribe`, `configure`); Python → overlay replies are `window.__HERMES_GAZE_OVERLAY__.onIntentResult(...)` evals. There is no HTTP API surface.
-- **Honest failures.** When candidates or fixations are missing, `service.py` returns `{"ok": false, "error": ...}` — never a fabricated stand-in.
-- **Pointing modes:** `hover` uses exact DOM cursor identity and speech-time history, without scoring or action execution. `simulated` retains Bayesian noisy-gaze resolution (default σ = 120 px). Camera tracking is not implemented.
+- **Python owns policy.** Noisy simulated gaze uses Bayesian resolution. Hover sends exact cursor evidence to the model, which chooses scope; Python enforces snapshot ownership and action confirmation. The overlay only collects DOM facts and renders results.
+- **Persistent CDP session.** One websocket per pinned tab; ordered nonce-bearing binding intents include `submit`, `resolve`, `choose`, `explain`, `transcribe`, `confirm_action` and `configure`. No HTTP resolution/action endpoints.
+- **Honest failures.** Missing/detached/expired evidence and uncertain click outcomes are reported, never replaced with synthetic targets or silently retried mutations.
+- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. Camera tracking is not implemented.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
 
-### Cursor context
+### Cursor context and actions
 
-Hover supplies evidence, not a preselected subject or scope. The model decides
-what the utterance refers to using pointed cells, headers, rows, surrounding
-structural text, and separate page controls. Small tables include all five demo
-rows; larger tables retain pointed rows, headers, total rows, and omission counts.
-No `data-gaze-*` annotation is required.
+Hover supplies evidence, not a preselected subject. The model sees the pointed
+cell, row/column/table/panel handles, surrounding structural text and separate
+controls. Small demo tables include all five rows and six columns; larger tables
+prioritize pointed rows, headers and omission counts. Final context, including
+the `Resolution` epoch, is at most 6000 characters.
 
-Typed questions use the last actual page target with its age. Spoken deictics
-use their real word timestamps and preceding cursor identity; two spoken
-referents stay ordered. Recording-stop snapshots survive slow transcription.
-History is bounded to 60 seconds/256 intervals and 64 target snapshots; detached,
-expired, or missing targets are explicitly unavailable, never selector rematches.
-Locked pointing preserves identity; unlock to compare different targets.
+Typed questions use the latest real Chrome target and its age. Voice evidence
+freezes at recording stop before ASR; real word timestamps select preceding
+cursor identities, including two spoken referents. Detached or replaced nodes
+never rematch selectors. Password/payment fields and associated labels are
+filtered before serialization; page text stays inside an escaped untrusted fence.
 
-The hook and voice one-shot explanation receive the same fenced, untrusted
-context (at most 6000 characters). Password/payment fields and field values are
-excluded before capture. Snapshot `@` handles map to selector/rectangle metadata;
-they are evidence identifiers, not new tool arguments. Hover does not authorize
-clicks or enable `gaze_choose`; scope/confirmation UI remains simulated-only.
-Explicit `target_hint_x/y` tool hints are rejected in hover; move the real cursor.
+`gaze_highlight(handles=[...], resolution_id=N)` highlights what the model used,
+including captured rows and columns. `gaze_click(handle=..., resolution_id=N)`
+activates a current control. Risky labels/classes, destructive utterances and form
+submissions require a trusted primary mouse click on the Chrome confirmation
+card. Synthetic clicks, spoken/tool confirmation, stale epochs and changed targets
+cannot approve it. Safe-looking controls execute immediately.
 
-`window.__HERMES_GAZE_OVERLAY__.captureCursorContext()` inspects the bounded wire.
-Collection limits: 12 columns per table; all rows for tables up to 12 rows,
-otherwise up to 64 historical pointed rows (at most 12 rendered per table).
-There are at most 12 page controls from the first 120 and bounded structural
-text, never a page HTML dump. Uncollected evidence is not fetched.
-Simulated scope corrections still append local `replay.jsonl` recordings in the
-plugin data directory (fallback `~/.cache/hermes-gaze`), never microphone audio.
-Treat these recordings as sensitive browsing data. Hover snapshots are session
-memory only.
+The action policy is demo-oriented and lexical, not a general website safety
+guarantee; disguised controls can evade classification. Privileged CDP/OS clients
+are outside the page-script/tool-argument confirmation boundary. Mutation requests
+are not automatically replayed after transport loss; an unknown outcome revokes
+the active snapshot.
 
-Run `benchmark/probe_phase1.py --output /tmp/gaze-phase1.json --with-model
---wikipedia --screenshot /tmp/gaze-phase1.png` with Python from a Hermes
-environment for the real Chrome/model acceptance replay. It uses a private
-Chrome profile, synthetic word timestamps (not microphone capture), and your
-configured model. Omit `--with-model` for the DOM/privacy smoke only.
-Explanations use Hermes's configured timeout; failures are shown as errors,
-never page context passed off as a model answer.
+Collection is bounded: 60 seconds/256 cursor intervals, 64 target identities, 32
+retained captures, 1024 rows/table, 64 collected columns and 8192 captured members/
+handles. Model rows use at most 12 cells, with the pointed value described
+separately; column handles retain captured members, never replacement cells.
+Scope navigation, up/down scope correction and save-trial controls are removed.
+Replay recording is off unless `record_trials: true`; files may contain sensitive
+browsing evidence but never microphone audio.
 
-Focused checks: `python3 -m unittest tests.test_cursor_context` and
-`node tests/cursor_context_dom.js`; run the full stdlib suite before integration.
+Run `node tests/cursor_context_dom.js` and
+`python3 -m unittest discover -s tests -t .` for deterministic checks.
 
+### Connect Chrome voice to Hermes
 
-### Phase 0: Hermes session probe
+Use in-process plugin isolation and grant injection in the intended profile:
 
-This opt-in experiment uses a **hardcoded two-row fixture**, not live cursor
-context. Normal `/gaze` resolution is unchanged. In the profile you want to test,
-set `plugins.entries.hermes-gaze.allow_gateway_injection: true` and use in-process
-plugin isolation. Restart Hermes after loading the plugin changes.
-
-```text
-/gaze demo
-/gaze probe start
-/gaze probe status
-/gaze probe followup
-/gaze probe status
-/gaze probe stop
+```yaml
+plugins:
+  isolation: in_process
+  entries:
+    hermes-gaze:
+      allow_gateway_injection: true
 ```
 
-`start` injects an ordinary user message into the calling session. The matching
-hook supplies the fixture and asks the configured model to highlight its table;
-text-stream hooks mirror the answer into Chrome, with a final-response backstop.
-`followup` asks for a random code from the first hook context **without resending
-that context**. Status includes acceptance, hook/stream/tool observations, timing,
-and recall results. `stop` detaches observation; it does not cancel a running turn.
-The commands do not alter consent settings or choose a different model.
+Restart Hermes after changing plugin configuration. Run `/gaze` or `/gaze connect`
+in the TUI/desktop conversation that should receive speech, then `/gaze demo`.
+Hold Space in Chrome, speak and release. Only your words become a normal user
+message; the matching session hook attaches frozen page context. The answer
+streams into Hermes and Chrome, with a final-response backstop. Spoken or typed
+followups use the same conversation. `/gaze disconnect` revokes pending and active
+action ownership; it does not cancel a Hermes turn already accepted by the host.
 
-For repeatable development checks, run `benchmark/probe_phase0.py --output
-/tmp/gaze-phase0.json` with Python from the Hermes environment. It uses temporary
-private config/credential copies, a separate headless Chrome, synthesized speech
-through the real transcriber, and three initial/follow-up pairs for each backend
-session source (`tui`, `desktop`). It checks actual HUD text and table geometry.
-This tests backend delivery, **not the native desktop renderer or a physical
-microphone**; run the commands above in the app for those live-surface checks.
+The HUD shows listening, transcribing, queued, thinking and completion/error
+states. Without a connected/authorized session, read-only questions can use a
+clearly labeled one-shot call, with no conversation followups or actions. Action
+requests fail rather than silently using that fallback. ASR file downloads are
+quiet without suppressing errors or redirecting process output.
 
-Recorded observations: [`benchmark/phase0_results.json`](benchmark/phase0_results.json).
-All six controlled initial/follow-up pairs passed on the configured Beam model.
-Hook-only context survived into the next turn without resending it; first answers
-took 2.0–5.1 seconds after injection (ASR excluded). This is integration evidence,
-not a broad model-reliability result; exploratory failures and UI limits are listed
-with the measurements.
-An additional actual TUI run rendered the answer and probe status, with 16.3 seconds
-to first text including tool discovery. Its throwaway harness timed out during
-shutdown; only the rendering observation is claimed. Native Desktop could not
-launch because its packaged app was missing.
+Development smoke: use Python from a Hermes environment:
+
+```bash
+python benchmark/probe_sessions.py --output /tmp/gaze-sessions.json
+python benchmark/probe_phase1.py --output /tmp/gaze-dom.json
+```
+
+The session smoke uses private config/credential copies and private Chrome,
+substituting synthesized WAV before the real transcription binding. It exercises
+real TUI and desktop **backends**, not the native desktop renderer or physical microphone.
+Historical Phase 0/1 measurements remain in `benchmark/*results.json`; the
+hardcoded `/gaze probe` experiment is removed.
 
 ## Quickstart
 

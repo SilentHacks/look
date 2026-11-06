@@ -11,16 +11,18 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | Path | What lives here |
 |---|---|
 | `plugin.yaml` | Plugin manifest: tools/hooks/skill declarations, config schema. Keep 1:1 with `register()`. |
-| `__init__.py` | `register(ctx)` entry point — wires tools, the `pre_llm_call` hook, the `/gaze` slash command, `hermes gaze` CLI, and the bundled skill. Thin wiring only. |
-| `tools.py` | Tool schemas (`gaze_resolve`, `gaze_choose`, `gaze_highlight`, `gaze_calibrate`, `gaze_benchmark`) + thin handlers that delegate to `service.py`. |
-| `service.py` | The session-facing layer: `resolve_now` (resolution + browser render), `handle_intent` (dispatches `resolve`/`choose`/`explain`/`transcribe`/`configure` binding intents), `explain_element`, `set_runtime`. |
+| `__init__.py` | Thin registration of six tools, context/stream/final/turn-end hooks, `/gaze` session connection, CLI and skill. |
+| `tools.py` | Schemas/thin handlers for `gaze_resolve`, simulated-only `gaze_choose`, snapshot `gaze_highlight`, guarded `gaze_click`, calibration and benchmark. |
+| `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
+| `voice_turns.py` | `VoiceTurns`: host session binding, exact text/session FIFO matching, frozen contexts, turn-owned answer streaming and final backstop. |
+| `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
 | `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process, ~65ms) → `parakeet-mlx` (~180ms) → `faster-whisper` (the only backend on Linux). `record_microphone`, `MAX_AUDIO_BYTES`. |
 | `asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
-| `browser/cdp_bridge.py` | `CdpSession` (one persistent websocket per pinned tab on a dedicated worker-loop thread, `Runtime.addBinding("__hermesGazeIntent")`, `eval_js`, `set_intent_handler`) and `GazeSession` (ring buffer + tracker + recalibrator + resolution epoch + `ingest` + `choose` + `configure`). `overlay.js` sits beside it. |
-| `browser/overlay.js` | The in-page terminal: spotlight, pins, HUD, Semantic Lens cards, mic capture, `extractCandidatesNear`. Talks to Python ONLY through the `__hermesGazeIntent` binding and `api.onIntentResult`. |
+| `browser/cdp_bridge.py` | Persistent pinned-tab CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
+| `browser/overlay.js` | DOM evidence collector and terminal: closure-held snapshot identities, column members, geometry, mic capture, trusted-click confirmation card and plain-text session streaming. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`. Same purity rule. |
@@ -31,11 +33,10 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 
 ## Invariants (each with the WHY)
 
-- **Exactly one resolver, and it is Python.** `overlay.js` must never score, rank, or
-  decide — it collects inputs and renders results. Duplicated logic in JS and Python
-  already diverged once (JS had its own thresholds); that is what the intent binding
-  replaced. If the overlay needs a new resolution behavior, extend `service.py` and
-  the intent vocabulary, never the JS.
+- **Python owns noisy-gaze and action policy; the model chooses cursor scope.**
+  The overlay collects identities/structural facts and renders highlights/status,
+  never scores, ranks or decides semantic scope/risk. This keeps one policy
+  implementation instead of diverging JS/Python decisions.
 - **Overlay → Python only via `__hermesGazeIntent`.** No `fetch()` to `server.py`, no
   new HTTP endpoints, no `Runtime.evaluate` polling for decisions. The binding keeps a
   single ordered channel that works on file:// and any origin without CORS. Replies
@@ -80,16 +81,29 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   `session.resolution_id`; a `choose` intent carrying a mismatched `resolution_id`
   gets `"stale resolution"`. Never accept a choose without the epoch check — a stale
   Lens card would click whatever now sits at that index.
-- **Hover snapshots are separate.** `last_hover_snapshot` invalidates
-  `last_resolution`/choose state and owns the resolution epoch. Explain reads the
-  stored utterance/context, checks epoch and pointed ID before and after the model
-  call. Hook context is returned verbatim, without an extra wrapper.
+- **Hover snapshots are immutable server-owned evidence.** Activation bumps the
+  epoch, invalidates simulated choose/pending confirmations, stamps `Resolution`
+  into the bounded context, and activates the browser's captured identity map.
+  Queued voice snapshots activate only in the matching session/text pre-hook.
+  Explain checks the saved snapshot before and after the call; hook context is
+  returned verbatim, including the current epoch.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
   associated labels. Capture history/evidence at recording stop, before ASR.
-- **No selector rematching for history.** Closure-held DOM identities are retained
-  for bounded history; detached/expired targets are unavailable. `@` handles map
-  to snapshot selectors/rectangles only, not action tools.
+- **No selector rematching for history or actions.** Short `@` handles refer to
+  captured DOM identities/column members. Highlight/click require the current
+  epoch; changed, detached or expired targets fail honestly.
+- **Confirmation is not a model tool.** Python classifies live risk and form
+  submits. Only the nonce-checked binding from a trusted primary mouse click can
+  consume its fingerprint-bound, single-use approval. Model/page text is plain
+  text in the new HUD paths; it cannot supply confirmation markup.
+- **Never replay mutations.** `eval_js_once` is mandatory for click commands.
+  Lost replies mean unknown outcome, not \"not executed\"; revoke that snapshot.
+- **Voice ownership includes session, exact utterance and turn.** Reasoning and
+  foreign/late deltas never reach Chrome. Disconnect revokes active actions.
+  `on_session_end` is a per-turn event, not a chat disconnect.
+- **Recording is development-only.** `record_trials` defaults false; never write
+  audio. Preserving an accepted injection takes precedence over recorder errors.
 
 ## Commands
 

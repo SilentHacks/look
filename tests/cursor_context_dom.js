@@ -6,7 +6,13 @@ const test = require('node:test');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../browser/overlay.js'), 'utf8');
 function element(tag, children = [], attrs = {}) {
   const el = { nodeType: 1, tagName: tag.toUpperCase(), children, attrs, isConnected: true,
-    parentElement: null, htmlFor: attrs.for || '',
+    parentElement: null, htmlFor: attrs.for || '', style: {}, dataset: {}, listeners: {},
+    setAttribute(name, value) { this.attrs[name] = value; },
+    appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+    remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter(c => c !== this); },
+    addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); },
+    click() { this.clickCount = (this.clickCount || 0) + 1;
+      for (const fn of this.listeners.click || []) fn({ isTrusted: false, button: 0, detail: 0 }); },
     getAttribute(name) { return this.attrs[name] || null; },
     matches(selector) {
       return selector.split(',').some(s => {
@@ -29,7 +35,7 @@ function element(tag, children = [], attrs = {}) {
       visit(this); return result;
     },
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; },
-    getBoundingClientRect() { return { left: 1, top: 2, width: 20, height: 10 }; },
+    getBoundingClientRect() { return this.rect || { left: 1, top: 2, width: 20, height: 10 }; },
   };
   for (const c of children) c.parentElement = el;
   return el;
@@ -46,6 +52,7 @@ const document = {
   elementFromPoint: () => hit,
   getElementById: id => id === 'password' ? password : null,
   querySelectorAll: () => [],
+  createElement: tag => element(tag),
   createTreeWalker(root, mask, filter) {
     const nodes = [];
     function walk(node) {
@@ -60,12 +67,20 @@ const document = {
     return { nextNode: () => nodes[i++] || null };
   },
 };
+const rendered = [];
+const intents = [];
+const shadow = element('div');
+const hudReply = element('div');
+const lockLabel = element('div');
+const tuckSummary = element('div');
 const context = vm.createContext({ document, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
   window: { addEventListener() {} }, location: { origin: 'https://example.invalid', pathname: '/' },
-  scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console });
+  scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
+  shadow, hudReply, lockLabel, tuckSummary, renderPins: candidates => rendered.push(candidates),
+  _emit: intent => intents.push(intent), releaseAudioStream() {} });
 const start = source.indexOf('  const cursorIds =');
 const end = source.indexOf('  function updateLiveInspector', start);
-vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext };', context);
+vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent };', context);
 const api = context.collect;
 assert.equal(api.safeText(section), 'Visible content');
 assert.equal(api.safeText(payment), '[redacted]');
@@ -172,4 +187,106 @@ test('native row headers remain data rows rather than becoming column headers', 
   assert.equal(block.total_rows, 2);
   assert.equal(block.headers.length, 0);
   assert.ok(block.rows.some(row => row.cells[0] === 'Alpha' && row.cells[1] === '42'));
+});
+
+test('snapshot actions bind exact nodes, current epoch, and unchanged controls', () => {
+  const control = element('button', [text('Export')]);
+  api.rememberHit(control, 12);
+  const snapshot = api.captureCursorContext();
+  const handle = snapshot.history.at(-1).id;
+  assert.equal(api.activateSnapshot(snapshot.snapshot_id, 5).ok, true);
+  const descriptor = api.inspectSnapshot(snapshot.snapshot_id, 5, handle);
+  assert.equal(descriptor.ok, true);
+  assert.equal(descriptor.clickable, true);
+  assert.equal(api.clickSnapshot(snapshot.snapshot_id, 4, handle, descriptor.fingerprint).executed, false);
+  assert.equal(api.clickSnapshot(snapshot.snapshot_id, 5, handle, descriptor.fingerprint).executed, true);
+  assert.equal(control.clickCount, 1);
+  control.attrs['aria-label'] = 'Delete everything';
+  assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 5, handle).ok, false);
+  assert.equal(api.clickSnapshot(snapshot.snapshot_id, 5, handle, descriptor.fingerprint).executed, false);
+  control.isConnected = false;
+  assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 5, [handle]).ok, false);
+  assert.equal(api.activateSnapshot(snapshot.snapshot_id, 4).ok, false);
+});
+
+test('column handles highlight captured member rectangles, never replacement cells', () => {
+  const fixture = tableFixture(3);
+  fixture.rows[1].children[1].rect = { left: 80, top: 90, width: 44, height: 20 };
+  api.rememberHit(fixture.rows[1].children[1], 13);
+  const snapshot = api.captureCursorContext();
+  const target = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  const block = snapshot.blocks.find(b => b.id === target.cell.block);
+  const column = block.columns[1].split(' ')[0];
+  assert.equal(api.activateSnapshot(snapshot.snapshot_id, 6).ok, true);
+  assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 6, [column]).ok, true);
+  assert.ok(rendered.at(-1).some(c => c.rect_vp.join(',') === '80,90,44,20'));
+  fixture.rows[1].children[1].isConnected = false;
+  fixture.rows[1].children[1] = element('td', [text('replacement')]);
+  assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 6, [column]).ok, false);
+  assert.equal(api.clickSnapshot(snapshot.snapshot_id, 6, column, 'anything').executed, false);
+});
+
+test('confirmation rejects synthetic clicks, emits once, and expires on capture', () => {
+  const node = element('button', [text('Purge')]);
+  api.rememberHit(node, 14);
+  const snapshot = api.captureCursorContext();
+  api.activateSnapshot(snapshot.snapshot_id, 7);
+  assert.equal(api.requestActionConfirmation({ action_id: 'opaque-action', resolution_id: 7,
+    label: '<img src=x onerror=alert(1)>' }).ok, true);
+  const card = shadow.children.at(-1);
+  assert.equal(card.children[0].textContent, '<img src=x onerror=alert(1)>');
+  const approve = card.children[2];
+  const before = intents.length;
+  approve.click();
+  for (const fn of approve.listeners.click) fn({ isTrusted: false, button: 0, detail: 1 });
+  assert.equal(intents.length, before);
+  const physicalClick = { isTrusted: true, button: 0, detail: 1, stopPropagation() {} };
+  for (let i = 0; i < 2; i++) for (const fn of approve.listeners.click) fn(physicalClick);
+  assert.equal(intents.length, before + 1);
+  assert.equal(intents.at(-1).type, 'confirm_action');
+  assert.equal(intents.at(-1).approved, true);
+  api.requestActionConfirmation({ action_id: 'expired', resolution_id: 7 });
+  const stale = shadow.children.at(-1).children[2];
+  api.captureCursorContext();
+  for (const fn of stale.listeners.click) fn(physicalClick);
+  assert.equal(intents.length, before + 1);
+});
+
+test('session text stays text and late streams cannot replace a newer final', () => {
+  api.onSessionEvent({ sequence: 1, request_id: 'first', resolution_id: 7, status: 'thinking', text: 'old' });
+  api.onSessionEvent({ sequence: 2, request_id: 'second', resolution_id: 7, status: 'complete', text: '<script>page()</script>' });
+  api.onSessionEvent({ sequence: 1, request_id: 'first', resolution_id: 7, status: 'complete', text: 'late old' });
+  api.onSessionEvent({ sequence: 2, request_id: 'second', resolution_id: 7, status: 'thinking', text: 'late partial' });
+  assert.equal(hudReply.textContent, '<script>page()</script>');
+  assert.equal(lockLabel.textContent, 'complete');
+});
+
+test('bounded snapshot retention expires honestly', () => {
+  const old = api.captureCursorContext();
+  for (let i = 0; i < 32; i++) api.captureCursorContext();
+  assert.equal(api.activateSnapshot(old.snapshot_id, 8).ok, false);
+  const current = api.captureCursorContext();
+  assert.equal(api.activateSnapshot(current.snapshot_id, 8).ok, true);
+});
+
+test('newly activated epochs win even when a queued request has an older sequence', () => {
+  api.onSessionEvent({ sequence: 0, request_id: 'queued-earlier', resolution_id: 8,
+    status: 'thinking', text: 'new active answer' });
+  api.onSessionEvent({ sequence: 99, request_id: 'old-epoch', resolution_id: 7,
+    status: 'complete', text: 'obsolete' });
+  assert.equal(hudReply.textContent, 'new active answer');
+  api.onSessionEvent({ sequence: 100, request_id: 'queued-future', resolution_id: 0, status: 'queued' });
+  api.onSessionEvent({ sequence: 0, request_id: 'queued-earlier', resolution_id: 8,
+    status: 'complete', text: 'finished active answer' });
+  assert.equal(hudReply.textContent, 'finished active answer');
+});
+
+test('final response replaces a turn-end partial completion', () => {
+  api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
+    status: 'complete', text: 'streamed partial' });
+  api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
+    status: 'complete', text: 'complete final response' });
+  api.onSessionEvent({ sequence: 1, request_id: 'final-backstop', resolution_id: 9,
+    status: 'thinking', text: 'late partial' });
+  assert.equal(hudReply.textContent, 'complete final response');
 });

@@ -114,8 +114,8 @@ def run(args):
                   window.__phase1Replies=[];api.onIntentResult=(msg)=>{window.__phase1Replies.push(msg);original(msg)};
                   const s=document.querySelector('#hermes-gaze-root').shadowRoot;
                   s.querySelector('#hg-input').value='What does this table show?';s.querySelector('#hg-send').click();return true;})()""")
-                wait_for(lambda: js("window.__phase1Replies.some(m=>m.type==='explain')"), timeout=30)
-                unavailable = js("window.__phase1Replies.find(m=>m.type==='explain')")
+                wait_for(lambda: js("window.__phase1Replies.some(m=>m.type==='submit')"), timeout=30)
+                unavailable = js("window.__phase1Replies.find(m=>m.type==='submit')")
                 assert not unavailable["ok"] and unavailable.get("error"), unavailable
                 assert unavailable["error"] in js("document.querySelector('#hermes-gaze-root').shadowRoot.querySelector('#hg-reply').innerText")
                 report["binding"] = js("window.__phase1Replies.map(m=>({type:m.type,ok:m.ok,resolution_id:m.resolution_id}))")
@@ -145,8 +145,8 @@ def run(args):
                     report["configured_model"] = {k: config.get("model", {}).get(k) for k in ("default", "provider")}
                     js("""(() => {window.__phase1Replies=[];const s=document.querySelector('#hermes-gaze-root').shadowRoot;
                       s.querySelector('#hg-input').value='Summarize this table';s.querySelector('#hg-send').click();return true;})()""")
-                    wait_for(lambda: js("window.__phase1Replies.some(m=>m.type==='explain')"), timeout=180)
-                    model_reply = js("window.__phase1Replies.find(m=>m.type==='explain')")
+                    wait_for(lambda: js("window.__phase1Replies.some(m=>m.type==='submit')"), timeout=180)
+                    model_reply = js("window.__phase1Replies.find(m=>m.type==='submit')")
                     assert model_reply["ok"], model_reply
                     hud_text = js("document.querySelector('#hermes-gaze-root').shadowRoot.querySelector('#hg-reply').innerText")
                     assert model_reply["explanation"] in hud_text, (model_reply, hud_text)
@@ -177,6 +177,66 @@ def run(args):
                             args.output.write_text(json.dumps(report, indent=2) + "\n")
                     report["model_answers"] = results
                     service.set_runtime(plugin.GazeConfig(cdp_url=session.cdp_http_url))
+
+                # Exercise real handle geometry and the entire trusted-confirmation boundary.
+                js("""window.__actionClicks=[];document.querySelectorAll('button').forEach(
+                  b=>b.addEventListener('click',()=>window.__actionClicks.push(b.id)));true""")
+                active = resolve("Export this table")
+                rid = active["resolution_id"]
+                table_handle = next(h for h, info in active["handles"].items() if info.get("kind") == "table")
+                export_handle = next(h for h, info in active["handles"].items() if info.get("label") == "Export CSV")
+                purge_handle = next(h for h, info in active["handles"].items() if info.get("label") == "Purge Cache")
+                geometry = {}
+                for name, handle in (("cell", active["top"]["cell"]["handle"]),
+                                     ("row", active["top"]["cell"]["row_handle"]),
+                                     ("column", active["top"]["cell"]["column_handle"]), ("table", table_handle)):
+                    assert session.actions.highlight([handle], rid)["ok"], name
+                    geometry[name] = js("""[...document.querySelector('#hermes-gaze-root').shadowRoot.querySelectorAll('.pin-box')]
+                      .map(e=>({width:parseFloat(e.style.width),height:parseFloat(e.style.height)}))""")
+                assert len(geometry["column"]) == 6, geometry
+                table_width = js("document.querySelector('#campaigns-table').getBoundingClientRect().width")
+                assert abs(geometry["table"][0]["width"] - table_width) < 12, geometry
+                assert session.actions.click(export_handle, rid)["executed"]
+                assert js("window.__actionClicks") == ["btn-export-csv"]
+                pending = session.actions.click(purge_handle, rid)
+                assert pending["confirmation_required"] and "action_id" not in pending, pending
+                token = session.actions._pending["action_id"]
+
+                def press_card(label="Confirm action"):
+                    rect = js(f"""(() => {{const s=document.querySelector('#hermes-gaze-root').shadowRoot;
+                      const b=[...s.querySelectorAll('[role=dialog] button')].find(e=>e.textContent==={json.dumps(label)});
+                      b.click();const r=b.getBoundingClientRect();return {{x:r.x+r.width/2,y:r.y+r.height/2}}}})()""")
+                    for kind in ("mousePressed", "mouseReleased"):
+                        session.cdp._submit(session.cdp._send_cmd("Input.dispatchMouseEvent",
+                            {"type": kind, "x": rect["x"], "y": rect["y"], "button": "left", "clickCount": 1}, 10), 20)
+
+                forged = []
+                service.handle_intent({"type": "confirm_action", "nonce": "wrong", "action_id": token,
+                                       "resolution_id": rid, "approved": True}, forged.append)
+                assert not forged[0]["ok"] and js("window.__actionClicks") == ["btn-export-csv"]
+                press_card()
+                wait_for(lambda: js("window.__actionClicks.includes('btn-purge-cache')"))
+                assert not session.actions.confirm(token, rid, True)["ok"]
+                assert js("window.__actionClicks").count("btn-purge-cache") == 1
+                assert session.actions.click(purge_handle, rid)["confirmation_required"]
+                js("document.querySelector('#btn-purge-cache').textContent='Changed control';true")
+                press_card()
+                wait_for(lambda: session.actions._pending is None)
+                assert js("window.__actionClicks").count("btn-purge-cache") == 1
+                js("document.querySelector('#btn-purge-cache').textContent='Purge Cache';true")
+                active = resolve("Purge this cache")
+                rid = active["resolution_id"]
+                assert session.actions.click(purge_handle, rid)["confirmation_required"]
+                token = session.actions._pending["action_id"]
+                resolve("Explain this table")
+                assert not session.actions.confirm(token, rid, True)["ok"]
+                active = resolve("Export this table")
+                js("document.querySelector('#btn-export-csv').replaceWith(document.querySelector('#btn-export-csv').cloneNode(true));true")
+                assert not session.actions.click(export_handle, active["resolution_id"])["ok"]
+                report["actions"] = {"geometry": geometry, "clicks": js("window.__actionClicks"),
+                                     "forged_nonce_rejected": True, "synthetic_click_rejected": True,
+                                     "duplicate_approval_rejected": True, "changed_control_rejected": True,
+                                     "stale_approval_rejected": True, "replaced_node_rejected": True}
 
                 # Native structures and sensitive descendants inside enclosing text.
                 js("""document.body.insertAdjacentHTML('beforeend', `<section id="phase1-privacy"><h2>Invoice</h2>

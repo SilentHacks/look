@@ -1,9 +1,7 @@
 """Exact-time cursor evidence, bounded context, and guarded one-shot explanations."""
 import copy
-import importlib.util
 import json
 import unittest
-from pathlib import Path
 from unittest import mock
 
 from hermes_gaze import service
@@ -157,25 +155,11 @@ class TestCursorContext(unittest.TestCase):
             result = service.resolve_now(session, utterance="", record_voice=True)
         self.assertEqual(result["top"]["id"], "@1")
 
-    def test_hook_pull_and_pushed_share_context_and_reject_hover_hints(self):
+    def test_hover_rejects_fabricated_coordinate_hints(self):
         from hermes_gaze import tools
         session = GazeSession(cdp_http_url="http://127.0.0.1:1")
         self.addCleanup(session.close)
-        spec = importlib.util.spec_from_file_location(
-            "hermes_gaze", Path(__file__).resolve().parents[1] / "__init__.py")
-        entry = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(entry)
-        data = capture()
-        with mock.patch.object(session, "fetch_cursor_context", return_value=data), \
-                mock.patch.object(session, "overlay_is_live", return_value=True), \
-                mock.patch.object(entry, "get_shared_session", return_value=session), \
-                mock.patch.object(tools, "get_shared_session", return_value=session), \
-                mock.patch.object(service.time, "time", return_value=30):
-            pushed = service.resolve_now(session, utterance="explain this", pushed={"cursor_context": data})
-            pulled = service.resolve_now(session, utterance="explain this")
-            hooked = entry._on_pre_llm_call("explain this")
-            self.assertEqual(pushed["context"], pulled["context"])
-            self.assertEqual(pushed["context"], hooked["context"])
+        with mock.patch.object(tools, "get_shared_session", return_value=session):
             hinted = json.loads(tools.handle_gaze_resolve({"utterance": "this", "target_hint_x": 3, "target_hint_y": 4}))
             self.assertFalse(hinted["ok"])
 

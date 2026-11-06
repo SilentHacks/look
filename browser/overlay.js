@@ -7,13 +7,13 @@
   const prevApi = window.__HERMES_GAZE_OVERLAY__;
   const prevState = prevApi && prevApi.state ? prevApi.state : null;
   const prevInputVal = prevApi && typeof prevApi.getInputValue === "function" ? prevApi.getInputValue() : "";
-  let prevReplyHtml = "";
+  let prevReplyText = "";
   let prevReplyDisplay = "none";
   const existingRoot = document.getElementById("hermes-gaze-root");
   if (existingRoot && existingRoot.shadowRoot) {
     const rEl = existingRoot.shadowRoot.querySelector("#hg-reply");
-    if (rEl && rEl.innerHTML && rEl.style.display !== "none") {
-      prevReplyHtml = rEl.innerHTML;
+    if (rEl && rEl.textContent && rEl.style.display !== "none") {
+      prevReplyText = rEl.textContent;
       prevReplyDisplay = rEl.style.display;
     }
   }
@@ -495,12 +495,6 @@
         </div>
         <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">🔒 Lock (${hotkeyLabel()})</button>
       </div>
-      <nav id="hg-scopes" aria-label="Subject scope" style="display:none;margin:8px 0;font-size:12px;">
-        <div id="hg-scope-options" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
-        <div style="margin-top:5px;color:#94a3b8;">↑/↓ change scope · Row and column are alternatives, not ancestors.</div>
-        <button class="ctrl-btn" id="hg-record" style="margin-top:5px;">Confirm intended scope &amp; save trial</button>
-        <span id="hg-record-status" role="status"></span>
-      </nav>
 
       <div class="chips-row">
         <button class="chip" data-prompt="What happens if I press this?">❓ What does this do?</button>
@@ -537,20 +531,11 @@
   const hudInput = hud.querySelector("#hg-input");
   const hudSend = hud.querySelector("#hg-send");
   const hudReply = hud.querySelector("#hg-reply");
-  const scopeNav = hud.querySelector("#hg-scopes");
-  const scopeOptions = hud.querySelector("#hg-scope-options");
-  const recordStatus = hud.querySelector("#hg-record-status");
-  hud.querySelector("#hg-record").addEventListener("click", () => {
-    if (state.selectedScopeId && !state.scopePending) {
-      recordStatus.textContent = "Saving…";
-      _emit({ type: "record", resolution_id: state.resolutionId, scope_id: state.selectedScopeId });
-    }
-  });
   if (prevInputVal && hudInput) {
     hudInput.value = prevInputVal;
   }
-  if (prevReplyHtml && prevReplyDisplay === "block") {
-    hudReply.innerHTML = prevReplyHtml;
+  if (prevReplyText && prevReplyDisplay === "block") {
+    hudReply.textContent = prevReplyText;
     hudReply.style.display = "block";
   }
 
@@ -715,6 +700,41 @@
   let cursorSerial = 0;
   let lockedNode = null;
   const speechCaptures = new Map();
+  const snapshots = new Map();
+  const snapshotInstance = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+  let snapshotSerial = 0;
+  let activeSnapshot = null;
+  let destroyed = false;
+  let confirmation = null;
+  let sessionSequence = -1;
+  let sessionRequest = null;
+  let sessionFinished = false;
+  let sessionResolution = 0;
+  const fingerprints = new WeakMap();
+  let fingerprintSerial = 0;
+  function actionFacts(el) {
+    const tag = el.tagName.toLowerCase();
+    const type = String(el.type || el.getAttribute("type") || "").toLowerCase();
+    const role = el.getAttribute("role") || "";
+    return { tag, type, role, label: safeLabel(el), class_name: String(el.className || "").slice(0, 300),
+      form_submit: !!el.closest("form") && (tag === "button" && (!type || type === "submit") ||
+        tag === "input" && (type === "submit" || type === "image")),
+      disabled: !!el.disabled || el.matches(":disabled") || el.getAttribute("aria-disabled") === "true" || !!el.closest("[inert]"),
+      clickable: tag === "button" || tag === "a" && !!el.getAttribute("href") ||
+        tag === "input" && ["button", "submit", "reset", "checkbox", "radio", "image"].includes(type) ||
+        role === "button" || role === "link" };
+  }
+  function fingerprint(el) {
+    const descriptor = JSON.stringify([cursorId(el), actionFacts(el), el.getAttribute("href"),
+      el.getAttribute("formaction"), el.closest("form") ? cursorId(el.closest("form")) : null,
+      el.closest("form")?.getAttribute("action"), el.closest("form")?.getAttribute("method"),
+      el.getAttribute("id"), el.getAttribute("name"), el.getAttribute("onclick"), el.getAttribute("target")]);
+    const previous = fingerprints.get(el);
+    if (previous?.descriptor === descriptor) return previous.token;
+    const token = `${snapshotInstance}:fingerprint:${++fingerprintSerial}`;
+    fingerprints.set(el, { descriptor, token });
+    return token;
+  }
   const sensitiveSelector = 'input[type="password"],[autocomplete^="cc-"],[autocomplete="current-password"],[autocomplete="new-password"],[name*="card" i],[name*="payment" i],[name*="cvv" i],[name*="cvc" i],[name^="cc-" i],[id*="card" i],[id*="payment" i],[id*="cvv" i],[id*="cvc" i],[id^="cc-" i]';
   function sensitive(el) {
     const field = el && el.closest("input,textarea,select,[contenteditable]");
@@ -787,20 +807,28 @@
       rect_doc: [r.left + scrollX, r.top + scrollY, r.width, r.height], block_ids: [] };
   }
   function captureCursorContext() {
-    const capture = { version: 1, captured_at: Date.now() / 1000, page_url: location.origin + location.pathname,
+    clearActionConfirmation();
+    const snapshotId = `${snapshotInstance}:${++snapshotSerial}`;
+    const identities = new Map();
+    identities.pageUrl = location.href;
+    const capture = { version: 1, snapshot_id: snapshotId, captured_at: Date.now() / 1000, page_url: location.origin + location.pathname,
       page_title: String(document.title || "").slice(0, 160),
       history: cursorHistory.map(h => ({ ...h })), targets: [], blocks: [], controls: [], handles: {} };
+    let capturedMembers = 0;
     function handle(node) {
       const id = cursorId(node);
-      if (!capture.handles[id] && !sensitive(node)) {
+      if (!capture.handles[id] && !sensitive(node) && identities.size < 8192) {
         const r = node.getBoundingClientRect();
-        capture.handles[id] = { selector: buildSelector(node).slice(0, 350), rect_vp: [r.left, r.top, r.width, r.height] };
+        const facts = actionFacts(node);
+        capture.handles[id] = { selector: buildSelector(node).slice(0, 350), rect_vp: [r.left, r.top, r.width, r.height],
+          kind: facts.role || facts.tag, ...facts };
+        identities.set(id, { node, fingerprint: fingerprint(node), kind: facts.role || facts.tag });
       }
       return id;
     }
     const blocks = new Map();
     const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean).reverse())].slice(0, 64).reverse();
-    for (const id of refs) {
+    for (const id of refs.slice().reverse()) {
       const el = cursorRefs.get(id);
       if (!el || !el.isConnected) { capture.targets.push({ id, available: false, reason: "historical node detached" }); continue; }
       const target = cursorMetadata(el);
@@ -812,9 +840,21 @@
       if (table) {
         const bid = handle(table);
         if (!blocks.has(bid)) {
-          const rowNodes = [...table.querySelectorAll("tr,[role=row]")].filter(row => row.closest("table,[role=grid]") === table);
-          const allCells = row => [...row.querySelectorAll("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]")]
-            .filter(cell => cell.closest("tr,[role=row]") === row);
+          const rowNodes = [];
+          const rowCells = new Map();
+          let collectionLimited = false;
+          for (const row of table.querySelectorAll("tr,[role=row]")) {
+            if (rowNodes.length >= 1024 || capturedMembers >= 8192) { collectionLimited = true; break; }
+            if (row.closest("table,[role=grid]") !== table) continue;
+            const cells = [];
+            for (const cell of row.querySelectorAll("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]")) {
+              if (cells.length >= 64 || capturedMembers >= 8192) { collectionLimited = true; break; }
+              if (cell.closest("tr,[role=row]") === row) { cells.push(cell); capturedMembers++; }
+            }
+            rowNodes.push(row);
+            rowCells.set(row, cells);
+          }
+          const allCells = row => rowCells.get(row) || [];
           const headerRow = rowNodes.find(row => {
             const cells = allCells(row);
             return cells.some(cell => cell.matches("[role=columnheader],th[scope=col],th[scope=colgroup]")) ||
@@ -823,23 +863,40 @@
           });
           const cellsOf = row => allCells(row).slice(0, 12);
           const dataRows = rowNodes.filter(row => row !== headerRow);
+          const columnCount = Math.min(64, Math.max(0, ...[...rowCells.values()].map(cells => cells.length)));
+          const columns = [];
+          for (let col = 0; col < columnCount; col++) {
+            const members = rowNodes.map(row => allCells(row)[col]).filter(node => node && !sensitive(node));
+            const id = `${bid}:column:${col + 1}`;
+            const label = headerRow && allCells(headerRow)[col] ? safeText(allCells(headerRow)[col], 60) : `Column ${col + 1}`;
+            if (members.length && identities.size < 8192) {
+              identities.set(id, { kind: "column", label, members, table });
+              capture.handles[id] = { kind: "column", label };
+              columns.push(`${id} ${label}`);
+            }
+          }
           blocks.set(bid, { id: bid, kind: "table", label: safeText(table.querySelector("caption"), 80),
             headers: headerRow ? cellsOf(headerRow).map(c => `${handle(c)} ${safeText(c, 60)}`) : [],
-            total_rows: dataRows.length, rows: [], _rows: dataRows, _cells: cellsOf, _allCells: allCells,
-            _header: headerRow, omitted_columns: headerRow ? Math.max(0, allCells(headerRow).length - 12) : 0 });
+            columns, total_rows: dataRows.length, collection_limited: collectionLimited,
+            rows: [], _rows: dataRows, _cells: cellsOf, _allCells: allCells,
+            _header: headerRow, _seen: new Set(), _rowIndex: new Map(dataRows.map((row, index) => [row, index])),
+            omitted_columns: headerRow ? Math.max(0, allCells(headerRow).length - 12) : 0 });
         }
         const block = blocks.get(bid);
         target.block_ids.push(bid);
         const row = cell && cell.closest("tr,[role=row]");
-        const ri = block._rows.indexOf(row);
+        const ri = block._rowIndex.get(row) ?? -1;
         if (cell) {
           const column = row ? block._allCells(row).indexOf(cell) : -1;
           const header = block._header && block._allCells(block._header)[column];
-          target.cell = { block: bid, row: ri + 1, column: column + 1, value: safeText(cell, 100),
-            header: header ? `${handle(header)} ${safeText(header, 60)}` : "" };
+          target.cell = { block: bid, handle: handle(cell), row_handle: row ? handle(row) : null,
+            row: ri + 1, column: column + 1, value: safeText(cell, 100),
+            header: header ? `${handle(header)} ${safeText(header, 60)}` : "",
+            column_handle: capture.handles[`${bid}:column:${column + 1}`] ? `${bid}:column:${column + 1}` : null };
         }
         const indices = block._rows.length <= 12 ? block._rows.map((_, i) => i) : [ri];
-        for (const i of indices) if (i >= 0 && block.rows.length < 64 && !block.rows.some(r => r.index === i + 1)) {
+        for (const i of indices) if (i >= 0 && block.rows.length < 64 && !block._seen.has(i)) {
+          block._seen.add(i);
           const node = block._rows[i];
           block.rows.push({ id: handle(node), index: i + 1, cells: block._cells(node).map(c => safeText(c, 70)) });
         }
@@ -855,7 +912,8 @@
           text: safeText(parent, 650), text_limit: 650 });
       }
     }
-    capture.blocks = [...blocks.values()].map(({ _rows, _cells, _allCells, _header, ...block }) => block);
+    capture.targets.reverse();
+    capture.blocks = [...blocks.values()].map(({ _rows, _cells, _allCells, _header, _seen, _rowIndex, ...block }) => block);
     // One bounded page-control pass per capture, never once per cell/mousemove.
     const controls = document.querySelectorAll('button,a,input,select,[role=button]');
     for (let i = 0; i < controls.length && i < 120 && capture.controls.length < 12; i++) {
@@ -865,8 +923,164 @@
       if (r.width && r.height) { handle(el); capture.controls.push(cursorMetadata(el)); }
     }
     capture.omitted_controls = Math.max(0, controls.length - capture.controls.length);
+    snapshots.set(snapshotId, identities);
+    while (snapshots.size > 32) {
+      const oldest = snapshots.keys().next().value;
+      snapshots.delete(oldest);
+      if (activeSnapshot?.id === oldest) activeSnapshot = null;
+    }
     return capture;
   }
+  let latestResolution = 0;
+  function activateSnapshot(snapshotId, resolutionId) {
+    if (destroyed || !Number.isSafeInteger(resolutionId) || resolutionId <= 0 ||
+        resolutionId < latestResolution) return { ok: false, error: "Stale resolution" };
+    if (!snapshots.has(snapshotId) || snapshots.get(snapshotId).pageUrl !== location.href)
+      return { ok: false, error: "Snapshot expired" };
+    clearActionConfirmation();
+    latestResolution = resolutionId;
+    activeSnapshot = { id: snapshotId, resolutionId, pageUrl: location.href };
+    state.resolutionId = resolutionId;
+    return { ok: true };
+  }
+  function snapshotEntry(snapshotId, resolutionId, handle) {
+    if (destroyed || !activeSnapshot || activeSnapshot.id !== snapshotId ||
+        activeSnapshot.resolutionId !== resolutionId || activeSnapshot.pageUrl !== location.href) return null;
+    return snapshots.get(snapshotId)?.get(handle) || null;
+  }
+  function inspectSnapshot(snapshotId, resolutionId, handle) {
+    const entry = snapshotEntry(snapshotId, resolutionId, handle);
+    if (entry?.members) {
+      if (!entry.table.isConnected || entry.members.some(node => !node.isConnected || sensitive(node) ||
+          node.closest("table,[role=grid]") !== entry.table))
+        return { ok: false, error: "Snapshot target unavailable" };
+      return { ok: true, handle, kind: "column", label: entry.label, tag: "", role: "column",
+        type: "", form_submit: false, class_name: "", disabled: false, clickable: false,
+        fingerprint: `${snapshotId}:${handle}` };
+    }
+    if (!entry || !entry.node || !entry.node.isConnected || sensitive(entry.node))
+      return { ok: false, error: "Snapshot target unavailable" };
+    const current = fingerprint(entry.node);
+    if (current !== entry.fingerprint) return { ok: false, error: "Target changed since capture" };
+    return { ok: true, handle, kind: entry.kind, ...actionFacts(entry.node), fingerprint: current };
+  }
+  function highlightSnapshot(snapshotId, resolutionId, handles, hudMessage) {
+    if (!Array.isArray(handles) || !handles.length || handles.length > 64)
+      return { ok: false, error: "Choose 1–64 snapshot handles" };
+    const candidates = [];
+    for (const handle of handles) {
+      const entry = snapshotEntry(snapshotId, resolutionId, handle);
+      const nodes = entry?.members || (entry?.node ? [entry.node] : []);
+      if (!nodes.length || entry?.table && !entry.table.isConnected ||
+          nodes.some(node => !node.isConnected || sensitive(node) ||
+            entry.table && node.closest("table,[role=grid]") !== entry.table))
+        return { ok: false, error: "Snapshot target unavailable" };
+      for (const node of nodes) {
+        const r = node.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) candidates.push({
+          label: snapshots.get(snapshotId) && (entry.kind === "column" ? "Column" : safeLabel(node)),
+          rect_vp: [r.left, r.top, r.width, r.height] });
+      }
+    }
+    if (!candidates.length) return { ok: false, error: "No visible target geometry" };
+    renderPins(candidates);
+    if (hudMessage) showPlainMessage(hudMessage);
+    return { ok: true };
+  }
+  function clickSnapshot(snapshotId, resolutionId, handle, expectedFingerprint) {
+    const descriptor = inspectSnapshot(snapshotId, resolutionId, handle);
+    if (!descriptor.ok) return { ...descriptor, executed: false };
+    if (!expectedFingerprint || expectedFingerprint !== descriptor.fingerprint ||
+        descriptor.disabled || !descriptor.clickable)
+      return { ok: false, executed: false, error: "Control changed or is not enabled/clickable" };
+    const entry = snapshotEntry(snapshotId, resolutionId, handle);
+    entry.node.click();
+    return { ok: true, executed: true };
+  }
+  function clearActionConfirmation() {
+    if (confirmation) confirmation.card.remove();
+    confirmation = null;
+    return true;
+  }
+  function requestActionConfirmation(info) {
+    clearActionConfirmation();
+    if (destroyed || !activeSnapshot || info?.resolution_id !== activeSnapshot.resolutionId ||
+        activeSnapshot.pageUrl !== location.href || typeof info.action_id !== "string" || !info.action_id)
+      return { ok: false, error: "Stale confirmation" };
+    const card = document.createElement("section");
+    card.className = "lens-card open";
+    card.style.cssText = "right:24px;top:80px;cursor:default;";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-label", "Confirm page action");
+    const title = document.createElement("h2");
+    title.className = "lens-title";
+    title.textContent = String(info.label || "Confirm action");
+    const description = document.createElement("p");
+    description.className = "lens-desc";
+    description.textContent = String(info.description || "Click Confirm to perform this page action.");
+    card.appendChild(title);
+    card.appendChild(description);
+    const pending = { card, actionId: info.action_id, resolutionId: info.resolution_id };
+    confirmation = pending;
+    for (const approved of [true, false]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ctrl-btn";
+      button.textContent = approved ? "Confirm action" : "Cancel";
+      button.addEventListener("click", event => {
+        if (!event.isTrusted || event.button !== 0 || event.detail < 1 ||
+            event.pointerType && event.pointerType !== "mouse" ||
+            confirmation !== pending || !activeSnapshot ||
+            activeSnapshot.resolutionId !== pending.resolutionId || activeSnapshot.pageUrl !== location.href) return;
+        event.stopPropagation();
+        clearActionConfirmation();
+        _emit({ type: "confirm_action", action_id: pending.actionId,
+          resolution_id: pending.resolutionId, approved });
+      });
+      card.appendChild(button);
+    }
+    shadow.appendChild(card);
+    return { ok: true };
+  }
+  function showPlainMessage(text) {
+    hudReply.style.display = "block";
+    hudReply.style.whiteSpace = "pre-wrap";
+    hudReply.textContent = String(text);
+  }
+  function onSessionEvent(event) {
+    if (destroyed || !event || !Number.isSafeInteger(event.sequence)) return;
+    const resolution = Number.isSafeInteger(event.resolution_id) ? event.resolution_id : 0;
+    const newTurn = resolution > sessionResolution;
+    if (resolution && (resolution < latestResolution || resolution < sessionResolution)) return;
+    if (!newTurn && event.sequence < sessionSequence) return;
+    // Turn-end may complete with partial text before the full final-response hook.
+    if (!newTurn && event.sequence === sessionSequence &&
+        (event.request_id !== sessionRequest || (sessionFinished && event.status !== "complete"))) return;
+    if (!resolution && event.status === "queued" && sessionSequence >= 0 && !sessionFinished) return;
+    if (newTurn || event.sequence > sessionSequence) {
+      sessionResolution = resolution || sessionResolution;
+      sessionSequence = event.sequence;
+      sessionRequest = event.request_id;
+      sessionFinished = false;
+    }
+    lockLabel.textContent = String(event.status || "thinking");
+    tuckSummary.textContent = event.session_connected === false ? "SESSION DISCONNECTED" : "HERMES SESSION";
+    if (event.text !== undefined) showPlainMessage(event.text);
+    if (event.error) showPlainMessage(event.error);
+    if (["complete", "error", "disconnected"].includes(event.status) || event.session_connected === false)
+      sessionFinished = true;
+  }
+  function onNavigation() {
+    activeSnapshot = null;
+    snapshots.clear();
+    clearActionConfirmation();
+    sessionFinished = true;
+    releaseAudioStream();
+  }
+  window.addEventListener("pagehide", onNavigation);
+  window.addEventListener("popstate", onNavigation);
+  window.addEventListener("hashchange", onNavigation);
+  window.navigation?.addEventListener("navigate", onNavigation);
   function onCursorScroll() {
     if (!state.armed && !cursorOverHud && typeof state.pointerX === "number")
       rememberHit(hitNode(state.pointerX, state.pointerY));
@@ -976,7 +1190,7 @@
     intent.id = ++_intentSeq;
     intent.nonce = _intentNonce;
     if (typeof window.__hermesGazeIntent !== "function") {
-      showHudMessage('<div style="color:#f87171;">⚠️ Resolver offline (session not connected).</div>');
+      showPlainMessage("Resolver offline. Run /gaze in the Hermes session, then retry.");
       return false;
     }
     window.__hermesGazeIntent(JSON.stringify(intent));
@@ -984,56 +1198,34 @@
   }
 
   function renderScopeOptions(msg) {
-    state.resolutionId = msg.resolution_id;
+    state.resolutionId = msg.resolution_id || 0;
     state.scopes = msg.scopes || [];
     state.selectedScopeId = msg.selected_scope_id;
-    scopeOptions.replaceChildren();
-    scopeNav.style.display = state.scopes.length ? "block" : "none";
-    recordStatus.textContent = "";
-    for (const scope of state.scopes) {
-      const button = document.createElement("button");
-      button.className = "ctrl-btn";
-      button.textContent = scope.scope || scope.role;
-      button.title = `${scope.label}: ${scope.summary || ""}`;
-      button.setAttribute("aria-pressed", String(scope.id === state.selectedScopeId));
-      if (scope.id === state.selectedScopeId) button.style.borderColor = "#38bdf8";
-      button.addEventListener("click", () => selectScope(scope.id));
-      scopeOptions.appendChild(button);
-    }
-  }
-
-  function selectScope(scopeId) {
-    if (state.scopePending || scopeId === state.selectedScopeId) return;
-    state.scopePending = _emit({
-      type: "scope", resolution_id: state.resolutionId, scope_id: scopeId,
-    });
-  }
-
-  function stepScope(direction) {
-    const index = state.scopes.findIndex((scope) => scope.id === state.selectedScopeId);
-    const next = state.scopes[index + direction];
-    if (next) selectScope(next.id);
   }
   function emitResolve(utterance, words, captured) {
     const text = (utterance || "").trim();
     if (!text) return false;
     state.scopePending = false;
     state.scopes = [];
-    scopeNav.style.display = "none";
     const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
     const px = locked ? state.lockedX : state.pointerX;
     const py = locked ? state.lockedY : state.pointerY;
     if (typeof px !== "number" || typeof py !== "number") {
-      showHudMessage('<div style="color:#fbbf24;">🎯 Aim the pointer at an element first, then speak or type.</div>');
+      showPlainMessage("Aim the pointer at an element first, then speak or type.");
       return false;
     }
+    const evidence = state.mode === "hover" ? captured || captureCursorContext() : null;
+    if (evidence) {
+      const current = evidence.targets.find(target => target.id === evidence.history.at(-1)?.id);
+      if (current?.available) renderPins([current]);
+    }
     const intent = {
-      type: "resolve",
+      type: state.mode === "hover" ? "submit" : "resolve",
       utterance: text,
       page_url: location.href,
       pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
       fixations: state.ringBuffer.slice(-25),
-      ...(state.mode === "hover" ? { cursor_context: captured || captureCursorContext() } :
+      ...(state.mode === "hover" ? { cursor_context: evidence } :
         { candidates: extractCandidatesNear(px, py, state.candidateRadiusPx || 380) }),
     };
     if (words) {
@@ -1125,12 +1317,21 @@
       return;
     }
 
-    if (msg.type === "record") {
-      if (msg.resolution_id && msg.resolution_id !== state.resolutionId) return;
-      recordStatus.textContent = msg.ok ? `Saved: ${msg.path}` : `Save failed: ${msg.error}`;
+
+    if (msg.type === "submit") {
+      if (msg.id !== _lastSentResolveId) return;
+      if (!msg.ok) {
+        showPlainMessage(msg.error || "Connect Hermes with /gaze, then retry.");
+      } else if (msg.delivery === "session") {
+        if (sessionSequence < 0 || sessionFinished) lockLabel.textContent = "queued";
+        tuckSummary.textContent = "HERMES SESSION";
+      } else if (msg.delivery === "one_shot") {
+        renderScopeOptions(msg);
+        if (Array.isArray(msg.ranked)) renderPins(msg.ranked);
+        showPlainMessage(`${msg.message || "Read-only one-shot fallback — no conversation or actions."}\n${msg.explanation || msg.text || msg.answer || ""}`);
+      }
       return;
     }
-
     if (msg.type === "resolve" || msg.type === "scope") {
       if (msg.type === "resolve" && msg.id < _lastSentResolveId) return;
       if (msg.type === "scope") {
@@ -1138,7 +1339,7 @@
         if (msg.resolution_id && msg.resolution_id < state.resolutionId) return;
       }
       if (!msg.ok) {
-        showHudMessage(`<div style="color:#f87171;">⚠️ ${escapeHtml(msg.error || "Resolver error.")}</div>`);
+        showPlainMessage(msg.error || "Resolver error.");
         return;
       }
       renderScopeOptions(msg);
@@ -1161,10 +1362,10 @@
       // correlate the reply with the pin that asked for it (a newer pin wins the element)
       if (expEl && String(expEl.dataset.rid || "") === String(msg.resolution_id || "")) {
         if (msg.ok && msg.explanation) {
-          expEl.innerHTML = `<span style="color:#f8fafc;">${escapeHtml(msg.explanation)}</span>`;
+          expEl.textContent = msg.explanation;
         } else {
           const fallback = msg.error || _pendingExplainFallback || "Explanation unavailable.";
-          expEl.innerHTML = `<span style="color:#cbd5e1;">${escapeHtml(fallback)}</span>`;
+          expEl.textContent = fallback;
         }
       }
       return;
@@ -1176,7 +1377,7 @@
         state.lensActive = false; // consumed — Python already re-rendered the pin
       } else {
         // keep the lens live so dwell/keys still work after a failed choose
-        showHudMessage(`<div style="color:#f87171;">⚠️ ${escapeHtml(msg.error || "Selection failed.")}</div>`);
+        showPlainMessage(msg.error || "Selection failed.");
       }
       return;
     }
@@ -1426,11 +1627,6 @@
 
   hudInput.addEventListener("keydown", (e) => {
     e.stopPropagation();
-    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && state.scopes.length) {
-      e.preventDefault();
-      stepScope(e.key === "ArrowUp" ? 1 : -1);
-      return;
-    }
     if (e.key === "Enter") {
       e.preventDefault();
       emitResolve(hudInput.value);
@@ -1454,12 +1650,6 @@
 
   function onWindowKeyDown(e) {
     if (isEditableTarget(e)) return;
-    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && state.scopes.length) {
-      e.preventDefault();
-      e.stopPropagation();
-      stepScope(e.key === "ArrowUp" ? 1 : -1);
-      return;
-    }
     if (e.code === "Space" && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
@@ -1726,7 +1916,10 @@
     pinsLayer.innerHTML = "";
     state.scopes = [];
     state.selectedScopeId = null;
-    scopeNav.style.display = "none";
+    activeSnapshot = null;
+    snapshots.clear();
+    clearActionConfirmation();
+    sessionFinished = true;
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
     state.lensActive = false;
@@ -1753,7 +1946,8 @@
     state.lensActive = false;
 
     (candidates || []).forEach((cand, idx) => {
-      const [x, y, w, h] = cand.rect_vp || [100, 100, 120, 36];
+      if (!Array.isArray(cand.rect_vp) || cand.rect_vp.length !== 4 || !cand.rect_vp.every(Number.isFinite)) return;
+      const [x, y, w, h] = cand.rect_vp;
       const box = document.createElement("div");
       box.className = "pin-box";
       box.style.left = `${x - 4}px`;
@@ -1783,7 +1977,7 @@
     state.resolutionId = resolutionId || 0;
 
     if (promptMessage) {
-      showHudMessage(`<div style="color:#38bdf8;font-weight:600;">${promptMessage}</div>`);
+      showPlainMessage(promptMessage);
     }
 
     const count = state.lensCandidates.length;
@@ -1873,6 +2067,14 @@
   }
 
   function destroy() {
+    destroyed = true;
+    activeSnapshot = null;
+    snapshots.clear();
+    clearActionConfirmation();
+    window.removeEventListener("pagehide", onNavigation);
+    window.removeEventListener("popstate", onNavigation);
+    window.removeEventListener("hashchange", onNavigation);
+    window.navigation?.removeEventListener("navigate", onNavigation);
     window.removeEventListener("scroll", onCursorScroll, true);
     if (stopDelayTimer) {
       clearTimeout(stopDelayTimer);
@@ -1926,6 +2128,13 @@
     armInteraction,
     extractCandidatesNear,
     captureCursorContext,
+    activateSnapshot,
+    inspectSnapshot,
+    highlightSnapshot,
+    clickSnapshot,
+    requestActionConfirmation,
+    clearActionConfirmation,
+    onSessionEvent,
     recordPoint,
     extractTableData,
     renderScopeContext(info) {

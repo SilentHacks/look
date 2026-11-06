@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import copy
 import functools
 import html
 import json
@@ -42,6 +43,7 @@ except ImportError:
 
         return _wrapper
 
+from ..actions import SnapshotActions
 from ..resolver.bayesian_fusion import CandidateElement, ResolutionResult
 from ..tracker.recalibrator import OnlineRecalibrator
 from ..tracker.simulated_gaze import FixationRingBuffer, FixationSample, SimulatedPointerTracker
@@ -182,6 +184,10 @@ class CdpSession:
         """Evaluate JS in the pinned tab; returns ``Runtime.evaluate`` ``result.value``.
         Thread-safe. Raises on timeout or page exception; one reconnect attempt on ws failure."""
         return self._submit(self._eval_with_reconnect(expression, timeout), timeout + 15.0)
+
+    def eval_js_once(self, expression: str, timeout: float = 6.0) -> Any:
+        """Evaluate a mutation once on the current connection; never reconnect/replay."""
+        return self._submit(self._eval_coro(expression, timeout), timeout + 1.0)
 
     def set_intent_handler(self, fn: Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]) -> None:
         """Register fn(intent, reply) invoked on the intent pool for each binding call."""
@@ -448,6 +454,7 @@ class GazeSession:
         self.last_resolution: Optional[ResolutionResult] = None
         self.last_hover_snapshot: dict[str, Any] | None = None
         self.resolution_id = 0
+        self.actions = SnapshotActions(self)
         self.scope_selection: Dict[str, str] = {}
         self.last_candidate_wire: List[Dict[str, Any]] = []
         self.last_resolution_input: Dict[str, Any] = {}
@@ -485,6 +492,9 @@ class GazeSession:
 
     def eval_js(self, expression: str, timeout: float = 6.0) -> Any:
         return self._cdp.eval_js(expression, timeout=timeout)
+
+    def eval_js_once(self, expression: str, timeout: float = 6.0) -> Any:
+        return self._cdp.eval_js_once(expression, timeout=timeout)
 
     def ensure_overlay(self) -> bool:
         """Connect if needed and inject overlay.js when the api is missing from the page."""
@@ -588,15 +598,41 @@ class GazeSession:
         ) or {}
 
     def store_hover_snapshot(self, payload: dict[str, Any]) -> int:
-        with self._lock:
-            self.last_resolution = None
-            self.last_candidates = []
-            self.last_candidate_wire = []
-            self.scope_selection.clear()
-            self.resolution_id += 1
-            payload.update(resolution_id=self.resolution_id, epoch=self.resolution_id)
-            self.last_hover_snapshot = payload
-            return self.resolution_id
+        with self.actions._lock:
+            self.actions.invalidate()
+            with self._lock:
+                self.last_resolution = None
+                self.last_candidates = []
+                self.last_candidate_wire = []
+                self.scope_selection.clear()
+                self.resolution_id += 1
+                rid = self.resolution_id
+                context = str(payload.get("context") or "")
+                if context.startswith("Resolution: ") and "\n" in context:
+                    context = context.split("\n", 1)[1]
+                context = f"Resolution: {rid}\n{context}"[:6000]
+                payload.update(resolution_id=rid, epoch=rid, context=context, browser_active=False)
+                snapshot = copy.deepcopy(payload)
+                self.last_hover_snapshot = snapshot
+            if snapshot.get("ok") is True and snapshot.get("snapshot_id"):
+                result = self.actions._browser("activateSnapshot", snapshot["snapshot_id"], rid)
+                with self._lock:
+                    if self.last_hover_snapshot is snapshot and self.resolution_id == rid:
+                        snapshot["browser_active"] = result.get("ok") is True
+                        payload["browser_active"] = snapshot["browser_active"]
+                        if not result.get("ok"):
+                            snapshot["activation_error"] = result.get("error", "snapshot activation failed")
+                            payload["activation_error"] = snapshot["activation_error"]
+            return rid
+
+    def clear_hover_snapshot(self) -> None:
+        """Revoke action ownership when the connected Hermes session changes."""
+        with self.actions._lock:
+            self.actions.invalidate()
+            with self._lock:
+                self.last_hover_snapshot = None
+                self.last_resolution = None
+                self.resolution_id += 1
 
     def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> List[CandidateElement]:
         """Pull pointer + fixations + nearby candidates from the pinned tab in ONE eval.
@@ -636,11 +672,13 @@ class GazeSession:
 
     def new_resolution(self, res: ResolutionResult) -> int:
         """Store res as the active resolution and bump + return the epoch resolution_id."""
-        with self._lock:
-            self.last_resolution = res
-            self.last_hover_snapshot = None
-            self.resolution_id += 1
-            return self.resolution_id
+        with self.actions._lock:
+            self.actions.invalidate()
+            with self._lock:
+                self.last_resolution = res
+                self.last_hover_snapshot = None
+                self.resolution_id += 1
+                return self.resolution_id
 
     def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None) -> None:
         # new_resolution under the lock; browser I/O outside it so slow evals don't
@@ -750,6 +788,7 @@ class GazeSession:
             return False
 
     def close(self) -> None:
+        self.actions.invalidate()
         self._cdp.close()
 
 

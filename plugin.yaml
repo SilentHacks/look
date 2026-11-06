@@ -19,13 +19,14 @@ provides_tools:
   - gaze_resolve
   - gaze_choose
   - gaze_highlight
+  - gaze_click
   - gaze_calibrate
   - gaze_benchmark
 provides_hooks:
   - pre_llm_call
   - on_stream_delta
   - post_llm_call
-  - post_tool_call
+  - on_session_end
 config_schema:
   mode:
     type: str
@@ -55,3 +56,7 @@ config_schema:
     type: str
     default: "base.en"
     description: "Local faster-whisper model name for deictic speech alignment."
+  record_trials:
+    type: bool
+    default: false
+    description: "Development only: write local replay evidence. May contain sensitive page text; never audio."

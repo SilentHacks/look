@@ -1,4 +1,4 @@
-"""Hermes Agent tools for hermes-gaze: gaze_resolve, gaze_choose, gaze_highlight, gaze_calibrate, gaze_benchmark."""
+"""Hermes tools for cursor evidence, snapshot highlighting and guarded actions."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from . import service
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
 from .browser.cdp_bridge import get_shared_session
 from .resolver.bayesian_fusion import LENS_MAX_CARDS
-from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 
 
 def _schema(name: str, description: str, properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -28,7 +27,8 @@ GAZE_RESOLVE_SCHEMA = _schema(
     "gaze_resolve",
     "Resolve what DOM element(s) the user is pointing or looking at in Chrome when saying a deictic phrase "
     "like 'what happens if I press this?', 'download this', 'export these results', or 'compare this one with this one'. "
-    "Returns ranked candidates with probabilities, consequence previews, and renders pins or the Semantic Lens in Chrome.",
+    "Hover returns exact pointer evidence, surrounding structure and snapshot handles; the model chooses scope. "
+    "Simulated mode retains ranked candidates and Semantic Lens decisions.",
     {
         "utterance": {
             "type": "string",
@@ -85,26 +85,26 @@ GAZE_CHOOSE_SCHEMA = _schema(
 
 GAZE_HIGHLIGHT_SCHEMA = _schema(
     "gaze_highlight",
-    "Pin one or more DOM elements in Chrome's Shadow-DOM overlay and display a concise answer or SVG chart in the bottom HUD.",
+    "Highlight the snapshot scope used in your answer: cell, row, column, table or panel. "
+    "Use only handles and the Resolution number from the current gaze context.",
     {
-        "selector": {
-            "type": "string",
-            "description": "CSS selector of the target element to pin (e.g. '#btn-purge-cache' or '#campaigns-table').",
-        },
-        "label": {
-            "type": "string",
-            "description": "Short badge label for the pin (e.g. 'Purge Cache').",
-        },
-        "hud_message": {
-            "type": "string",
-            "description": "Concise explanation or HTML/SVG snippet to display in the bottom glassmorphic HUD.",
-        },
-        "extract_table": {
-            "type": "boolean",
-            "description": "If true and the target is a <table>, extract its rows as CSV/Markdown and render an inline SVG scatter plot.",
-        },
+        "handles": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 8,
+                    "description": "Current snapshot @ handles to highlight; never CSS selectors."},
+        "resolution_id": {"type": "integer", "description": "Resolution number in the current gaze context."},
+        "hud_message": {"type": "string", "description": "Optional plain text, never HTML; omit while answering a streamed turn."},
     },
-    required=["selector", "hud_message"],
+    required=["handles", "resolution_id"],
+)
+
+GAZE_CLICK_SCHEMA = _schema(
+    "gaze_click",
+    "Click one current snapshot control. Risky actions require a real confirmation click in Chrome; "
+    "you cannot confirm them through this tool. Clarify ambiguous action requests first.",
+    {
+        "handle": {"type": "string", "description": "Current @ handle of the control to activate, not the data subject."},
+        "resolution_id": {"type": "integer", "description": "Resolution number in the current gaze context."},
+    },
+    required=["handle", "resolution_id"],
 )
 
 GAZE_CALIBRATE_SCHEMA = _schema(
@@ -169,7 +169,10 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
         mode=str(args.get("mode") or session.tracker.mode or "hover"),
         record_voice=bool(args.get("record_voice", False)),
         duration_s=float(args.get("duration_s", 2.6)),
+        activate=not (args.get("record_voice") and str(args.get("mode") or session.tracker.mode) == "hover"),
     )
+    if args.get("record_voice") and str(args.get("mode") or session.tracker.mode) == "hover":
+        payload = service.submit_snapshot(payload)
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
@@ -183,64 +186,14 @@ def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
-    session = get_shared_session()
-    selector = str(args.get("selector") or "")
-    label = str(args.get("label") or selector)
-    hud_message = str(args.get("hud_message") or "")
-    extract_table = bool(args.get("extract_table", False))
+    result = get_shared_session().actions.highlight(
+        args.get("handles"), args.get("resolution_id"), str(args.get("hud_message") or ""))
+    return json.dumps(result, ensure_ascii=False)
 
-    table_csv = ""
-    svg_chart = ""
-    if session.is_chrome_reachable():
-        if extract_table:
-            raw_table = session.eval_js(
-                f"window.__HERMES_GAZE_OVERLAY__.extractTableData({json.dumps(selector)})",
-            )
-            if isinstance(raw_table, dict) and raw_table.get("rows"):
-                table_csv = extract_structured_data(raw_table, fmt="csv")
-                svg_chart = render_svg_scatter(
-                    raw_table.get("headers") or [],
-                    raw_table.get("rows") or [],
-                )
-        if hud_message.strip().startswith("<div"):
-            full_hud = hud_message + (f"<div>{svg_chart}</div>" if svg_chart else "")
-        else:
-            full_hud = (
-                f"<div style='font-size:13.5px;'><strong style='color:#38bdf8;'>🔍 {label}</strong></div>"
-                f"<div style='margin-top:6px;color:#f8fafc;font-size:12.5px;line-height:1.45;'>{hud_message}</div>"
-                + (f"<div style='margin-top:8px;'>{svg_chart}</div>" if svg_chart else "")
-                + f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;'>"
-                f"<span>Target: {selector}</span>"
-                f"</div>"
-            )
-        js = f"""
-        (() => {{
-          const el = document.querySelector({json.dumps(selector)});
-          const rect = el ? el.getBoundingClientRect() : {{left: 100, top: 100, width: 120, height: 36}};
-          const pin = [{{
-            selector: {json.dumps(selector)},
-            label: {json.dumps(label)},
-            rect_vp: [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)],
-            probability: 1.0
-          }}];
-          window.__HERMES_GAZE_OVERLAY__.renderPins(pin, {json.dumps(full_hud)});
-          return true;
-        }})()
-        """
-        session.eval_js(js)
 
-    return json.dumps(
-        {
-            "ok": True,
-            "selector": selector,
-            "label": label,
-            "chrome_connected": session.is_chrome_reachable(),
-            "extracted_csv": table_csv,
-            "rendered_svg_chart": bool(svg_chart),
-        },
-        indent=2,
-        ensure_ascii=False,
-    )
+def handle_gaze_click(args: dict[str, Any], **kwargs: Any) -> str:
+    result = get_shared_session().actions.click(args.get("handle"), args.get("resolution_id"))
+    return json.dumps(result, ensure_ascii=False)
 
 
 def handle_gaze_calibrate(args: Dict[str, Any], **kwargs: Any) -> str:
@@ -285,6 +238,7 @@ ALL_TOOLS = (
     ("gaze_resolve", GAZE_RESOLVE_SCHEMA, handle_gaze_resolve, "👁️"),
     ("gaze_choose", GAZE_CHOOSE_SCHEMA, handle_gaze_choose, "🎯"),
     ("gaze_highlight", GAZE_HIGHLIGHT_SCHEMA, handle_gaze_highlight, "✨"),
+    ("gaze_click", GAZE_CLICK_SCHEMA, handle_gaze_click, "🖱️"),
     ("gaze_calibrate", GAZE_CALIBRATE_SCHEMA, handle_gaze_calibrate, "🧭"),
     ("gaze_benchmark", GAZE_BENCHMARK_SCHEMA, handle_gaze_benchmark, "📊"),
 )

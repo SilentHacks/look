@@ -17,6 +17,7 @@ class GazeConfig:
     wiggle_trigger: bool = True
     hotkey: str = "AltRight"  # JS KeyboardEvent.code (e.g. "AltRight", "Backquote", "F8")
     whisper_model: str = "base.en"
+    record_trials: bool = False  # Development-only, potentially sensitive browsing evidence.
 
     @classmethod
     def from_ctx(cls, ctx: Any) -> "GazeConfig":
@@ -32,4 +33,5 @@ class GazeConfig:
             wiggle_trigger=bool(get("wiggle_trigger", cls.wiggle_trigger)),
             hotkey=str(get("hotkey", cls.hotkey) or cls.hotkey),
             whisper_model=str(get("whisper_model", cls.whisper_model) or cls.whisper_model),
+            record_trials=bool(get("record_trials", cls.record_trials)),
         )

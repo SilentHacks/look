@@ -298,7 +298,13 @@ class ParakeetCoreML:
 
 
 def download(model_id: str, patterns: List[str]) -> str:
-    """Fetch model files from the Hub, returning the local snapshot root."""
-    from huggingface_hub import snapshot_download  # noqa: PLC0415
+    """Fetch model files quietly; errors and warnings still reach the caller."""
+    from huggingface_hub import snapshot_download
+    from tqdm.auto import tqdm
 
-    return snapshot_download(model_id, allow_patterns=patterns)
+    class QuietProgress(tqdm):
+        def __init__(self, *args, **kwargs):
+            kwargs["disable"] = True
+            super().__init__(*args, **kwargs)
+
+    return snapshot_download(model_id, allow_patterns=patterns, tqdm_class=QuietProgress)
