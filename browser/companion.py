@@ -146,12 +146,28 @@ class Companion:
             "throw Error('Snapshot tab is not foreground'); return (" + expression + ");})()", timeout,
             context_id=context_id)
 
-    def foreground(self, target: str, document: str, route: int | None = None) -> bool:
+    def recording_loss(self, target: str, document: str) -> str | None:
+        """Only definite document/focus loss cancels capture; routes guard actions only."""
         with self._lock:
             tab = self._tabs.get(target)
-        return bool(tab and tab.is_connected and tab._context_unique_id == document
-                    and (route is None or tab._route_id == route) and tab.eval_js(
-                        "document.visibilityState === 'visible' && document.hasFocus()", timeout=.5))
+        if tab is None:
+            return "Recording cancelled: the source tab was closed."
+        if not tab.is_connected:
+            return None
+        if tab._context_unique_id != document:
+            return "Recording cancelled: the source document changed."
+        # No reconnect/retry into another document when checking recording ownership.
+        state = tab.eval_js_once(
+            "({hidden:document.visibilityState !== 'visible', focused:document.hasFocus()})",
+            timeout=.5, context_id=document)
+        if tab._context_unique_id != document:
+            return "Recording cancelled: the source document changed."
+        if isinstance(state, dict):
+            if state.get("hidden") is True:
+                return "Recording cancelled: the source tab is hidden."
+            if state.get("focused") is False:
+                return "Recording cancelled: the source tab lost focus."
+        return None
 
     def _display_pending(self, tab: CdpSession) -> None:
         event = self._inbox_event or tab.session_event

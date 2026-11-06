@@ -25,7 +25,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer for recall; evidence, actions and non-inbox replies retain captured ownership. |
 | `browser/overlay.js` | DOM collector and captured identities, vermilion proof geometry, source-attached Errata notes; private control tree stays detached and is mirrored through CDP. |
 | `browser/panel.js` | Errata renderer in a script-disabled, opaque-origin sandbox iframe; preserves private focus/scroll during streaming. Trusted events return only through its CDP context. |
-| `microphone.py` | Single-owner native capture; closes on release, cancellation, focus/document/route loss, device error, disconnect or the native 30-second deadline. |
+| `microphone.py` | Single-owner native capture; closes on release, cancellation, definite focus/document loss, device error, disconnect or the native 30-second deadline. Chrome checks cannot block the native deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`. Same purity rule. |
@@ -191,12 +191,19 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   highlight; it cannot transfer that highlight to the newly focused tab.
 - **Microphone capture stays outside website origins.** Native `sounddevice`
   owns the device only during talk; no browser grant, `getUserMedia`, pre-warmed
-  input stream or audio bytes in the page. Focus/document/route loss, device error
-  and a hard 30-second native deadline cancel and discard, never submit partial
-  speech. The watchdog checks every 100ms. A hostile site can suppress Space keyup:
-  capture may continue until that deadline; no Input Monitoring permission is
-  requested. The UI shows the cap and receives native cancellation notification.
-  Wait for Listening before speaking.
+  input stream or audio bytes in the page. Definite hidden/unfocused tab or full
+  document replacement, device error and a hard 30-second native deadline cancel
+  and discard, never submit partial speech. Slow/failed Chrome checks are unknown,
+  not loss; same-document URL/route changes never cancel recording. Route changes
+  still revoke action authority and confirmations. Evidence freezes at release with
+  that document's current route, before ASR. Cursor history already retains real
+  identities across scrolling and uses audio-relative word times shifted to wall time;
+  detached/virtualized-away nodes fail honestly, never selector-rematch.
+  The native watchdog checks every 100ms independently of Chrome reads and emits
+  `record_warning` with `seconds_remaining: 5` once, about five seconds before the cap.
+  A hostile site can suppress Space keyup: capture may continue until that deadline;
+  no Input Monitoring permission is requested. The UI shows the cap, remaining-time
+  warning and the actual cancellation reason. Wait for Listening before speaking.
 - **Recording is development-only.** `record_trials` defaults false; never write
   audio. Preserving an accepted injection takes precedence over recorder errors.
 

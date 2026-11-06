@@ -253,7 +253,7 @@
   hudInput.value = prevInputVal;
   let noteOpen = false, indexOpen = false, composeOpen = false, noteItem = "";
   let noteSide = 0, frameHeight = 1, cursorOverHud = false, collapseTimer = null;
-  let focusInput = false, micReady = false, localError = "";
+  let focusInput = false, micReady = false, micWarning = "", localError = "";
   const itemAnchors = new Map(), requestAnchors = new Map();
   let pendingAnchor = null;
   function control(action, itemId = "", requestId = "") {
@@ -976,7 +976,7 @@
     captureStatus.hidden = !isListening && !["recording","transcribing"].includes(inbox?.capture_state) && !disconnected;
     captureStatus.classList.toggle("pending", !micReady);
     captureStatus.classList.toggle("disconnected", disconnected && !isListening);
-    lockLabel.textContent = micReady ? "Listening" : disconnected ? "Disconnected" : "";
+    lockLabel.textContent = micReady ? micWarning || "Listening · 30s limit" : disconnected ? "Disconnected" : "";
     folio.textContent = item ? String(item.capture_order) : "";
     targetName.replaceChildren();
     targetName.textContent = item?.target_label || (composeOpen ? state.hoveredCandidate?.label : "") || "";
@@ -1049,7 +1049,7 @@
     const previous = inbox;
     inboxRevision = event.revision;
     inbox = event;
-    if (event.session_connected === false) cancelListening();
+    if (event.session_connected === false) cancelListening("Recording cancelled: disconnected from Hermes.");
     const newest = event.items.at(-1);
     if (newest && !previous?.items.some(i => i.item_id === newest.item_id)) {
       const status = newest.conversation.at(-1)?.status;
@@ -1077,7 +1077,6 @@
     clearActionConfirmation();
     state.lensActive = false;
     lensLayer.innerHTML = "";
-    cancelListening();
   }
   function onNavigation() {
     activeSnapshot = null;
@@ -1085,7 +1084,7 @@
     stopTrackingPins();
     pinsLayer.innerHTML = "";
     clearActionConfirmation();
-    cancelListening();
+    cancelListening("Recording cancelled: the source document changed.");
   }
   window.addEventListener("pagehide", onNavigation);
   function onCursorScroll() {
@@ -1259,6 +1258,13 @@
       return;
     }
 
+    if (msg.type === "record_warning") {
+      if (isListening) {
+        micWarning = `${msg.seconds_remaining} seconds left — release Space`;
+        renderNote();
+      }
+      return;
+    }
     if (msg.type === "record_start") {
       if (!msg.ok) {
         isListening = false;
@@ -1270,6 +1276,7 @@
       return;
     }
     if (msg.type === "record_cancel") {
+      if (msg.cancelled && !isListening) return; // Keep the local, specific cancellation reason.
       isListening = false;
       spaceHeld = false;
       resetMicUiIdle(msg.error || "Recording cancelled.");
@@ -1358,6 +1365,7 @@
 
   function resetMicUiIdle(error) {
     micReady = false;
+    micWarning = "";
     if (error) localError = error;
     renderNote();
   }
@@ -1390,12 +1398,12 @@
         candidates: extractCandidatesNear(x, y, state.candidateRadiusPx || 380) }) });
   }
 
-  function cancelListening() {
+  function cancelListening(reason = "Recording cancelled by you.") {
     if (!isListening) return;
     isListening = false;
     spaceHeld = false;
     _emit({ type: "record_cancel" });
-    resetMicUiIdle();
+    resetMicUiIdle(reason);
   }
 
   hudMic.addEventListener("click", (e) => {
@@ -1484,7 +1492,10 @@
   }
 
   function onWindowBlur() {
-    cancelListening();
+    if (document.visibilityState !== "visible")
+      cancelListening("Recording cancelled: the source tab is hidden.");
+    else if (!document.hasFocus())
+      cancelListening("Recording cancelled: the source tab lost focus.");
   }
 
   window.addEventListener("keydown", onWindowKeyDown, { capture: true });
@@ -1917,7 +1928,7 @@
     window.removeEventListener("scroll", onCursorScroll, true);
     window.visualViewport?.removeEventListener("resize", onUiResize);
     window.visualViewport?.removeEventListener("scroll", onUiResize);
-    cancelListening();
+    cancelListening("Recording cancelled: the browser companion stopped.");
     window.removeEventListener("mousemove", onWindowMouseMove, { passive: true });
     window.removeEventListener("keydown", onWindowKeyDown, { capture: true });
     window.removeEventListener("keyup", onWindowKeyUp, { capture: true });

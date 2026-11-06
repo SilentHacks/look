@@ -334,7 +334,7 @@ def record_microphone(
     from .browser.cdp_bridge import get_shared_session
 
     microphone = get_shared_session().microphone
-    result = microphone.start("tool", lambda: True, sample_rate=sample_rate)
+    result = microphone.start("tool", lambda: None, sample_rate=sample_rate)
     if not result["ok"]:
         raise RuntimeError(result["error"])
     try:

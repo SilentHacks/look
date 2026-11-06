@@ -19,14 +19,18 @@ class Microphone:
         self._error = ""
         self._generation = 0
 
-    def start(self, owner: str, foreground, sample_rate: int = 16000, on_cancel=None) -> dict:
+    def start(self, owner: str, check_loss, sample_rate: int = 16000, on_cancel=None, on_warning=None) -> dict:
         import sounddevice as sd
 
         with self._lock:
             if self._stream is not None:
                 return {"ok": False, "error": "Microphone is already in use"}
-            if not foreground():
-                return {"ok": False, "error": "Only the focused Chrome tab can record"}
+            try:
+                loss = check_loss()
+            except Exception:
+                return {"ok": False, "error": "Could not check the focused Chrome tab; try again"}
+            if loss:
+                return {"ok": False, "error": loss}
             self._audio = bytearray()
             self._error = ""
             self._epoch = 0.
@@ -55,27 +59,51 @@ class Microphone:
             self._generation += 1
             generation = self._generation
 
+        foreground_loss = ""
+
+        def check_foreground():
+            nonlocal foreground_loss
+            while True:
+                with self._lock:
+                    if self._stream is None or self._generation != generation:
+                        return
+                try:
+                    loss = check_loss()
+                except Exception:
+                    loss = None  # A slow/broken CDP read is unknown, not proof of loss.
+                with self._lock:
+                    if self._generation != generation or self._stream is None:
+                        return
+                    if loss:
+                        foreground_loss = loss
+                        return
+                time.sleep(.1)
+
         def watch():
-            # A page can suppress keyup. The native deadline does not depend on page events.
+            # Never wait for Chrome here: a stalled renderer cannot extend the native cap.
+            warned = False
             while True:
                 time.sleep(.1)
                 with self._lock:
                     if self._stream is None or self._generation != generation:
                         return
-                try:
-                    live = (time.monotonic() - started < self.MAX_RECORDING_SECONDS
-                            and not self._error and foreground())
-                except Exception:
-                    live = False
-                if not live:
-                    with self._lock:
-                        if self._generation != generation:
-                            return
+                    remaining = self.MAX_RECORDING_SECONDS - (time.monotonic() - started)
+                    reason = (f"Recording cancelled: {self.MAX_RECORDING_SECONDS:g}-second limit reached."
+                              if remaining <= 0 else
+                              f"Recording cancelled: microphone error ({self._error})." if self._error else
+                              foreground_loss)
+                    if reason:
                         self.cancel(owner)
+                if reason:
                     if on_cancel:
-                        on_cancel("Recording cancelled: focus/page changed, device failed, or 30s limit reached.")
+                        on_cancel(reason)
                     return
+                if remaining <= 5 and not warned:
+                    warned = True
+                    if on_warning:
+                        on_warning(5)
 
+        threading.Thread(target=check_foreground, name="hermes-gaze-mic-focus", daemon=True).start()
         threading.Thread(target=watch, name="hermes-gaze-mic", daemon=True).start()
         return {"ok": True, "ready_ms": round((time.monotonic() - started) * 1000)}
 

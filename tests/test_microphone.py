@@ -33,10 +33,10 @@ class CaptureTests(unittest.TestCase):
         mic = Microphone()
         self.addCleanup(mic.cancel)
         with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=Input)):
-            self.assertFalse(mic.start("background", lambda: False)["ok"])
+            self.assertFalse(mic.start("background", lambda: "Recording cancelled: the source tab is hidden.")["ok"])
             self.assertEqual(streams, [])
-            self.assertTrue(mic.start("tab-A", lambda: True)["ok"])
-            self.assertFalse(mic.start("tab-B", lambda: True)["ok"])
+            self.assertTrue(mic.start("tab-A", lambda: None)["ok"])
+            self.assertFalse(mic.start("tab-B", lambda: None)["ok"])
             with self.assertRaises(RuntimeError):
                 mic.stop("tab-B")
             self.assertFalse(streams[0].closed)
@@ -44,14 +44,14 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual(audio, b"\x01\x00\x02\x00")
             self.assertTrue(streams[0].closed)
             self.assertGreater(epoch, 0)
-            self.assertTrue(mic.start("tab-B", lambda: True)["ok"])
+            self.assertTrue(mic.start("tab-B", lambda: None)["ok"])
             mic.cancel("tab-A")
             self.assertFalse(streams[1].closed)
             mic.cancel("tab-B")
             self.assertTrue(streams[1].closed)
             with self.assertRaises(RuntimeError):
                 mic.stop("tab-B")
-            self.assertTrue(mic.start("tab-C", lambda: True)["ok"])
+            self.assertTrue(mic.start("tab-C", lambda: None)["ok"])
 
             def device_lost():
                 raise RuntimeError("device lost")

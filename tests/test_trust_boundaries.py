@@ -82,7 +82,7 @@ class TrustBoundaries(unittest.TestCase):
         mic.MAX_RECORDING_SECONDS = .02
         self.addCleanup(mic.cancel)
         with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=Input)):
-            self.assertTrue(mic.start('A', lambda: True, on_cancel=lambda _: cancelled.set())['ok'])
+            self.assertTrue(mic.start('A', lambda: None, on_cancel=lambda _: cancelled.set())['ok'])
             self.assertTrue(closed.wait(1))
             self.assertTrue(cancelled.wait(1))
             self.assertEqual(mic._audio, bytearray())
