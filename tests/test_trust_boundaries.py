@@ -116,10 +116,22 @@ class TrustBoundaries(unittest.TestCase):
         self.assertEqual(replies[0]['explanation'], 'Preferences opens the settings panel.')
         self.assertTrue(any('Open preferences' in value['text'] for value in inputs))
 
-    def test_urls_drop_all_capabilities_and_reject_malformed_authorities(self):
+    def test_urls_keep_destinations_but_remove_capabilities(self):
         self.assertEqual(safe_url('https://alice:password@example.invalid/reset?access_token=SECRET#KEY'),
                          'https://example.invalid/reset')
         self.assertEqual(safe_url('https://[::1]/path?code=SECRET'), 'https://[::1]/path')
+        self.assertEqual(safe_url('https://youtube.com/watch?v=abc'), 'https://youtube.com/watch?v=abc')
+        self.assertEqual(safe_url('https://shop.invalid/product?id=123&sort=price&tag=a&tag=b'),
+                         'https://shop.invalid/product?id=123&sort=price&tag=a&tag=b')
+        self.assertEqual(safe_url('https://shop.invalid/?search=ordinary+search+phrase&empty='),
+                         'https://shop.invalid/?search=ordinary+search+phrase&empty=')
+        for name in ('token', 'api_key', 'clientSecret', 'password', 'auth', 'session',
+                     'signature', 'code', 'csrf', 'accessToken', 'X-Amz-Signature'):
+            self.assertEqual(safe_url(f'https://shop.invalid/?id=123&{name}=hidden'),
+                             'https://shop.invalid/?id=123')
+        self.assertEqual(safe_url('https://shop.invalid/?id=123&data=0123456789abcdef0123456789abcdef'),
+                         'https://shop.invalid/?id=123')
+        self.assertEqual(safe_url('https://shop.invalid/?' + '&'.join('x=1' for _ in range(129))), '')
         for value in ('javascript:alert(1)', 'https://[broken/path', 'https://example.invalid/\nSECRET',
                       'https://example.invalid\\@evil.invalid/'):
             self.assertEqual(safe_url(value), '')

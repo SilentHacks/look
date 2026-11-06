@@ -263,6 +263,7 @@ class VoiceTurnsTests(unittest.TestCase):
             values[1], values[-1] = price, last
             data['blocks'][0]['rows'] = [{'id': '@r1', 'index': 1, 'cells': values}]
             data['targets'][0]['cell']['value'] = price
+            data['targets'][0]['surface'] = 'Covered by consent gate ' + price
             return cursor_result(data, 'this', [{'word': 'this', 'start': 11}])
         self.turns.submit('first', wide('£111.19', '£901.42'))
         second = self.turns.submit('second', wide('£222.37', '£902.43'))
@@ -272,6 +273,8 @@ class VoiceTurnsTests(unittest.TestCase):
         context = self.pre('compare')['context']
         for value in ('£111.19', '£222.37', '£901.42', '£902.43'):
             self.assertIn(value, context)
+        for price in ('£111.19', '£222.37'):
+            self.assertIn('Covered by consent gate ' + price, context)
         self.assertLessEqual(len(context), 6000)
         stamp_resolution(context, 999)
 

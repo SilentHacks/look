@@ -122,19 +122,19 @@ assert.ok(!api.safeLabel(label).includes('secret-label-attribute'));
 
 test('deal links resolve absolutely without schemes, sensitive labels or unbounded link lists', () => {
   const pointed = element('span', [text('£25 deal')]);
-  const link = element('a', [pointed], { href: 'https://alice:SECRET@demo.invalid/deals/pointed?access_token=TOKEN#FRAGMENT' });
+  const link = element('a', [pointed], { href: 'https://alice:SECRET@demo.invalid/deals/pointed?id=123&access_token=TOKEN&clientSecret=HIDDEN&data=0123456789abcdef0123456789abcdef#FRAGMENT' });
   const secret = element('label', [element('a', [text('secret')], { href: '/SECRET' })], { for: 'password' });
   const card = element('article', [link, secret,
     element('a', [text('bad')], { href: 'javascript:alert(1)' }),
     element('a', [text('mail')], { href: 'mailto:owner@example.com' }),
-    element('a', [text('peer')], { href: 'https://merchant.invalid/product' })]);
+    element('a', [text('peer')], { href: 'https://youtube.com/watch?v=abc' })]);
   api.rememberHit(pointed, 2);
   const evidence = api.captureCursorContext();
   const target = evidence.targets.find(t => t.id === evidence.history.at(-1).id);
-  assert.deepEqual(Array.from(target.urls), ['https://demo.invalid/deals/pointed']);
+  assert.deepEqual(Array.from(target.urls), ['https://demo.invalid/deals/pointed?id=123']);
   const block = evidence.blocks.find(b => b.kind === 'article');
-  assert.deepEqual(Array.from(block.urls), ['https://demo.invalid/deals/pointed', 'https://merchant.invalid/product']);
-  for (const secret of ['SECRET', 'TOKEN', 'FRAGMENT']) assert.ok(!JSON.stringify(evidence).includes(secret));
+  assert.deepEqual(Array.from(block.urls), ['https://demo.invalid/deals/pointed?id=123', 'https://youtube.com/watch?v=abc']);
+  for (const secret of ['SECRET', 'TOKEN', 'HIDDEN', '0123456789abcdef', 'FRAGMENT']) assert.ok(!JSON.stringify(evidence).includes(secret));
   assert.ok(!JSON.stringify(evidence).includes('/SECRET'));
   assert.ok(!JSON.stringify(evidence).includes('javascript:'));
 });
@@ -641,6 +641,7 @@ test('routing retains live evidence and streams; pagehide revokes evidence, not 
 
 test('disconnected voice shows the one-shot answer instead of silently queuing', () => {
   context.hudInput = { value: '' };
+  context.isListening = false;
   context.resetMicUiIdle = message => { lockLabel.textContent = message; };
   context.renderScopeOptions = () => {};
   context.onIntentResult({ type: 'record_stop', ok: true, delivery: 'one_shot',

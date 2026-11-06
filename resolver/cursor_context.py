@@ -5,19 +5,34 @@ import html
 import json
 import math
 import re
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .temporal_aligner import ALL_DEICTICS, extract_deictic_anchors
 
+_SECRET_PARAM = re.compile(
+    r"(?:^|[^a-z0-9])(?:token|key|secret|password|passwd|pwd|auth|authorization|"
+    r"session|sessionid|signature|sig|code|credential|credentials|jwt|bearer|nonce|"
+    r"csrf|xsrf|apikey|accesstoken)(?:$|[^a-z0-9])", re.I)
+
+
+def secret_query(name, value):
+    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    # ponytail: conservative opaque-value heuristic; tune only against real link failures.
+    return bool(_SECRET_PARAM.search(name) or
+                len(value) >= 32 and len(set(value)) >= 16 and not re.search(r"\s", value))
+
+
 def safe_url(value):
-    """Retain a destination, never URL credentials, query capabilities or fragments."""
-    if not isinstance(value, str) or re.search(r"[\s\\\x00-\x1f\x7f]", value):
+    """Keep usable HTTP(S) links, excluding credentials, fragments and likely secrets."""
+    if not isinstance(value, str) or len(value) > 8192 or re.search(r"[\s\\\x00-\x1f\x7f]", value):
         return ""
     try:
         url = urlsplit(value)
         if url.scheme not in ("http", "https") or not url.hostname:
             return ""
-        clean = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
+        query = urlencode([(key, val) for key, val in parse_qsl(
+            url.query, keep_blank_values=True, max_num_fields=128) if not secret_query(key, val)])
+        clean = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, query, ""))
         return clean if len(clean) <= 600 else ""
     except ValueError:
         return ""

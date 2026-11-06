@@ -164,6 +164,9 @@ class Companion:
                     and document == getattr(tab, "_displayed_document", None))):
             return
         try:
+            if inbox and not tab.eval_js(
+                    "document.visibilityState === 'visible' && document.hasFocus()", timeout=.5):
+                return
             delivered = tab.eval_js_once(
                 "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
                 "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");return true})()",
@@ -179,7 +182,10 @@ class Companion:
         with self._lock:
             if event.get("type") == "inbox":
                 self._inbox_event = dict(event)
-                tabs = list(self._tabs.values())
+                try:
+                    tabs = [self._target()]
+                except ConnectionError:
+                    tabs = []
             else:
                 tab = self._tabs.get(event.get("browser_target"))
                 tabs = [tab] if tab is not None else []

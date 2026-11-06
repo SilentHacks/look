@@ -22,7 +22,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
-| `browser/companion.py` | Discovers supported tabs, follows foreground focus, routes evidence/mutations/replies to their captured tab and document. Background replies wait in Python. |
+| `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer for recall; evidence, actions and non-inbox replies retain captured ownership. |
 | `browser/overlay.js` | DOM collector, exact snapshot identities and live highlight geometry; detached private control tree mirrored through CDP. |
 | `browser/panel.js` | Private renderer in a script-disabled, opaque-origin sandbox iframe. Trusted UI events return only through its CDP context, never page messaging. |
 | `microphone.py` | Single-owner native capture; closes on release, cancellation, focus/document/route loss, device error, disconnect or the native 30-second deadline. |
@@ -121,9 +121,12 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   associated labels. Freeze mode-appropriate evidence at recording stop, before
   ASR: cursor identities in hover, candidates/pointer/fixations in simulated mode.
   Evidence URLs are HTTP(S), at most three per item and 600 characters each.
-  Strip credentials, all query parameters and fragments before wire serialization
-  and again before model serialization; never guess which query values are secrets.
+  Strip credentials and fragments always; retain ordinary query parameters but
+  exclude secret-named parameters and long opaque values, bounded to 128 fields
+  and 8192 input characters. Apply this before wire and again before model serialization.
   Pointed facts/URLs precede peer URLs in the shared 6000-character fenced packet.
+  Covered-frame/modal surface warnings join the saved essential facts, so follow-ups
+  and comparisons cannot lose them to optional neighbours/history under the budget.
 - **No selector rematching for history or actions.** Short `@` handles refer to
   captured DOM identities/column members. Highlight/click require the current
   epoch; changed, detached or expired targets fail honestly.

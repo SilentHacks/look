@@ -164,26 +164,44 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             page(a, 'document.body.tabIndex=-1;document.body.focus()')
             print('PASS 1: page cannot reach UI/API/binding; synthetic Ask rejected; no host injection')
 
-            event = dict(sequence=100, request_id='private-A', resolution_id=100, status='complete',
-                         text='PRIVATE_A_PAYROLL_7391', browser_target=a._target_id, browser_document=a._context_unique_id)
+            def inbox_event(revision, text):
+                return dict(type='inbox', version=1, revision=revision, session_connected=True,
+                    capture_state='idle', paused=False, selected_item_id='private-A',
+                    items=[dict(item_id='private-A', capture_order=1, target_label='PRIVATE_ITEM_LABEL',
+                        source_url='https://example.invalid/', action_state='expired', unread=True,
+                        conversation=[dict(request_id='private-request', utterance='PRIVATE_QUESTION',
+                            status='complete', text=text, error='', queue_position=0)])])
+            event = inbox_event(100, 'PRIVATE_A_PAYROLL_7391')
             session.display_session_event(event)
-            until(lambda: node(a, '#hg-reply', 'return this.textContent') == event['text'])
+            until(lambda: event['items'][0]['conversation'][0]['text'] in (node(a, '#hg-reply', 'return this.textContent') or ''))
             assert b.session_event is None
             assert 'PRIVATE_A_PAYROLL_7391' not in (node(b, '#hg-reply', 'return this.textContent') or '')
             command(a, 'Emulation.setFocusEmulationEnabled', {'enabled': False})
             command(b, 'Page.bringToFront', {})
             command(b, 'Emulation.setFocusEmulationEnabled', {'enabled': True})
-            waiting = {**event, 'sequence': 101, 'resolution_id': 101, 'text': 'PRIVATE_A_WAITING'}
+            waiting = inbox_event(101, 'PRIVATE_UNREAD_ANSWER')
             session.display_session_event(waiting)
-            assert node(a, '#hg-reply', 'return this.textContent') == event['text']
-            assert b.session_event is None
+            until(lambda: 'PRIVATE_UNREAD_ANSWER' in (node(b, '#hg-reply', 'return this.textContent') or ''))
+            assert 'PRIVATE_UNREAD_ANSWER' not in (node(a, '#hg-reply', 'return this.textContent') or '')
+            for tab in (a, b):
+                # Main-world probes: serialization, text, selection, frames and open shadows.
+                public = page(tab, '''const seen=[];function walk(root){
+                    if(!root)return;seen.push(root.textContent,root.innerHTML);
+                    for(const n of root.querySelectorAll("*")){
+                        if(n.shadowRoot)walk(n.shadowRoot);
+                        if(n.tagName==="IFRAME"){try{walk(n.contentDocument)}catch(e){}}
+                    }}walk(document.documentElement);seen.push(String(getSelection()));
+                    return JSON.stringify(seen);''')
+                for marker in ('PRIVATE_ITEM_LABEL', 'PRIVATE_QUESTION', 'PRIVATE_A_PAYROLL_7391',
+                               'PRIVATE_UNREAD_ANSWER', '1 unread'):
+                    assert marker not in public, marker
             command(b, 'Emulation.setFocusEmulationEnabled', {'enabled': False})
             command(a, 'Page.bringToFront', {})
             command(a, 'Emulation.setFocusEmulationEnabled', {'enabled': True})
-            until(lambda: node(a, '#hg-reply', 'return this.textContent') == waiting['text'])
+            until(lambda: 'PRIVATE_UNREAD_ANSWER' in (node(a, '#hg-reply', 'return this.textContent') or ''))
             node(a, '#hg-reply', 'const r=document.createRange();r.selectNodeContents(this);getSelection().removeAllRanges();getSelection().addRange(r);return true')
-            assert 'PRIVATE_A_PAYROLL_7391' not in page(a, 'return String(getSelection())')
-            print('PASS 2: only source receives reply; background receives nothing; parent selection cannot read reply')
+            assert 'PRIVATE_UNREAD_ANSWER' not in page(a, 'return String(getSelection())')
+            print('PASS 2: focused-only protected inbox recall; hostile pages cannot read item, answer or unread text')
 
             aim(a, '#secret')
             data = capture(a)
@@ -191,7 +209,7 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             for secret in ('alice', 'password', 'VERY_SECRET', 'private_key'):
                 assert secret not in json.dumps(data) and secret not in packet
             assert 'https://example.invalid/export' in packet
-            print('PASS 6: URL credentials, all query parameters and fragments absent from wire and model context')
+            print('PASS 6: URL credentials, secret query parameters and fragments absent from wire and model context')
 
             aim(a, '#danger')
             data = capture(a)

@@ -656,6 +656,12 @@
       return "[redacted]";
     return (el.getAttribute("aria-label") || el.getAttribute("title") || safeText(el, max, excluded)).slice(0, max);
   }
+  function secretQuery(name, value) {
+    name = name.replace(/([a-z0-9])([A-Z])/g, "$1_$2");
+    // ponytail: same bounded conservative opaque-value heuristic as Python's serializer.
+    return /(?:^|[^a-z0-9])(?:token|key|secret|password|passwd|pwd|auth|authorization|session|sessionid|signature|sig|code|credential|credentials|jwt|bearer|nonce|csrf|xsrf|apikey|accesstoken)(?:$|[^a-z0-9])/i.test(name) ||
+      value.length >= 32 && new Set(value).size >= 16 && !/\s/.test(value);
+  }
   function safeLinks(el) {
     const links = [];
     const candidates = [el.closest("a[href]"), ...el.querySelectorAll("a[href]")];
@@ -671,10 +677,16 @@
       }
       if (excluded || !rendered(link)) continue;
       try {
-        const url = new URL(link.getAttribute("href"), document.baseURI || location.href);
+        const href = link.getAttribute("href");
+        if (href.length > 8192) continue;
+        const url = new URL(href, document.baseURI || location.href);
         url.username = "";
         url.password = "";
+        const params = Array.from(url.searchParams);
+        if (params.length > 128) continue;
         url.search = "";
+        for (const [name, value] of params)
+          if (!secretQuery(name, value)) url.searchParams.append(name, value);
         url.hash = "";
         if (["http:", "https:"].includes(url.protocol) && url.href.length <= 600 && !links.includes(url.href))
           links.push(url.href);
@@ -1368,7 +1380,7 @@
       return;
     }
     if (msg.type === "record_stop") {
-      if (!isListening) resetMicUiIdle(msg.ok ? "queued" : msg.error || "Recording failed.");
+      if (!isListening) resetMicUiIdle(msg.ok ? (msg.delivery === "one_shot" ? "complete" : "queued") : msg.error || "Recording failed.");
       if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         showPlainMessage(`${msg.message || "Read-only one-shot fallback"}\n${msg.explanation || ""}`);
