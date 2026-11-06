@@ -10,6 +10,7 @@ from hermes_gaze.resolver.cursor_context import build_context
 
 class BrowserActions:
     """Model live identities/epochs and record only actions actually accepted by Chrome."""
+    is_connected = False
     def __init__(self):
         self.nodes = {
             "@export": {"handle": "@export", "label": "Export CSV", "kind": "control", "tag": "button",
@@ -28,7 +29,7 @@ class BrowserActions:
         self.fail_click = False
         self.lose_click_reply = False
 
-    def eval_js_once(self, expression, timeout=6):
+    def eval_js_once(self, expression, timeout=6, *, target=None, document=None):
         call = expression.split("window.__HERMES_GAZE_OVERLAY__.", 1)[1]
         method, args = call.split("(", 1)
         args = json.loads("[" + args.rsplit(")", 1)[0] + "]")
@@ -226,7 +227,7 @@ class TestSnapshotActions(unittest.TestCase):
     def test_cdp_once_does_not_route_through_reconnect(self):
         cdp = CdpSession()
         calls = []
-        async def execute(expression, timeout):
+        async def execute(expression, timeout, context_id=None):
             calls.append(expression)
             raise ConnectionError("reply lost")
         cdp._eval_coro = execute

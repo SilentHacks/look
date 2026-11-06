@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from urllib.parse import urlparse
 
 from . import service
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
@@ -22,17 +23,32 @@ def _handle_slash_command(raw_args: str) -> str:
     sub = argv[0].lower() if argv else "status"
     session = get_shared_session()
 
+    if sub == "start":
+        if not session.is_chrome_reachable():
+            port = urlparse(session.cdp_http_url).port or 9222
+            launch_chrome_with_cdp("about:blank", port=port)
+            for _ in range(40):
+                if session.is_chrome_reachable():
+                    break
+                time.sleep(.25)
+        ready = session.ensure_overlay()
+        if not ready and session.is_chrome_reachable():
+            try:
+                session.cdp.open_blank()
+                ready = session.ensure_overlay()
+            except OSError:
+                pass
+        return ("Chrome companion ready. Hold Space; wait for Listening, then speak."
+                if ready else "Chrome companion could not attach to a supported page.")
+
     if sub == "demo":
         cfg = _config()
         server = get_shared_server()
         server.start()
         url = f"http://{server.host}:{server.port}/"
-        if not session.is_chrome_reachable() or not session.is_mic_capture_working():
-            try:
-                session.eval_js("window.close();")
-            except Exception:
-                pass
-            launch_chrome_with_cdp(url)
+        if not session.is_chrome_reachable():
+            port = urlparse(session.cdp_http_url).port or 9222
+            launch_chrome_with_cdp(url, port=port)
             for _ in range(20):
                 if session.is_chrome_reachable():
                     break

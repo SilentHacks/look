@@ -96,12 +96,14 @@ const hudReply = element('div');
 const lockLabel = element('div');
 const tuckSummary = element('div');
 const context = vm.createContext({ document, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
-  window: { addEventListener() {}, innerWidth: 1200, innerHeight: 800 },
+  window: { listeners: {}, innerWidth: 1200, innerHeight: 800,
+    addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
+    dispatchEvent(event) { for (const handler of this.listeners[event.type] || []) handler(event); } },
   getComputedStyle: node => ({ display: node.style.display || 'block' }),
   location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
   shadow, hudReply, lockLabel, tuckSummary, renderPins: candidates => rendered.push(candidates),
-  _emit: intent => intents.push(intent), releaseAudioStream() {} });
+  _emit: intent => intents.push(intent), cancelListening() {} });
 const start = source.indexOf('  const cursorIds =');
 const end = source.indexOf('  function updateLiveInspector', start);
 vm.runInContext(source.slice(start, end) + '\nthis.collect = { safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent };', context);
@@ -464,4 +466,24 @@ test('confirmation replies display outcomes without overwriting newer evidence',
   }
   context.onIntentResult({ type: 'confirm_action', resolution_id: resolution_id - 1, ok: true, executed: true });
   assert.equal(lockLabel.textContent, 'unknown outcome');
+});
+
+test('routing retains live evidence and streams; pagehide revokes evidence, not the answer', () => {
+  const node = element('button', [text('Read more')]);
+  api.rememberHit(node, 16);
+  const snapshot = api.captureCursorContext();
+  const handle = snapshot.history.at(-1).id;
+  assert.equal(api.activateSnapshot(snapshot.snapshot_id, 12).ok, true);
+  api.onSessionEvent({ sequence: 3, request_id: 'routing', resolution_id: 12,
+    status: 'thinking', text: 'before routing' });
+  for (const type of ['hashchange', 'popstate']) context.window.dispatchEvent({ type });
+  api.onSessionEvent({ sequence: 3, request_id: 'routing', resolution_id: 12,
+    status: 'thinking', text: 'after routing' });
+  assert.equal(hudReply.textContent, 'after routing');
+  assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, true);
+  context.window.dispatchEvent({ type: 'pagehide' });
+  assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, false);
+  api.onSessionEvent({ sequence: 3, request_id: 'routing', resolution_id: 12,
+    status: 'thinking', text: 'answer after departure' });
+  assert.equal(hudReply.textContent, 'answer after departure');
 });

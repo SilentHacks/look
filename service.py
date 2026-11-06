@@ -186,6 +186,9 @@ def resolve_now(
     if mode == "hover":
         capture = pushed.get("cursor_context") if pushed is not None else session.fetch_cursor_context()
         payload = cursor_result(capture, utterance, word_timestamps, time.time())
+        if isinstance(capture, dict) and capture.get("browser_target"):
+            payload["browser_target"] = capture["browser_target"]
+            payload["browser_document"] = capture.get("browser_document")
         payload["utterance"] = utterance
         payload["chrome_connected"] = session.is_chrome_reachable()
         if not activate:
@@ -380,7 +383,39 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
         return
     itype = str(intent.get("type") or "")
     try:
+        if itype in ("record_start", "record_stop", "record_cancel"):
+            from . import voice as _voice
+
+            target = intent.get("_browser_target")
+            document = intent.get("_browser_document")
+            if not target or not document:
+                reply({"ok": False, "error": "Recording requires an owned Chrome document"})
+                return
+            owner = f"{target}:{document}"
+            if itype == "record_start":
+                reply(session.microphone.start(owner, lambda: session.cdp.foreground(target, document)))
+            elif itype == "record_cancel":
+                session.microphone.cancel(owner)
+                reply({"ok": True, "cancelled": True})
+            else:
+                audio, epoch = session.microphone.stop(owner)
+                capture = intent.get("cursor_context")
+                if not isinstance(capture, dict):
+                    reply({"ok": False, "error": "Recording has no cursor capture"})
+                    return
+                capture["browser_target"] = target
+                capture["browser_document"] = document
+                text, words = _voice.transcribe_audio_buffer(
+                    audio, model_name=_whisper_model_name(), audio_epoch=epoch)
+                snapshot = resolve_now(session, utterance=text, words=words,
+                                       pushed={"cursor_context": capture}, activate=False)
+                reply({**submit_snapshot(snapshot), "text": text})
+            return
         if itype == "submit":
+            capture = intent.get("cursor_context")
+            if isinstance(capture, dict) and intent.get("_browser_target"):
+                capture["browser_target"] = intent["_browser_target"]
+                capture["browser_document"] = intent.get("_browser_document")
             snapshot = resolve_now(session, utterance=str(intent.get("utterance") or ""),
                                    words=intent.get("words"),
                                    pushed={"cursor_context": intent.get("cursor_context")}, activate=False)

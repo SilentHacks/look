@@ -45,7 +45,6 @@
     pointerX: prevState && typeof prevState.pointerX === "number" ? prevState.pointerX : null,
     pointerY: prevState && typeof prevState.pointerY === "number" ? prevState.pointerY : null,
     choosePending: false,
-    recordStartEpoch: 0, // Date.now()/1000 when the current mic recording began (word timestamps are audio-relative)
     lockedX: null,
     lockedY: null,
     ringBuffer: prevState && Array.isArray(prevState.ringBuffer) ? prevState.ringBuffer.slice(-250) : [], // {x_vp, y_vp, x_doc, y_doc, t, sigma}
@@ -492,7 +491,6 @@
   const cursorHistory = [];
   let cursorSerial = 0;
   let lockedNode = null;
-  const speechCaptures = new Map();
   const snapshots = new Map();
   const snapshotInstance = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
   let snapshotSerial = 0;
@@ -983,13 +981,9 @@
     activeSnapshot = null;
     snapshots.clear();
     clearActionConfirmation();
-    sessionFinished = true;
-    releaseAudioStream();
+    cancelListening();
   }
   window.addEventListener("pagehide", onNavigation);
-  window.addEventListener("popstate", onNavigation);
-  window.addEventListener("hashchange", onNavigation);
-  window.navigation?.addEventListener("navigate", onNavigation);
   function onCursorScroll() {
     if (!state.armed && !cursorOverHud && typeof state.pointerX === "number")
       rememberHit(hitNode(state.pointerX, state.pointerY));
@@ -1087,14 +1081,12 @@
   // --- Resolver Intent Channel (the Python session resolves, explains, transcribes & clicks) ---
   let _intentSeq = 0;
   let _lastSentResolveId = 0;
-  let _lastTranscribeId = 0;
   let _pendingUtterance = "";
   let _pendingExplainFallback = "";
   let _pendingExplainRid = 0;
   // Session nonce set via setIntentNonce() after Python (re)injects us. Stays in closure —
   // page scripts can call the binding but cannot read this value, so they cannot forge intents.
   let _intentNonce = "";
-  const _transcribeTimers = new Map();
 
   function _emit(intent) {
     intent.id = ++_intentSeq;
@@ -1157,29 +1149,6 @@
     });
   }
 
-  function emitTranscribe(audioBase64, mimeType, capture, audioEpoch) {
-    const intent = {
-      type: "transcribe",
-      audio_base64: audioBase64,
-      mime_type: mimeType || "audio/webm",
-      sample_rate: 16000,
-      // wall-clock recording start — Python shifts audio-relative whisper timestamps by this
-      audio_epoch: audioEpoch,
-    };
-    if (!_emit(intent)) {
-      resetMicUiIdle("⚠️ Resolver offline (session not connected).");
-      return false;
-    }
-    const timerId = setTimeout(() => {
-      _transcribeTimers.delete(intent.id);
-      speechCaptures.delete(intent.id);
-      resetMicUiIdle("❌ Transcription timed out — resolver did not respond.");
-    }, 90000); // generous: first-run whisper model download can take tens of seconds
-    _transcribeTimers.set(intent.id, timerId);
-    _lastTranscribeId = intent.id;
-    speechCaptures.set(intent.id, { capture, resolveId: _lastSentResolveId });
-    return true;
-  }
 
   function escapeHtml(value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
@@ -1201,6 +1170,22 @@
     }
     if (!msg || typeof msg !== "object") return;
 
+    if (msg.type === "record_start") {
+      if (!msg.ok) {
+        isListening = false;
+        resetMicUiIdle(msg.error || "Microphone unavailable.");
+      } else if (isListening) {
+        hudMic.textContent = "Stop";
+        hudInput.placeholder = "Listening…";
+        lockLabel.textContent = `Listening · release Space to send (${msg.ready_ms}ms startup)`;
+      }
+      return;
+    }
+    if (msg.type === "record_stop") {
+      resetMicUiIdle(msg.ok ? "queued" : msg.error || "Recording failed.");
+      if (msg.text) hudInput.value = String(msg.text);
+      return;
+    }
     if (msg.type === "confirm_action") {
       if (msg.resolution_id !== state.resolutionId) return;
       const outcome = msg.outcome === "unknown" ? "unknown outcome" : !msg.ok ? "failed" :
@@ -1210,31 +1195,6 @@
       return;
     }
 
-    if (msg.type === "transcribe") {
-      const pendingTimer = _transcribeTimers.get(msg.id);
-      const frozen = speechCaptures.get(msg.id);
-      speechCaptures.delete(msg.id);
-      if (pendingTimer) {
-        clearTimeout(pendingTimer);
-        _transcribeTimers.delete(msg.id);
-      }
-      if (!frozen || frozen.resolveId !== _lastSentResolveId || msg.id !== _lastTranscribeId || isListening) return;
-      if (!isListening) {
-        resetMicUiIdle();
-      }
-      if (msg.ok && msg.text && String(msg.text).trim()) {
-        const spoken = String(msg.text).trim();
-        hudInput.value = spoken;
-        hudInput.dispatchEvent(new Event("input", { bubbles: true }));
-        lockLabel.textContent = `🗣️ Heard: "${spoken}"${msg.backend ? ` (${msg.backend})` : ""}`;
-        emitResolve(spoken, msg.words, frozen.capture);
-      } else {
-        lockLabel.textContent = msg.error
-          ? `❌ ${msg.error}`
-          : "⚠️ No speech detected in audio. Please speak clearly while holding Spacebar.";
-      }
-      return;
-    }
 
 
     if (msg.type === "submit") {
@@ -1336,199 +1296,52 @@
   }
 
   const DEFAULT_PLACEHOLDER = "Ask about this…";
+  const TALK_KEY = "Space";
   const hudMic = hud.querySelector("#hg-mic-btn");
   let isListening = false;
-  let mediaRecorder = null;
-  let activeMediaStream = null;
-  let streamAcquirePromise = null;
-  let audioChunks = [];
   let spaceHeld = false;
-  let recordingStartedAt = 0;
-  let stopDelayTimer = null;
-
-  function hasLiveAudioStream(stream) {
-    if (!stream || !stream.active) return false;
-    const tracks = stream.getAudioTracks();
-    return tracks.length > 0 && tracks.every((t) => t.readyState === "live" && t.enabled);
-  }
-
-  function releaseAudioStream() {
-    if (activeMediaStream) {
-      try {
-        activeMediaStream.getTracks().forEach((t) => t.stop());
-      } catch (_) {}
-      activeMediaStream = null;
-    }
-    streamAcquirePromise = null;
-  }
-
-  async function ensureAudioStream() {
-    if (hasLiveAudioStream(activeMediaStream)) {
-      return activeMediaStream;
-    }
-    if (streamAcquirePromise) {
-      return streamAcquirePromise;
-    }
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error("Browser does not support mediaDevices audio capture.");
-    }
-    streamAcquirePromise = Promise.race([
-      navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      }),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Microphone access timed out (check macOS Microphone permission for Chrome)")),
-          2500
-        )
-      ),
-    ]);
-    try {
-      const stream = await streamAcquirePromise;
-      activeMediaStream = stream;
-      return stream;
-    } finally {
-      streamAcquirePromise = null;
-    }
-  }
-
-  // Pre-warm microphone stream quietly so the first Spacebar press has 0ms startup delay
-  setTimeout(() => {
-    ensureAudioStream().catch(() => {});
-  }, 150);
 
   function resetMicUiIdle(statusMessage) {
     hudMic.classList.remove("listening");
     hudMic.textContent = "Speak";
     hudInput.placeholder = DEFAULT_PLACEHOLDER;
-    if (statusMessage) {
-      lockLabel.textContent = statusMessage;
-    }
+    if (statusMessage) lockLabel.textContent = statusMessage;
   }
 
-  async function startListening() {
-    if (isListening) return;
-    if (stopDelayTimer) {
-      clearTimeout(stopDelayTimer);
-      stopDelayTimer = null;
-    }
+  function startListening() {
+    if (isListening || document.visibilityState !== "visible" || !document.hasFocus()) return;
     isListening = true;
-    recordingStartedAt = 0;
-    audioChunks = [];
-    // Do not lock voice: two spoken referents may point to different real nodes.
-
     hudMic.classList.add("listening");
-    hudMic.textContent = "Stop";
-    hudInput.placeholder = "Listening…";
-    lockLabel.textContent = "Recording · release Space or click Stop";
-    targetBar.classList.add("locked");
-
-    try {
-      const stream = await ensureAudioStream();
-
-      // If user released Spacebar while microphone stream was still opening
-      if (!isListening) {
-        resetMicUiIdle("⚠️ Hold Spacebar while speaking (released before mic was ready).");
-        return;
-      }
-
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : (MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "");
-
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      mediaRecorder = recorder;
-      audioChunks = [];
-      const audioEpoch = Date.now() / 1000;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          audioChunks.push(e.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const frozenCapture = captureCursorContext();
-        const chunks = audioChunks.slice();
-        audioChunks = [];
-        const recordedBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-
-        if (recordedBlob.size < 200) {
-          resetMicUiIdle("⚠️ Spoke too briefly. Hold Spacebar or click Speak, then talk.");
-          return;
-        }
-
-        hudMic.classList.remove("listening");
-        hudMic.textContent = "Wait";
-        lockLabel.textContent = "Transcribing audio locally…";
-
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = String(reader.result || "");
-          const commaIdx = dataUrl.indexOf(",");
-          const audioBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
-          emitTranscribe(audioBase64, recorder.mimeType || "audio/webm", frozenCapture, audioEpoch);
-        };
-        reader.onerror = () => {
-          resetMicUiIdle("❌ Could not encode recorded audio for transcription.");
-        };
-        reader.readAsDataURL(recordedBlob);
-      };
-
-      recorder.start(80);
-      recordingStartedAt = performance.now();
-      state.recordStartEpoch = Date.now() / 1000; // sent with audio so Python can shift whisper word times to wall-clock
-    } catch (err) {
+    hudMic.textContent = "Opening…";
+    hudInput.placeholder = "Wait for Listening, then speak…";
+    lockLabel.textContent = "Opening microphone · wait for Listening";
+    if (!_emit({ type: "record_start" })) {
       isListening = false;
-      releaseAudioStream();
-      resetMicUiIdle(`⚠️ ${err && err.message ? err.message : "Microphone permission needed: Allow mic in Chrome."}`);
+      resetMicUiIdle("Microphone offline.");
     }
   }
 
   function stopListening() {
     if (!isListening) return;
     isListening = false;
-    hudMic.classList.remove("listening");
+    resetMicUiIdle("Transcribing audio locally…");
+    // Freeze evidence at release, before transcription and before routing can change it.
+    _emit({ type: "record_stop", cursor_context: captureCursorContext() });
+  }
 
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-      hudMic.textContent = "Wait";
-      lockLabel.textContent = "Transcribing audio locally…";
-
-      const elapsed = recordingStartedAt ? performance.now() - recordingStartedAt : 500;
-      const tailMs = Math.max(150, Math.min(420, 520 - elapsed));
-      const activeRecorder = mediaRecorder;
-
-      if (stopDelayTimer) clearTimeout(stopDelayTimer);
-      stopDelayTimer = setTimeout(() => {
-        stopDelayTimer = null;
-        if (activeRecorder && activeRecorder.state === "recording") {
-          try {
-            activeRecorder.requestData();
-          } catch (_) {}
-          try {
-            activeRecorder.stop();
-          } catch (err) {
-            resetMicUiIdle(`⚠️ Recorder stop error: ${err.message || err}`);
-          }
-        }
-      }, tailMs);
-    } else {
-      resetMicUiIdle("⚠️ Hold Spacebar while speaking.");
-    }
+  function cancelListening() {
+    if (!isListening) return;
+    isListening = false;
+    spaceHeld = false;
+    _emit({ type: "record_cancel" });
+    resetMicUiIdle("Recording cancelled: tab or page lost focus.");
   }
 
   hudMic.addEventListener("click", (e) => {
+    if (!e.isTrusted) return;
     e.currentTarget.blur();
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
+    if (isListening) stopListening();
+    else startListening();
   });
 
   // --- Wire Chips & Input ---
@@ -1568,8 +1381,9 @@
   }
 
   function onWindowKeyDown(e) {
+    if (!e.isTrusted || document.visibilityState !== "visible") return;
     if (isEditableTarget(e)) return;
-    if (e.code === "Space" && !e.altKey && !e.metaKey && !e.ctrlKey) {
+    if (e.code === TALK_KEY && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
       if (!e.repeat && !spaceHeld) {
@@ -1593,7 +1407,7 @@
   }
 
   function onWindowKeyUp(e) {
-    if (e.code === "Space" && spaceHeld) {
+    if (e.isTrusted && e.code === TALK_KEY && spaceHeld) {
       e.preventDefault();
       e.stopPropagation();
       spaceHeld = false;
@@ -1602,16 +1416,13 @@
   }
 
   function onWindowBlur() {
-    if (spaceHeld) {
-      spaceHeld = false;
-      stopListening();
-    }
+    cancelListening();
   }
 
   window.addEventListener("keydown", onWindowKeyDown, { capture: true });
   window.addEventListener("keyup", onWindowKeyUp, { capture: true });
   window.addEventListener("blur", onWindowBlur);
-  window.addEventListener("pagehide", releaseAudioStream);
+  document.addEventListener("visibilitychange", onWindowBlur);
 
   function getAccessibleLabel(el) {
     if (!el) return "";
@@ -1992,33 +1803,14 @@
     snapshots.clear();
     clearActionConfirmation();
     window.removeEventListener("pagehide", onNavigation);
-    window.removeEventListener("popstate", onNavigation);
-    window.removeEventListener("hashchange", onNavigation);
-    window.navigation?.removeEventListener("navigate", onNavigation);
     window.removeEventListener("scroll", onCursorScroll, true);
-    if (stopDelayTimer) {
-      clearTimeout(stopDelayTimer);
-      stopDelayTimer = null;
-    }
-    for (const timerId of _transcribeTimers.values()) {
-      clearTimeout(timerId);
-    }
-    _transcribeTimers.clear();
-    isListening = false;
-    spaceHeld = false;
-    if (mediaRecorder && mediaRecorder.state === "recording") {
-      try {
-        mediaRecorder.onstop = null;
-        mediaRecorder.stop();
-      } catch (_) {}
-    }
-    releaseAudioStream();
+    cancelListening();
     window.removeEventListener("mousemove", onWindowMouseMove, { passive: true });
     window.removeEventListener("mouseup", onWindowMouseUp);
     window.removeEventListener("keydown", onWindowKeyDown, { capture: true });
     window.removeEventListener("keyup", onWindowKeyUp, { capture: true });
     window.removeEventListener("blur", onWindowBlur);
-    window.removeEventListener("pagehide", releaseAudioStream);
+    document.removeEventListener("visibilitychange", onWindowBlur);
     if (host && host.parentNode) {
       host.remove();
     }

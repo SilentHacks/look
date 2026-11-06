@@ -109,8 +109,15 @@ def register(ctx: Any) -> None:
         return _on_pre_llm_call(**kwargs)
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
-        if raw_args.strip() in ("connect", "disconnect"):
-            return turns.bind(raw_args.strip(), **kwargs)
+        if raw_args.strip() in ("", "connect", "start"):
+            result = _handle_slash_command("start")
+            if not session.cdp.is_connected:
+                return result
+            return (result + "\n" + turns.bind("connect", **kwargs)
+                    + "\nFresh Hermes sessions still need one normal Hermes message before Chrome turns.")
+        if raw_args.strip() == "disconnect":
+            session.microphone.cancel()
+            return turns.bind("disconnect", **kwargs)
         bound = turns.bind("", **kwargs)
         result = _handle_slash_command(raw_args)
         return result + "\n" + bound
@@ -123,7 +130,7 @@ def register(ctx: Any) -> None:
         "gaze",
         handler=gaze_command,
         description="Connect this Hermes session to Chrome voice, control pointing, or launch the demo.",
-        args_hint="[connect|disconnect|status|demo|mode|resolve|listen|benchmark]",
+        args_hint="[connect|start|disconnect|status|demo|mode|resolve|listen|benchmark]",
     )
     ctx.register_cli_command(
         name="gaze",

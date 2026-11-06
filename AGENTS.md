@@ -21,8 +21,10 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
-| `browser/cdp_bridge.py` | Persistent pinned-tab CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
-| `browser/overlay.js` | DOM evidence collector and terminal: closure-held snapshot identities, column members, geometry, mic capture, trusted-click confirmation card and plain-text session streaming. |
+| `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
+| `browser/companion.py` | Discovers supported tabs, follows foreground focus, routes snapshot mutations to their source tab and retains the latest session event across document replacement. |
+| `browser/overlay.js` | DOM evidence collector and terminal: closure-held snapshot identities, column members, geometry, native-mic talk controls, trusted-click confirmation card and plain-text session streaming. |
+| `microphone.py` | Single-owner bounded native capture. Device opens on talk, closes on release, cancellation, lost tab/document focus or disconnect. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`. Same purity rule. |
@@ -48,10 +50,12 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   are callback-style (`reply({...})` → `api.onIntentResult`) — intents return nothing.
   Every intent carries `nonce`, pushed to the overlay via `api.setIntentNonce` after
   each (re)injection; `handle_intent` rejects intents without the session's
-  `session._intent_nonce` — the binding is callable by any same-frame page script,
-  so the nonce is what stops forged resolves/transcribes/explains.
+  `session._intent_nonce`. Overlay code and its binding live in the named
+  `hermes-gaze` CDP isolated world, never the website's JavaScript world. The
+  transport accepts only that main-frame context and stamps tab/document ownership.
+  Microphone buttons and talk keys additionally require trusted input events.
 - **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
-  `audio_epoch` (wall-clock recording start: `state.recordStartEpoch` in the overlay,
+  `audio_epoch` (the first native input buffer's ADC wall-clock epoch for Chrome,
   `time.time()` before `record_microphone` on the tool path) and shifts each word.
   The temporal aligner compares anchors against fixation epochs — unshifted word
   times silently collapse alignment onto the latest fixation.
@@ -111,6 +115,19 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 - **Voice ownership includes session, exact utterance and turn.** Reasoning and
   foreign/late deltas never reach Chrome. Disconnect revokes active actions.
   `on_session_end` is a per-turn event, not a chat disconnect.
+- **Focus changes do not retarget evidence or discard answers.** Each captured
+  snapshot retains its source Chrome target and unique CDP execution context;
+  mutations use `uniqueContextId` (numeric context IDs can be reused), require
+  foreground focus and still check captured identities/epoch. In-page route events
+  alone do not invalidate identities: live detached/fingerprint checks do.
+  `pagehide` revokes browser snapshots but not answer streaming. The companion
+  caches the latest session event in Python and restores it after full navigation;
+  it is a single shared latest reply, not a conversation-history implementation.
+- **Microphone capture stays outside website origins.** Native `sounddevice`
+  owns the device only during talk; no browser grant, `getUserMedia`, pre-warmed
+  input stream or audio bytes in the page. Lost focus cancels rather than submitting
+  partial speech; the native watchdog checks every 100ms. Space remains the talk key
+  (`TALK_KEY` in the overlay). Wait for Listening before speaking.
 - **Recording is development-only.** `record_trials` defaults false; never write
   audio. Preserving an accepted injection takes precedence over recorder errors.
 
@@ -151,7 +168,16 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   captures the current cursor, not the historical target.
 - Hermes persists browser evidence in `state.db` through `api_content`, independently
   of `record_trials`. Disabling plugin replay recording does not disable host retention.
-- Current Hermes lazy initialization is bypassed by injected Chrome turns. Send a
-  normal Hermes message first if Chrome returns `agent_init_failed`; the full
-  session probe does this explicitly. Prompt-only acceptance uses normal submission
-  and does not warm its fresh sessions.
+- `/gaze` or `/gaze connect` starts/attaches the Chrome companion and binds the
+  current Hermes session. Host `tui_gateway/plugin_inject.py` rejects lazy sessions;
+  the isolated live host sample instead accepted scheduling then returned
+  `status=error`, `error_surface.code=agent_init_failed`, before plugin turn hooks.
+  No public plugin initialization API exists. A first normal Hermes message is
+  still required. Do not patch the host or inject a hidden warm-up turn here.
+- Native microphone permission belongs to the process running Hermes, not Chrome.
+  Website Permissions-Policy/CSP cannot block capture. Measured device startup was
+  80ms standalone and 222ms through the private Chrome talk key; speech before
+  Listening can be clipped. A zero-wait first-word guarantee is not established.
+- Automatic attachment supports HTTP(S), file and about:blank pages, not Chrome
+  internal pages. Background/closed-tab mutations fail rather than moving to a
+  different tab. Answer retention is in-memory and ends with the plugin process.
