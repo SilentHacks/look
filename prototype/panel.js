@@ -10,10 +10,10 @@
   sheet.replaceSync(`
     :root { color-scheme: light; --label:rgba(0,0,0,.86); --secondary:rgba(60,60,67,.72); --tertiary:rgba(60,60,67,.5);
       --accent:#0066d6; --red:#c9281e; --hover:rgba(0,0,0,.055); --line:rgba(0,0,0,.09);
-      --shimmer-a:rgba(60,60,67,.55); --shimmer-b:rgba(0,0,0,.95); }
+      --shimmer-a:rgba(60,60,67,.68); --shimmer-b:rgba(0,0,0,.95); }
     :root.dark { --label:rgba(255,255,255,.92); --secondary:rgba(235,235,245,.68); --tertiary:rgba(235,235,245,.42);
       --accent:#4ea1ff; --red:#ff6b60; --hover:rgba(255,255,255,.08); --line:rgba(255,255,255,.11);
-      --shimmer-a:rgba(235,235,245,.5); --shimmer-b:rgba(255,255,255,1); }
+      --shimmer-a:rgba(235,235,245,.66); --shimmer-b:rgba(255,255,255,1); }
     * { box-sizing:border-box; }
     html,body { font:13px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
       -webkit-font-smoothing:antialiased; color:var(--label); letter-spacing:-.006em; user-select:none; cursor:default; }
@@ -230,14 +230,14 @@
     }
     // Footer: a plain hint until you hover, then plain words.
     const foot = root.querySelector('.foot');
-    const sig = JSON.stringify([m.hint, m.reading, m.item.lost, m.item.host]);
+    const sig = JSON.stringify([m.hint, m.reading, m.item.lost, m.item.host, m.item.gone]);
     if (foot.dataset.sig !== sig) {
       foot.dataset.sig = sig;
       foot.textContent = '';
       const hint = h('div', 'hint', m.hint || '');
       const actions = h('div', 'actions');
-      const go = h('button', 'act', m.item.lost ? `Back to ${m.item.host}` : 'Show on page');
-      go.dataset.act = 'go';
+      const go = h('button', m.item.gone ? 'act off' : 'act', m.item.gone ? 'No longer on this page' : m.item.lost ? `Back to ${m.item.host}` : 'Show on page');
+      if (!m.item.gone) go.dataset.act = 'go';
       const read = h('button', 'act', m.reading ? 'Stop reading' : 'Read aloud');
       read.dataset.act = 'read';
       const close = h('button', 'act quiet', 'Dismiss');

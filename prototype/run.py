@@ -75,8 +75,6 @@ class Injector:
         br.send("Target.setDiscoverTargets", {"discover": True})
 
     def on_event(self, method: str, params: dict, session: str | None) -> None:
-        if os.environ.get("HG_PROTO_DEBUG") and method.startswith("Target."):
-            print("[event]", method, json.dumps(params)[:160], flush=True)
         if method in ("Target.targetCreated", "Target.targetInfoChanged"):
             info = params["targetInfo"]
             if info.get("type") == "page" and not info.get("url", "").startswith(("devtools:", "chrome:", "chrome-extension:")):
@@ -192,6 +190,7 @@ BANNER = """
                                reduced motion, glass vs solid
 
   A quick tap on Space still pages down. Answers run: short, medium, long, error, then repeat.
+  Everything you read is sample text. Point at the real page; the names come from its real text.
   Sites may show consent walls or bot checks to a private browser. Skip them, or open any
   other tab: every new tab is injected automatically.
 
@@ -220,6 +219,7 @@ def main() -> int:
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGHUP, stop)
+    signal.signal(signal.SIGINT, stop)
     chrome = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         br = None

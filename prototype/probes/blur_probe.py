@@ -31,13 +31,15 @@ PAGES = {
     "html-blend": page("body{mix-blend-mode:multiply}"),
     "dark-meta": page("html{color-scheme:dark}", '<meta name="color-scheme" content="dark">'),
     "iframe-under": page("", "", '<iframe style="position:fixed;inset:0;width:100%;height:100%;border:0" src="/stripes"></iframe>'),
+    "xorigin-iframe": page("", "", '<iframe style="position:fixed;inset:0;width:100%;height:100%;border:0" src="http://localhost:__PORT__/stripes"></iframe>'),
+    "site-dialog-after": page(),
     "video-under": page("", "", '<canvas id=c width=800 height=800 style="position:fixed;inset:0;width:100%;height:100%"></canvas><script>const x=c.getContext("2d");for(let i=0;i<800;i+=12){x.fillStyle="#000";x.fillRect(i,0,6,800);x.fillStyle="#fff";x.fillRect(i+6,0,6,800)}</script>'),
 }
 
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
-        body = page().encode() if self.path == "/stripes" else PAGES.get(self.path.strip("/"), "").encode()
+        body = page().encode() if self.path == "/stripes" else PAGES.get(self.path.strip("/"), "").replace("__PORT__", str(port)).encode()
         self.send_response(200); self.send_header("content-type", "text/html"); self.end_headers(); self.wfile.write(body)
 srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), H); srv.daemon_threads = True
 port = srv.server_address[1]; threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -174,6 +176,16 @@ try:
         m = lambda x0: contrast(img, x0, 200, x0 + 120, dpr)
         row = {"A plate behind frame": m(80), "B filter on iframe": m(320), "C inside sandbox doc": m(560), "D bare frame (control)": m(800), "E clipped unit": contrast(img, 80, 460, 200, dpr), "open page (control)": contrast(img, 980, 200, 1090, dpr)}
         results[name] = {"contrast_0_255": row, "frame_caps": caps, "hostile_page_reads": leak}
+        if name == "site-dialog-after":
+            # A website dialog opened later sits above us in the top layer. Re-showing the host restores order.
+            br.send("Runtime.evaluate", {"expression": "const dlg=document.createElement('dialog');dlg.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;margin:0;padding:0;border:0;background:%s';document.body.append(dlg);dlg.showModal();1" % STRIPES}, session=s)
+            time.sleep(.3)
+            img2 = png_rgba(base64.b64decode(br.send("Page.captureScreenshot", {"format": "png"}, session=s, timeout=30)["data"]))
+            results[name]["under_later_dialog_A"] = contrast(img2, 80, 200, 200, dpr)
+            br.send("Runtime.evaluate", {"contextId": wid, "expression": "const h=document.getElementById('probe-host');h.hidePopover();h.showPopover();1"}, session=s)
+            time.sleep(.3)
+            img3 = png_rgba(base64.b64decode(br.send("Page.captureScreenshot", {"format": "png"}, session=s, timeout=30)["data"]))
+            results[name]["after_reraise_A"] = contrast(img3, 80, 200, 200, dpr)
         br.send("Target.closeTarget", {"targetId": tid})
 finally:
     chrome.terminate()

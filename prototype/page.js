@@ -76,14 +76,14 @@
     * { box-sizing:border-box; }
     .ring { position:fixed; left:0; top:0; pointer-events:none; will-change:transform,width,height; border-radius:9px;
       background:rgba(var(--a),var(--fill)); box-shadow:0 0 0 var(--stroke) rgba(var(--a),var(--edge)), 0 0 0 calc(var(--stroke) + 4px) rgba(var(--a),var(--halo)); }
-    .ring.region { border-radius:50%; box-shadow:none; background:radial-gradient(closest-side, rgba(var(--a),calc(var(--fill)*2.1)) 0%, rgba(var(--a),calc(var(--fill)*1.7)) 45%, rgba(var(--a),calc(var(--fill)*.5)) 78%, rgba(var(--a),0) 100%); }
+    .ring.region { border-radius:50%; box-shadow:none; background:radial-gradient(closest-side, rgba(var(--a),calc(var(--fill)*3.2)) 0%, rgba(var(--a),calc(var(--fill)*2.6)) 45%, rgba(var(--a),calc(var(--fill)*.8)) 78%, rgba(var(--a),0) 100%); }
     .plate { position:fixed; left:0; top:0; pointer-events:none; will-change:transform,width,height,opacity;
       background:var(--fill); -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur); box-shadow:var(--shadow); }
     .plate.sliver { background:var(--fill-2); box-shadow:var(--shadow-2); }
-    .light { --fill:rgba(249,249,251,.74); --fill-2:rgba(246,246,249,.62); --blur:blur(34px) saturate(1.9);
+    .light { --fill:rgba(250,250,252,.8); --fill-2:rgba(247,247,250,.68); --blur:blur(34px) saturate(1.9);
       --shadow:0 0 0 .5px rgba(0,0,0,.13), 0 12px 36px rgba(0,0,0,.17), 0 3px 8px rgba(0,0,0,.07), inset 0 .5px 0 rgba(255,255,255,.75);
       --shadow-2:0 0 0 .5px rgba(0,0,0,.11), 0 8px 22px rgba(0,0,0,.11), inset 0 .5px 0 rgba(255,255,255,.6); --bar:rgba(0,102,214,1); }
-    .dark { --fill:rgba(44,44,48,.7); --fill-2:rgba(52,52,56,.6); --blur:blur(34px) saturate(1.7);
+    .dark { --fill:rgba(40,40,44,.76); --fill-2:rgba(50,50,54,.66); --blur:blur(34px) saturate(1.7);
       --shadow:0 0 0 .5px rgba(255,255,255,.15), 0 14px 44px rgba(0,0,0,.55), 0 3px 8px rgba(0,0,0,.3), inset 0 .5px 0 rgba(255,255,255,.1);
       --shadow-2:0 0 0 .5px rgba(255,255,255,.12), 0 8px 24px rgba(0,0,0,.4), inset 0 .5px 0 rgba(255,255,255,.08); --bar:rgba(95,172,255,1); }
     .solid.light { --fill:rgb(250,250,252); --fill-2:rgb(240,240,243); --blur:none; }
@@ -204,7 +204,7 @@
     return n;
   }
 
-  const clean = t => (t || '').replace(/\s+/g, ' ').trim();
+  const clean = t => (t || '').replace(/\[[^\]]{1,8}\]/g, '').replace(/\s+/g, ' ').trim(); // minus footnote marks
   function ownText(n) {
     if (n.matches('input,select,textarea')) return clean(n.getAttribute('aria-label') || n.placeholder || n.name || ''); // never .value
     if (n.matches('img,picture,video,svg,canvas')) return clean(n.getAttribute('alt') || n.querySelector?.('img')?.alt || n.getAttribute('aria-label') || n.title || '');
@@ -214,8 +214,10 @@
       return lead && opening.startsWith(clean(lead.innerText)) ? clean(lead.innerText) : opening;
     }
     const titled = n.matches('a,h1,h2,h3,h4,h5,h6,button') ? n : n.querySelector('h1,h2,h3,h4,[class*="title" i] a,[class*="title" i],a[title],a');
-    const t = clean((titled || n).innerText || (titled || n).textContent);
-    return t || clean(n.getAttribute('aria-label') || n.title || '');
+    const raw = (titled || n).innerText || (titled || n).textContent || '';
+    // A deal card opens with its price; the name is the first line made of words.
+    const words = raw.split('\n').map(clean).find(l => /\p{L}{3,}/u.test(l));
+    return words || clean(raw) || clean(n.getAttribute('aria-label') || n.title || '');
   }
   function clip(t, max = 30) {
     t = t.replace(/^[\d.,#)\s]+(?=\D)/, '').replace(/[.,:;–—-]+$/, '');
@@ -236,9 +238,10 @@
       const col = cell.cellIndex;
       const headRow = table?.tHead?.rows?.[0] || table?.rows?.[0];
       let header = headRow && headRow !== row ? clean(headRow.cells[col]?.innerText) : '';
+      header = header.replace(/\s*\([^)]*\)\s*$/, '');
       if (header.length > 4 && header === header.toUpperCase()) header = header[0] + header.slice(1).toLowerCase();
       const short = [clip(label, 20), clip(header, 14)].filter(Boolean).join(' · ');
-      if (short) return {short, base: label, full: `${label}${header ? `, ${header}` : ''}: ${clean(cell.innerText)}`};
+      if (short) return {short, base: label, col: clip(header, 14), full: `${label}${header ? `, ${header}` : ''}: ${clean(cell.innerText)}`};
     }
     const t = ownText(n);
     return t ? {short: clip(t), full: t.length > 120 ? t.slice(0, 120).trim() + '…' : t} : {short: 'This part of the page', full: 'this part of the page'};
@@ -280,7 +283,9 @@
       r.g.o.snap(0);
       lit.set(key, r);
     }
-    r.style = style; r.dying = false;
+    r.style = style; r.dying = false; r.fly = null;
+    r.g.x.k = r.g.y.k = r.g.w.k = r.g.h.k = SNAPPY.k;
+    r.g.x.c = r.g.y.c = r.g.w.c = r.g.h.c = SNAPPY.c;
     r.g.o.to(1);
     wake();
     return r;
@@ -301,10 +306,10 @@
           if (y + h < 2) { w = Math.min(w, 140); x = Math.max(8, Math.min(vw - w - 8, x)); y = 3; h = 4; }
           else if (y > vh - 2) { w = Math.min(w, 140); x = Math.max(8, Math.min(vw - w - 8, x)); y = vh - 7; h = 4; }
         }
-        const scrolling = Math.abs(r.g.x.t - x) > 0 && !r.g.x.v && r.seen;
+        if (r.fly) { x = r.fly.x(); y = r.fly.y(); w = 20; h = 10; }
         r.g.x.to(x); r.g.y.to(y); r.g.w.to(w); r.g.h.to(h);
         // Track scroll exactly; the spring is only for arrival and for moving between states.
-        if (r.seen && (S.scrollingAt && performance.now() - S.scrollingAt < 140)) { r.g.x.snap(x); r.g.y.snap(y); r.g.w.snap(w); r.g.h.snap(h); }
+        if (r.seen && !r.fly && (S.scrollingAt && performance.now() - S.scrollingAt < 140)) { r.g.x.snap(x); r.g.y.snap(y); r.g.w.snap(w); r.g.h.snap(h); }
         r.seen = true;
       }
       const st = RING_STYLES[r.style] || RING_STYLES.live;
@@ -417,7 +422,7 @@
     const hard = [], soft = [];
     for (const t of item?.targets || []) {
       const r = targetRect(t);
-      if (r && r.bottom > 0 && r.top < innerHeight) hard.push(inflate(r, 10));
+      if (r && r.bottom > 0 && r.top < innerHeight) hard.push(inflate(r, 14));
       const cell = t.el?.closest?.('td,th');
       if (cell && dataTable(cell.closest('table'))) {
         const row = cell.closest('tr')?.getBoundingClientRect();
@@ -457,7 +462,10 @@
           let cost = covers * 1000 + softCovers / (W * H) * 26 + frac * 60 + near / vmax * 20 + hi * 7;
           // No margins anywhere: hug an edge rather than float over the middle of the content.
           if (frac > .15) cost += Math.min(vw - rect.right, rect.left, vh - rect.bottom) / vmax * 26;
-          if (hard[0] && rect.right <= hard[0].left) cost += 1.5;            // prefer right of or below
+          if (hard[0]) {
+            if (rect.right <= hard[0].left) cost += 2;                       // prefer right of or below
+            cost += Math.abs(y - hard[0].top) / vmax * 9;                    // and lined up with it
+          }
           if (S.pos) cost += Math.hypot(x - S.pos.x, y - S.pos.y) / vmax * 5; // don't wander
           if (!best || cost < best.cost) best = {x, y, H, cost, frac, covers};
         }
@@ -497,6 +505,7 @@
       reading: S.reading === item.id, hint: hintFor(item),
       prev: peek(pv), next: peek(nx),
       item: {id: item.id, subject: item.subject, lost: item.lost, host: item.host,
+        gone: !item.lost && item.targets.length > 0 && !item.targets.some(targetRect),
         turns: item.turns.map(t => ({id: t.id, q: t.q, a: t.shown, status: t.status, error: t.error}))},
     }});
     S.dir = null;
@@ -681,7 +690,7 @@
       return;
     }
     const r = targetRect(t);
-    if (!r) return;
+    if (!r) { pushCard(); return; } // the page removed it: the card says so, we don't guess
     const inView = r.top > 40 && r.bottom < innerHeight - 40;
     if (!inView) {
       const y = scrollY + r.top + r.height / 2 - innerHeight / 2;
@@ -729,9 +738,14 @@
   }
   function capsuleSpot(w) {
     if (S.open && S.pos) {
-      const y = S.pos.y - (S.sizes.prevH ? S.sizes.prevH : 0) - PILL_H - 8;
-      if (y >= MARGIN) return {x: S.pos.x + 2, y};
-      return {x: S.pos.x + 2, y: S.pos.y + S.frameH + 6};
+      const {hard} = avoidance(current());
+      const clear = (x, y) => y >= MARGIN && y + PILL_H <= innerHeight - MARGIN &&
+        !hard.some(r => overlap({left: x, top: y, right: x + w, bottom: y + PILL_H}, r) > 0);
+      const x = Math.min(S.pos.x + 2, innerWidth - w - MARGIN);
+      const above = (S.frameY ?? S.pos.y) - PILL_H - 8, below = (S.frameY ?? S.pos.y) + S.frameH + 8;
+      if (clear(x, above)) return {x, y: above};
+      if (clear(x, below)) return {x, y: below};
+      return {x: innerWidth - w - MARGIN, y: MARGIN};
     }
     if (S.capSpot) return {...S.capSpot, x: S.capSpot.right - w}; // keep the right edge still as the words change
     // Where notifications live, nudged off anything we can see.
@@ -806,7 +820,7 @@
     updatePointing(performance.now(), true);
     wake();
   }
-  const waveW = follow => BARS * BAR_W + (BARS - 1) * BAR_GAP + 26 + (follow ? (S.pillLabelW || 150) - 4 : 0);
+  const waveW = follow => BARS * BAR_W + (BARS - 1) * BAR_GAP + 26 + (follow ? (S.pillLabelW || 150) + 8 : 0);
   function pillAnchor() {
     const vw = innerWidth, vh = innerHeight;
     const w = waveW(S.hold?.follow);
@@ -911,21 +925,36 @@
     }
     S.pointer.moved = 0;
     send({t: 'coach', coach: S.coach});
-    // Rings give way to the capsule; the answer lights them again.
+    // What you pointed at goes into the capsule, so you can see where your question went.
+    // The answer lights it again.
     setTimeout(() => {
       if (S.hold) return;
       const cur = S.open ? current() : null;
-      for (const t of H.targets) if (!cur?.targets.includes(t)) dropRing(t.key);
-    }, 650);
+      for (const t of H.targets) {
+        if (cur?.targets.includes(t)) continue;
+        const ring = lit.get(t.key);
+        if (ring && S.pillMode === 'capsule' && !reduced() && !t.soft) {
+          ring.fly = {x: () => P.pill.x.x + 8, y: () => P.pill.y.x + 11};
+          // Collapse first, then travel: a small spark, never a big box sliding over the page.
+          ring.g.w.k = ring.g.h.k = 900; ring.g.w.c = ring.g.h.c = 60;
+          ring.g.x.k = ring.g.y.k = 170; ring.g.x.c = ring.g.y.c = 24;
+          setTimeout(() => { if (ring.fly) dropRing(t.key); }, 170);
+        } else dropRing(t.key);
+      }
+    }, 230);
   }
   function subjectFor(targets) {
     if (!targets.length) return {short: clip(document.title || 'This page'), full: document.title || 'this page'};
     const names = targets.map(t => {
       const raw = t.soft ? nameOf(t.anchor || document.body) : nameOf(t.el);
-      return t.soft ? {short: `Around ${clip(raw.short, 26)}`, full: `the area around ${raw.full}`} : raw;
+      return t.soft ? {short: `Around ${clip(raw.short, 26)}`, base: raw.base || clip(raw.short, 20), around: true, full: `the area around ${raw.full}`} : raw;
     });
     if (names.length === 1) return names[0];
-    return {short: `${clip(names[0].base || names[0].short, 20)} and ${names.length > 2 ? 'others' : clip(names[1].base || names[1].short, 20)}`, full: names.map(n => n.full).join(' and ')};
+    // Two cells of one row: name the row once.
+    if (names.length === 2 && names[0].base && names[0].base === names[1].base && names[0].col && names[1].col) {
+      return {short: `${clip(names[0].base, 20)} · ${names[0].col} and ${names[1].col}`, full: names.map(n => n.full).join(' and ')};
+    }
+    return {short: `${names[0].around ? 'Around ' : ''}${clip(names[0].base || names[0].short, 20)} and ${names.length > 2 ? 'others' : clip(names[1].base || names[1].short, 20)}`, full: names.map(n => n.full).join(' and ')};
   }
   function askNew(targets) {
     S.asked++;
@@ -939,7 +968,7 @@
     S.queue.push({item, turn});
     S.pillLabelW = S.pillLabelW || 150;
     updateCapsule();
-    if (S.pillMode === 'capsule') { P.pill.h.kick?.(0); }
+    P.pill.w.kick(70);
     pump();
   }
   function askFollowUp(item, extra) {
@@ -1254,6 +1283,8 @@
     pw.transform = `translate3d(${labelX}px,0,0)`;
     pw.width = `${Math.max(0, pv.w.x - labelX - 6)}px`;
     pw.height = `${PILL_H}px`;
+    // The label waits until the bars have settled into their small pulse.
+    pw.opacity = S.pillMode === 'capsule' ? Math.max(0, Math.min(1, (m - .72) / .28)).toFixed(3) : '1';
     drawRings(level);
     const anyLit = lit.size > 0;
     const alive = springs.size || fades.size || S.hold || anyLit || (pv.o.x > .004) || (S.cardFade > 0 && S.cardFade < 1);
@@ -1294,6 +1325,7 @@
         open: S.open, cur: it?.subject, pos: S.pos,
         card: {x: front.x.t, y: front.y.t, w: front.w.t, h: front.h.t},
         frame: {y: S.frameY, h: S.frameH}, targets: rects, sizes: S.sizes, maxBody: S.maxBody, dark: S.dark, soft: S.soft,
+        targetTags: it ? (it.targets || []).map(t => t.el ? `${t.el.tagName}.${t.el.className}`.slice(0, 60) + (t.el.isConnected ? '' : ' (detached)') : 'region') : [],
         hold: S.hold ? {targets: S.hold.targets.length, follow: S.hold.follow?.subject || null} : null,
         lit: lit.size, pill: {mode: S.pillMode, text: S.pillText, x: P.pill.x.t, y: P.pill.y.t, w: P.pill.w.t, h: P.pill.h.t, o: P.pill.o.t},
         items: S.items.map(i => ({subject: i.subject, archived: i.archived, seen: i.seen, status: i.turns.map(t => t.status)})),
