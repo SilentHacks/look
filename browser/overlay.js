@@ -2785,6 +2785,7 @@
         pill: {mode: S.pillMode, x: P.pill.x.t, y: P.pill.y.t, w: P.pill.w.t, h: P.pill.h.t, o: P.pill.o.t},
         items: S.items.map(i => ({subject: i.subject, archived: i.archived, presented: i.presented, status: i.turns.map(t => t.status)})),
         retreatInMs: S.retreatAt ? Math.round(S.retreatAt - performance.now()) : null,
+        errors: (inbox?.items || []).flatMap(i => i.conversation.map(r => r.error).filter(Boolean)),
         talk: {spaceHeld, armed: S.keyArmed, listening: isListening, focused: document.hasFocus(), nonce: !!_intentNonce, ready: S.ready}};
     },
     Configure(opts) {

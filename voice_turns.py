@@ -69,6 +69,7 @@ class VoiceTurns:
         # One-time hints live with the inbox, so they follow navigation and tabs.
         self.coach = dict(greeted=False, heard=0, answered=0, retreated=False)
         self.model_names = True
+        self.host_refused = False
         self._naming = False
 
     @property
@@ -169,6 +170,12 @@ class VoiceTurns:
         self.pending.append(run)
         return run
 
+    def _moved_on(self):
+        """Asking again after a failed answer is moving on: nothing queued can slip past it.
+        A host that refused injection stays paused; only Try again or Continue may probe it."""
+        if not self.pending and not self.host_refused:
+            self.paused = False
+
     def _start_highlight(self, run):
         from .service import start_question_highlight
 
@@ -201,6 +208,7 @@ class VoiceTurns:
                 return {"ok": False, "fallback_allowed": True, "error": "Run /gaze connect."}
             if len(self.pending) >= self.MAX_PENDING:
                 return {"ok": False, "error": "Inbox full: eight questions are waiting."}
+            self._moved_on()
             try:
                 if not isinstance(snapshot, dict) or len(json.dumps(snapshot).encode()) > self.MAX_SNAPSHOT_BYTES:
                     raise ValueError("Cursor evidence is too large or invalid.")
@@ -286,6 +294,7 @@ class VoiceTurns:
                 item = self._item(item_id)
                 if not self.connected or not item or len(self.pending) >= self.MAX_PENDING:
                     return {"ok": False, "error": "Follow-up target unavailable or queue full"}
+                self._moved_on()
                 run = self._new_run(text, copy.deepcopy(item["snapshot"]), item_id)
                 run["followup"] = True
                 item["archived"] = False
@@ -332,6 +341,7 @@ class VoiceTurns:
                     run.update(finished=True, ended=True)
                     self.active = None
                     self.paused = True
+                    self.host_refused = True
                     self._event(run, "failed", error=error)
 
     def _stop_speaking(self):
@@ -466,6 +476,7 @@ class VoiceTurns:
                         early.superseded = True
             elif action == "resume":
                 self.paused = False
+                self.host_refused = False
             elif action in ("retry", "skip") and item:
                 run = next((r for r in reversed(self.runs)
                             if r["item_id"] == item_id and r["status"] in ("failed", "interrupted")
@@ -489,12 +500,14 @@ class VoiceTurns:
                     retry["snapshot"].pop("early_highlight", None)
                     run["status"] = "retried"
                     item["presented"] = True
+                    self.host_refused = False
                     self.pending.remove(retry)
                     self.pending.insert(0, retry)
                     self.paused = False
                 else:
                     run["status"] = "skipped"
                     run.pop("transcribe", None)
+                    self._moved_on()
             else:
                 return {"ok": False, "error": "Unknown inbox command or item"}
             self.publish()
