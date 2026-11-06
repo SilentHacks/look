@@ -41,8 +41,9 @@ never rematch selectors. Password/payment fields and associated labels are
 filtered before serialization; page text stays inside an escaped untrusted fence.
 
 Fresh hover evidence automatically highlights the pointed handles.
-`gaze_highlight(handles=[...], resolution_id=N)` changes that highlight when the model
-uses a different scope, including captured rows and columns. `gaze_click(handle=..., resolution_id=N)`
+`gaze_highlight(handles=[...], resolution_id=N)` changes that highlight for a different
+scope, including captured rows and columns; the wider highlight depends on the model
+invoking the tool. `gaze_click(handle=..., resolution_id=N)`
 activates a current control. Risky labels/classes, destructive utterances and form
 submissions require a trusted primary mouse click on the Chrome confirmation
 card. Synthetic clicks, spoken/tool confirmation, stale epochs and changed targets
@@ -86,8 +87,8 @@ Hold Space in Chrome, speak and release. Only your words become a normal user
 message; the matching session hook attaches frozen page context. The answer
 streams into Hermes and Chrome, with a final-response backstop.
 Refreshing cursor evidence through a tool does not interrupt that turn's answer stream.
-Spoken or typed followups use conversation history without reattaching old evidence
-or changing its epoch. A connected non-deictic utterance without a target is delivered
+Followups without a fresh capture use conversation history without reattaching old
+evidence or changing its epoch. A connected non-deictic utterance without a target is delivered
 as plain text. After compaction, resolving again captures the current cursor, not
 the historical target. `/gaze disconnect` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
@@ -110,11 +111,14 @@ python benchmark/probe_sessions.py --prompt-only --repo-folder --trials 10 --sou
 The session smoke uses private config/credential copies and private Chrome,
 substituting synthesized WAV before the real transcription binding. It exercises
 real TUI and desktop **backends**, not the native desktop renderer or physical microphone.
+It reuses installed dependencies without updating them and initializes lazy host
+agents with a normal control turn before injecting speech.
 Prompt-only mode uses fresh sessions and the configured model for headers, a cell,
 a button, a wider-scope followup, hostile page text, a synthetic stale cursor,
 pasted code and an explicit plugin question. `--repo-folder` enables project rules;
 the default uses a neutral folder. Reports retain answers, captures and browser
 operations; `--plugin-root` can select an isolated committed baseline.
+Prompt-only questions remain the first user request in each fresh session.
 Historical Phase 0/1 measurements remain in `benchmark/*results.json`; the
 hardcoded `/gaze probe` experiment is removed.
 

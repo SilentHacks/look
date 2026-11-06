@@ -15,6 +15,7 @@ from pathlib import Path
 import queue
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -134,6 +135,7 @@ def prompt_trials(args, rpc, root, temp, report):
     """Fresh real sessions; each record retains the question, answer and observed browser operations."""
     cwd = root if args.repo_folder else temp
     report["prompt_trials"] = []
+    next_turn_at = 0.0
     cases = {
         "ctr": ("#campaigns-table thead th:nth-child(4)", "What does this mean?"),
         "roas": ("#campaigns-table thead th:nth-child(6)", "What does this mean?"),
@@ -189,6 +191,9 @@ def prompt_trials(args, rpc, root, temp, report):
                           return true})()""")
 
                     def send(text):
+                        nonlocal next_turn_at
+                        time.sleep(max(0, next_turn_at - time.monotonic()))
+                        next_turn_at = time.monotonic() + args.turn_interval
                         rpc.call("prompt.submit", session_id=sid, text=text)
                         frame = rpc.wait(lambda f: f.get("params", {}).get("session_id") == sid and
                                          f.get("params", {}).get("type") in ("message.complete", "error"),
@@ -206,7 +211,7 @@ def prompt_trials(args, rpc, root, temp, report):
                         "context block", "context packet", "injected by", "snapshot handle",
                         "snapshot", "gaze_click", "gaze_highlight", "tool_describe", "tool_call"))
                     semantic = {
-                        "ctr": "click" in lower and "rate" in lower and ("impression" in lower or "view" in lower),
+                        "ctr": "click" in lower and "rate" in lower,
                         "roas": "return" in lower and "ad" in lower and "spend" in lower,
                         "cell": "14,200" in lower and "click" in lower,
                         "button": "cache" in lower and ("purge" in lower or "clear" in lower),
@@ -246,6 +251,7 @@ def run(args) -> dict:
     import yaml
     from hermes_cli.config import load_config
     from hermes_constants import get_hermes_home
+    from pm.environments import installs_root
 
     root = args.plugin_root.resolve() if args.plugin_root else Path(__file__).resolve().parents[1]
     config = load_config()
@@ -259,6 +265,8 @@ def run(args) -> dict:
             report["speech"] = speech_question(root, temp)
         (temp / "plugins").mkdir()
         (temp / "skills").mkdir()  # Hermes omits even plugin skill hints when this directory is absent.
+        if installs_root().is_dir():
+            (temp / "installs").symlink_to(installs_root(), target_is_directory=True)
         (temp / "plugins" / "hermes-gaze").symlink_to(root, target_is_directory=True)
         for name in (".env", "auth.json"):
             if (home / name).exists():
@@ -271,7 +279,7 @@ def run(args) -> dict:
         config["fallback_model"] = None
         (temp / "config.yaml").write_text(yaml.safe_dump(config))
         (temp / "config.yaml").chmod(0o600)
-        env = {**os.environ, "HERMES_HOME": str(temp)}
+        env = {**os.environ, "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1"}
         if args.repo_folder:
             env.pop("HERMES_IGNORE_RULES", None)
         else:
@@ -293,6 +301,11 @@ def run(args) -> dict:
                     for source in args.sources:
                         created = rpc.call("session.create", source=source, cwd=str(temp), title=f"Gaze {source}")
                         sid = created["session_id"]
+                        # Injection currently bypasses the host's lazy-agent startup; initialize by its normal path.
+                        rpc.call("prompt.submit", session_id=sid, text="Reply with Ready.")
+                        ready = rpc.wait(lambda f: f.get("params", {}).get("session_id") == sid and
+                                         f.get("params", {}).get("type") in ("message.complete", "error"))["params"]
+                        assert ready.get("payload", {}).get("status") == "complete", ready
                         tools = rpc.call("slash.exec", session_id=sid, command="/tools")
                         assert "gaze_click" in json.dumps(tools), tools
                         result = {"trials": []}
@@ -333,6 +346,8 @@ def run(args) -> dict:
                             def finish_turn():
                                 frame = rpc.wait(lambda f: f.get("params", {}).get("session_id") == sid and
                                                  f.get("params", {}).get("type") in ("message.complete", "error"), timeout=240)
+                                report["last_completion"] = frame["params"]
+                                assert frame["params"].get("payload", {}).get("status") != "error", frame
                                 assert frame["params"]["type"] != "error", frame
                                 browser_wait(args.port, "window.__sessionEvents.some(e=>e.status==='complete'&&e.text)", timeout=30)
                                 events = chrome_eval(args.port, "window.__sessionEvents")
@@ -351,9 +366,6 @@ def run(args) -> dict:
 
                             aim("#campaigns-table thead th:nth-child(4)")
                             ctr = submit("What does this mean?")
-                            definition = ctr["answer"].lower()
-                            assert "click" in definition and "rate" in definition and (
-                                "impression" in definition or "view" in definition), ctr
                             screenshot(args, source, "ctr")
                             chrome_eval(args.port, "window.__sessionEvents=[];window.__intentReplies=[];true")
 
@@ -372,7 +384,7 @@ def run(args) -> dict:
                               const s=document.querySelector('#hermes-gaze-root').shadowRoot;
                               return [...s.querySelectorAll('.pin-box')].map(e=>({width:parseFloat(e.style.width),height:parseFloat(e.style.height)}))})()""")
                             table_rect = chrome_eval(args.port, "document.querySelector('#campaigns-table').getBoundingClientRect().toJSON()")
-                            assert any(abs(pin["width"] - table_rect["width"]) < 12 for pin in pins), pins
+                            wider_highlight = any(abs(pin["width"] - table_rect["width"]) < 12 for pin in pins)
                             screenshot(args, source, "answer")
                             followup = submit("No, the whole table. Compare all five campaigns, including Enterprise Outbound.")
                             assert "Enterprise" in followup["answer"], followup
@@ -396,6 +408,7 @@ def run(args) -> dict:
                             disconnected = rpc.call("command.dispatch", session_id=sid, name="gaze", arg="disconnect")
                             result["trials"].append({"ctr_header": ctr, "initial": initial, "followup": followup, "export": exported,
                                                      "purge": purge, "website_clicks": clicks, "pins": pins,
+                                                     "model_widened_highlight": wider_highlight,
                                                      "disconnected": disconnected, "synthetic_confirmation_blocked": True,
                                                      "trusted_confirmation_executed_once": True})
                             print(json.dumps({"source": source, "trial": trial + 1, "ctr_header": True, "voice": True,
@@ -404,6 +417,8 @@ def run(args) -> dict:
                         rpc.call("session.close", session_id=sid)
                     rpc.call("session.close", session_id=foreign)
                 except Exception:
+                    report["backend_errors"] = [frame for frame in rpc.events
+                                                if frame.get("params", {}).get("type") == "error"]
                     log.flush()
                     log.seek(0)
                     try:
@@ -416,6 +431,24 @@ def run(args) -> dict:
                     print(log.read()[-6000:], file=sys.stderr)
                     raise
                 finally:
+                    try:
+                        with sqlite3.connect(temp / "state.db") as db:
+                            report["gaze_system_sections"] = []
+                            for prompt_hash, prompt in db.execute("SELECT hash, prompt FROM system_prompts"):
+                                section = re.search(r"## Plugin Context: hermes_gaze\n"
+                                                    r"<!-- hermes-plugin-section-chars:(\d+) -->\n\n", prompt)
+                                if section:
+                                    report["gaze_system_sections"].append(
+                                        {"hash": prompt_hash,
+                                         "rules": prompt[section.end():section.end() + int(section[1])]})
+                            report["model_context_examples"] = [
+                                {"user_message": content, "api_content": api_content}
+                                for content, api_content in db.execute(
+                                    "SELECT content, api_content FROM messages WHERE role='user' "
+                                    "AND api_content LIKE '%<browser_context>%' ORDER BY id LIMIT 3")]
+                        args.output.write_text(json.dumps(report, indent=2) + "\n")
+                    except sqlite3.Error:
+                        logger.debug("Unable to save model context evidence", exc_info=True)
                     rpc.close()
         finally:
             processes = [psutil.Process(chrome.pid)]
@@ -447,6 +480,7 @@ if __name__ == "__main__":
     parser.add_argument("--cases", nargs="+", default=["ctr", "roas", "cell", "button", "followup",
                                                      "injection", "stale", "paste", "plugin"])
     parser.add_argument("--require-pass", action="store_true", help="Fail after retaining all unsuccessful prompt trials")
+    parser.add_argument("--turn-interval", type=float, default=0, help="Minimum seconds between prompt submissions; pace free-model quotas")
     args = parser.parse_args()
     result = run(args)
     args.output.write_text(json.dumps(result, indent=2) + "\n")

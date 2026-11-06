@@ -151,3 +151,7 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   captures the current cursor, not the historical target.
 - Hermes persists browser evidence in `state.db` through `api_content`, independently
   of `record_trials`. Disabling plugin replay recording does not disable host retention.
+- Current Hermes lazy initialization is bypassed by injected Chrome turns. Send a
+  normal Hermes message first if Chrome returns `agent_init_failed`; the full
+  session probe does this explicitly. Prompt-only acceptance uses normal submission
+  and does not warm its fresh sessions.
