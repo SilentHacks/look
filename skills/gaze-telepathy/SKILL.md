@@ -7,6 +7,8 @@ description: Understand what the user points at in Chrome using exact cursor evi
 
 Hermes Gaze adds private browser evidence automatically. Its system prompt section
 defines how to use that evidence; the user's message remains the question.
+`[gaze_ref]` was the legacy prefix for gaze/cursor evidence, not a user request.
+Current packets use `<browser_context>` instead.
 
 ## Snapshot tools
 

@@ -110,6 +110,10 @@ states. Without a connected/authorized session, read-only questions can use a
 clearly labeled one-shot call, with no conversation followups or actions. Action
 requests fail rather than silently using that fallback. ASR file downloads are
 quiet without suppressing errors or redirecting process output.
+Browser recordings require `ffmpeg` on Hermes's PATH (or in a standard macOS
+install location). Their MIME type is preserved through transcription; decoder
+failures report the actual ffmpeg diagnostic and never reinterpret compressed
+bytes as raw PCM. Native 16-bit PCM/WAV remains an in-process fast path.
 
 Development smoke: use Python from a Hermes environment:
 
@@ -131,6 +135,8 @@ pasted code and an explicit plugin question. `--repo-folder` enables project rul
 the default uses a neutral folder. Reports retain answers, captures and browser
 operations; `--plugin-root` can select an isolated committed baseline.
 Prompt-only questions remain the first user request in each fresh session.
+`--turn-interval 6` spaces submissions for free-model quotas. Provider errors and
+240-second terminal-response timeouts remain failed trials, not fallback answers.
 Historical Phase 0/1 measurements remain in `benchmark/*results.json`; the
 hardcoded `/gaze probe` experiment is removed.
 

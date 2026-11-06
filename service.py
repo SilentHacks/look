@@ -528,6 +528,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             text, words_out = _voice.transcribe_audio_buffer(
                 audio_bytes, sample_rate=sample_rate, model_name=_whisper_model_name(),
                 audio_epoch=audio_epoch,
+                mime_type=str(intent.get("mime_type") or "") or None,
             )
             reply({"ok": True, "text": text, "words": words_out, "backend": _voice._LAST_BACKEND})
             return

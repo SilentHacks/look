@@ -201,7 +201,7 @@ def _transcribe_parakeet(audio_np: Any, sample_rate: int, epoch_off: float) -> O
 
 def _looks_like_container(raw_bytes: bytes) -> bool:
     """Sniff known media-container magics — anything else is treated as raw s16le PCM."""
-    if raw_bytes[:4] in (b"OggS", b"fLaC", b"ID3", b"\x1a\x45\xdf\xa3"):  # ogg, flac, mp3, ebml/webm
+    if raw_bytes.startswith((b"OggS", b"fLaC", b"ID3", b"\x1a\x45\xdf\xa3")):
         return True
     if len(raw_bytes) > 8 and raw_bytes[4:8] == b"ftyp":  # mp4/m4a
         return True
@@ -210,8 +210,8 @@ def _looks_like_container(raw_bytes: bytes) -> bool:
     return False
 
 
-def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
-    """Decode any audio container (WebM, Opus, WAV, MP3) or raw s16le PCM to 16kHz mono float32."""
+def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000, mime_type: Optional[str] = None) -> Any:
+    """Decode a container or raw s16le PCM; a declared browser MIME type requires container decoding."""
     import numpy as np
     import shutil
     import subprocess
@@ -225,7 +225,7 @@ def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
     if is_riff:
         try:
             with wave.open(io.BytesIO(raw_bytes), "rb") as wf:
-                if wf.getframerate() == sample_rate:
+                if wf.getframerate() == sample_rate and wf.getsampwidth() == 2:
                     channels = wf.getnchannels()
                     raw_frames = wf.readframes(wf.getnframes())
                     audio_np = np.frombuffer(raw_frames, dtype=np.int16).astype(np.float32) / 32768.0
@@ -239,27 +239,28 @@ def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000) -> Any:
         shutil.which("ffmpeg")
         or ("/opt/homebrew/bin/ffmpeg" if os.path.isfile("/opt/homebrew/bin/ffmpeg") else "/usr/local/bin/ffmpeg")
     )
-    if (is_riff or _looks_like_container(raw_bytes)) and os.path.isfile(ffmpeg_bin):
+    if is_riff or mime_type or _looks_like_container(raw_bytes):
+        if not os.path.isfile(ffmpeg_bin):
+            raise RuntimeError("Recorded audio requires ffmpeg. Install ffmpeg and restart Hermes.")
+        cmd = [
+            ffmpeg_bin, "-nostdin", "-hide_banner", "-loglevel", "error",
+            "-threads", "0", "-i", "pipe:0", "-f", "s16le",
+            "-ac", "1", "-ar", str(sample_rate), "pipe:1",
+        ]
         try:
-            cmd = [
-                ffmpeg_bin,
-                "-nostdin",
-                "-threads", "0",
-                "-i", "pipe:0",
-                "-f", "s16le",
-                "-ac", "1",
-                "-ar", str(sample_rate),
-                "pipe:1",
-            ]
             proc = subprocess.run(cmd, input=raw_bytes, capture_output=True, check=True)
-            if len(proc.stdout) > 0:
-                return np.frombuffer(proc.stdout, dtype=np.int16).astype(np.float32) / 32768.0
-        except Exception as exc:
-            logger.warning("ffmpeg decode error: %s, falling back to raw PCM", exc)
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.decode("utf-8", errors="replace").strip()[-500:]
+            raise ValueError(f"Could not decode recorded audio: {detail or 'ffmpeg rejected the recording'}") from exc
+        if not proc.stdout:
+            raise ValueError("Recorded audio decoded to no samples")
+        return np.frombuffer(proc.stdout, dtype="<i2").astype(np.float32) / 32768.0
 
     # Raw s16le PCM — what record_microphone produces. No container magic means
     # skipping the ffmpeg spawn entirely.
-    return np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+    if len(raw_bytes) % 2:
+        raise ValueError("Raw PCM audio must contain complete 16-bit samples (even byte length)")
+    return np.frombuffer(raw_bytes, dtype="<i2").astype(np.float32) / 32768.0
 
 
 def transcribe_audio_buffer(
@@ -268,6 +269,7 @@ def transcribe_audio_buffer(
     model_name: str = _DEFAULT_MODEL,
     audio_epoch: Optional[float] = None,
     backend: str = "auto",
+    mime_type: Optional[str] = None,
 ) -> Tuple[str, List[Dict[str, object]]]:
     """Transcribe WebM, WAV, or PCM bytes into text with word-level timestamps.
 
@@ -280,7 +282,7 @@ def transcribe_audio_buffer(
     ``"whisper"`` (force the faster-whisper path)."""
     import numpy as np
 
-    audio_np = decode_audio_to_float32(audio_bytes, sample_rate=sample_rate)
+    audio_np = decode_audio_to_float32(audio_bytes, sample_rate=sample_rate, mime_type=mime_type)
     if len(audio_np) == 0:
         return "", []
 
