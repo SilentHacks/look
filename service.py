@@ -9,7 +9,6 @@ explanation requests (``explain_element``) via ``ctx.llm``.
 from __future__ import annotations
 
 import base64
-import html
 import json
 import logging
 import threading
@@ -125,13 +124,9 @@ def _render_scope(session: GazeSession, info: Dict[str, Any]) -> None:
     if not session.is_chrome_reachable():
         return
     selected = info["top"]
-    message = f"<strong>Subject: {html.escape(str(selected.get('label') or ''))}</strong>"
-    message += f"<div>{html.escape(str(selected.get('summary') or ''))}</div>"
-    if info.get("needs_explain"):
-        message += f'<div id="gaze-explanation-text" data-rid="{session.resolution_id}">Asking Hermes…</div>'
     owner = session.last_resolution_input
     session.cdp.eval_js_once(
-        f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([selected])}, {json.dumps(message)})",
+        f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([selected])})",
         target=owner.get("browser_target"), document=owner.get("browser_document"), route=owner.get("browser_route"))
 
 def resolve_now(
@@ -203,12 +198,9 @@ def resolve_now(
         session.last_resolution_input = {"cursor_context": capture, "utterance": utterance,
                                          "words": word_timestamps or []}
         if payload["chrome_connected"]:
-            rid = payload["resolution_id"]
-            message = (f'Cursor evidence<div id="gaze-explanation-text" data-rid="{rid}">Asking Hermes…</div>'
-                       if payload["ok"] else html.escape(payload["error"]))
             try:
                 session.cdp.eval_js_once(
-                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])}, {json.dumps(message)});"
+                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])});"
                     f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});return true}})()",
                     target=payload.get("browser_target"), document=payload.get("browser_document"))
             except Exception:
@@ -252,7 +244,6 @@ def resolve_now(
              for key in ("browser_target", "browser_document", "browser_route")}
     payload.update(owner)
 
-    hud_html = None
     if res.top and (res.top.candidate.is_container or res.top.candidate.role == "table"):
         table_payload = None
         if session.is_chrome_reachable():
@@ -268,17 +259,13 @@ def resolve_now(
             svg_chart = render_svg_scatter(table_payload.get("headers") or [], table_payload.get("rows") or [])
             payload["extracted_data"] = extracted_str
             payload["svg_scatter"] = svg_chart
-            hud_html = (
-                f"<div><strong>Extracted {html.escape(str(res.top.candidate.label))} ({len(table_payload.get('rows') or [])} rows):</strong></div>"
-                f"<div style='margin-top:6px;'>{svg_chart}</div>"
-            )
 
     with session.actions._lock:
         if page_url != session.scope_page_url:
             session.scope_selection.clear()
             session.scope_page_url = page_url
         session.last_candidates = candidates
-        rid = session.render_resolution_in_browser(res, hud_html=hud_html, evidence=resolution_input)
+        rid = session.render_resolution_in_browser(res, evidence=resolution_input)
         payload.update(resolution_id=rid, chrome_connected=session.is_chrome_reachable(), mode=mode, page_url=page_url)
         payload.update(_scope_payload(session, payload.get("ranked") or []))
         if payload["scope_anchor_id"] in session.scope_selection:
@@ -506,9 +493,9 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                             result = submit_snapshot(snapshot)
                         reply({**result, "text": text})
                     except Exception as exc:
-                        if reservation:
-                            turns.transcribed(reservation["request_id"], "", error=str(exc))
-                        reply({"ok": False, "error": str(exc)})
+                        result = (turns.transcribed(reservation["request_id"], "", error=str(exc))
+                                  if reservation else {"ok": False, "error": str(exc)})
+                        reply(result)
                 if reservation:
                     turns.start_transcription(reservation["request_id"], finish_recording)
                 else:

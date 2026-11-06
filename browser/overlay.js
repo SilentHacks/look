@@ -8,7 +8,6 @@
   const prevState = prevApi && prevApi.state ? prevApi.state : null;
   const prevInputVal = prevApi && typeof prevApi.getInputValue === "function" ? prevApi.getInputValue() : "";
   const prevReplyText = prevApi?.getReplyText?.() || "";
-  const prevReplyDisplay = prevReplyText ? "block" : "none";
   const existingRoot = document.getElementById("hermes-gaze-root");
   if (prevApi && typeof prevApi.destroy === "function") {
     try {
@@ -31,7 +30,6 @@
     scopes: [],
     selectedScopeId: null,
     scopePending: false,
-    tucked: false,
     armed: false, // When true, lockedX / lockedY stay frozen while user interacts with HUD
     armedAt: 0,
     // null until the first real mousemove — a fabricated center point is never a valid pointer
@@ -61,7 +59,7 @@
   const uiFrame = document.createElement("iframe");
   uiFrame.setAttribute("sandbox", "");
   uiFrame.setAttribute("aria-label", "Hermes Gaze private controls");
-  uiFrame.style.cssText = "position:fixed;z-index:1;right:16px;bottom:16px;width:min(438px,calc(100vw - 32px));max-height:calc(100vh - 32px);height:1px;border:0;pointer-events:auto;background:transparent;color-scheme:normal";
+  uiFrame.style.cssText = "position:fixed;z-index:1;left:0;top:0;width:1px;height:1px;border:0;pointer-events:none;background:transparent;color-scheme:normal";
   visualShadow.appendChild(uiFrame);
   let uiRevision = 0;
   let uiEvent = null;
@@ -76,26 +74,23 @@
       }
     }
     for (const [id, node] of uiNodes) if (!shadow.contains(node)) uiNodes.delete(id);
-    return { revision: ++uiRevision, html: shadow.innerHTML, value: hudInput.value,
-      viewportHeight: Math.max(1, window.innerHeight - 32), hotkey: state.hotkey, lensActive: state.lensActive };
+    const focus = focusInput;
+    focusInput = false;
+    const dark = pageIsDark();
+    pinsLayer.style.color = dark ? "#ff8b70" : "#c33d26";
+    svgLeaders.style.stroke = pinsLayer.style.color;
+    return { revision: ++uiRevision, html: shadow.innerHTML, value: hudInput.value, focusInput:focus,
+      viewportHeight: Math.max(1, (window.visualViewport?.height || window.innerHeight) - 32), dark, hotkey:state.hotkey, lensActive:state.lensActive };
   }
   const uiObserver = new MutationObserver(() => {
     if (_intentNonce && !destroyed)
       window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
   });
   uiObserver.observe(shadow, { childList: true, subtree: true, characterData: true, attributes: true,
-    attributeFilter: ["style", "class", "aria-expanded", "placeholder"] });
+    attributeFilter: ["style", "class", "hidden", "aria-expanded", "aria-pressed", "aria-label", "disabled"] });
   function fitUiFrame(height) {
-    uiFrame.style.height = `${Math.max(1, Math.min(height, window.innerHeight - 32))}px`;
-    const r = uiFrame.getBoundingClientRect();
-    if (r.left < 16 || r.right > window.innerWidth - 16) {
-      uiFrame.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - r.width - 16))}px`;
-      uiFrame.style.right = "auto";
-    }
-    if (r.top < 16 || r.bottom > window.innerHeight - 16) {
-      uiFrame.style.top = `${Math.max(16, Math.min(r.top, window.innerHeight - r.height - 16))}px`;
-      uiFrame.style.bottom = "auto";
-    }
+    frameHeight = Math.max(1, Math.min(height, (window.visualViewport?.height || window.innerHeight) - 32));
+    positionNote();
   }
   function onUiResize() {
     fitUiFrame(uiFrame.getBoundingClientRect().height);
@@ -103,6 +98,8 @@
       window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
   }
   window.addEventListener("resize", onUiResize);
+  window.visualViewport?.addEventListener("resize", onUiResize);
+  window.visualViewport?.addEventListener("scroll", onUiResize);
   function onUiEvent(message) {
     if (document.visibilityState !== "visible" || !document.hasFocus()) return;
     const surface = getComputedStyle(host);
@@ -112,7 +109,10 @@
         surface.clipPath !== "none" || surface.maskImage !== "none" ||
         surface.scale !== "none" || surface.rotate !== "none" || surface.translate !== "none") return;
     const node = uiNodes.get(message.target);
-    if (!node || !shadow.contains(node)) return;
+    // A dismissed iframe may retain browser focus. Its trusted shortcut keys must
+    // reopen it; hidden controls still cannot submit text or activate actions.
+    if (!node || !shadow.contains(node) ||
+        node.closest("[hidden]") && !(node === hud && message.event.startsWith("key"))) return;
     hudInput.value = String(message.value || "");
     if (message.event === "input") return;
     const EventType = message.event.startsWith("key") ? KeyboardEvent : message.pointerType ? PointerEvent : MouseEvent;
@@ -120,438 +120,284 @@
     uiEvent = new EventType(message.event, { ...message, clientX: frame.left + (message.clientX || 0),
       clientY: frame.top + (message.clientY || 0),
       bubbles: !["mouseenter", "mouseleave"].includes(message.event), cancelable: true });
-    if (message.event === "mousemove" && isDragging) onWindowMouseMove(uiEvent);
-    if (message.event === "mouseup") onWindowMouseUp();
+    if (message.event === "mousemove") cursorOverHud = true;
     try { node.dispatchEvent(uiEvent); } finally { uiEvent = null; }
   }
 
 
+  // System fonts only. Private paper and controls never enter the website DOM.
   const style = document.createElement("style");
   style.textContent = `
-    :host {
-      color-scheme: dark;
-      --surface: #202623;
-      --inset: #151917;
-      --ink: #eef4ef;
-      --muted: #a0b1a7;
-      --accent: #a9dfbd;
-      --line: #3c4841;
-    }
-    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    button, input { font: inherit; }
-    button { cursor: pointer; }
-    button:focus-visible, input:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 3px;
-    }
-    button:disabled { opacity: .5; cursor: wait; }
-    .spotlight {
-      position: fixed;
-      border-radius: 50%;
-      pointer-events: none;
-      transform: translate(-50%, -50%);
-      border: 1px solid #76b89199;
-      background: #76b8910c;
-      transition: width .14s ease, height .14s ease;
-    }
-    .spotlight.armed { border: 2px solid var(--accent); background: #a9dfbd18; }
-    .spotlight-tag {
-      position: absolute;
-      bottom: -25px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--inset);
-      color: var(--accent);
-      border: 1px solid var(--line);
-      font-size: 10px;
-      padding: 3px 8px;
-      border-radius: 6px;
-      white-space: nowrap;
-    }
-    .pin-box {
-      position: fixed;
-      pointer-events: none;
-      border: 2px solid #76b891;
-      border-radius: 6px;
-      background: #76b89112;
-    }
-    .pin-badge {
-      position: absolute;
-      top: -23px;
-      left: 0;
-      background: var(--inset);
-      color: var(--accent);
-      font-size: 11px;
-      font-weight: 600;
-      padding: 3px 8px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      white-space: nowrap;
-    }
-    .lens-layer { position: fixed; inset: 0; pointer-events: none; }
-    .lens-card {
-      position: fixed;
-      width: min(268px, calc(100vw - 32px));
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 16px;
-      color: var(--ink);
-      pointer-events: auto;
-      cursor: pointer;
-      box-shadow: 0 12px 40px #0004;
-      transform: translateY(4px);
-      opacity: 0;
-      transition: transform .15s ease, opacity .15s ease;
-    }
-    .lens-card.open { transform: translateY(0); opacity: 1; }
-    .lens-card.primary, .lens-card:hover { border-color: var(--accent); }
-    .lens-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    .lens-key { background: var(--accent); color: var(--inset); padding: 3px 8px; border-radius: 5px; font-size: 11px; }
-    .lens-prob { font-size: 11px; color: var(--muted); }
-    .lens-title { font-size: 14px; font-weight: 600; margin: 0 0 6px; overflow-wrap: anywhere; }
-    .lens-desc { font-size: 12px; color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
-    .lens-card .ctrl-btn { margin: 8px 6px 0 0; }
-    .lens-card[role="dialog"] { border-color: #c7a66d; }
-    .lens-card[role="dialog"] button:first-of-type { background: #dfc18e; color: #241d12; }
-    .dwell-bar { height: 3px; background: var(--accent); width: 0%; margin-top: 12px; border-radius: 3px; }
-
-    /* Quiet Signal: one compact surface, with target and answer kept distinct. */
-    .hud-shell {
-      position: fixed;
-      right: 24px;
-      bottom: 24px;
-      width: 420px;
-      max-width: calc(100vw - 32px);
-      max-height: calc(100dvh - 32px);
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      color: var(--ink);
-      box-shadow: 0 16px 56px #0004, 0 2px 8px #0002;
-      pointer-events: auto;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      user-select: none;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .hud-shell.tucked { width: auto; }
-    .hud-dragbar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--line);
-      cursor: grab;
-      gap: 12px;
-      flex-shrink: 0;
-    }
-    .hud-dragbar:active { cursor: grabbing; }
-    .hud-shell.tucked .hud-dragbar { border-bottom: none; }
-    .plugin-identity { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; white-space: nowrap; }
-    .drag-grip { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-    .plugin-pill { display: none; }
-    .tucked .plugin-pill { display: block; max-width: 90px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; font-weight: 400; color: var(--muted); }
-    .tucked #hg-mode-btn, .tucked #hg-clear-btn { display: none; }
-    .hud-controls { display: flex; align-items: center; gap: 4px; }
-    .ctrl-btn {
-      background: transparent;
-      color: var(--muted);
-      border: 1px solid transparent;
-      border-radius: 6px;
-      min-height: 30px;
-      padding: 4px 7px;
-      font-size: 11px;
-      white-space: nowrap;
-    }
-    .ctrl-btn:hover, .chip:hover { background: #a9dfbd12; color: var(--ink); }
-    .ctrl-btn.active { color: var(--accent); border-color: var(--line); }
-    .hud-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; }
-    .hud-shell.tucked .hud-body { display: none; }
-    .target-bar { display: flex; align-items: center; gap: 12px; }
-    .target-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
-    .target-state-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; color: var(--muted); overflow-wrap: anywhere; }
-    .target-bar.locked .target-state-label { color: var(--accent); }
-    .target-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .target-sub { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; max-height: 48px; overflow-y: auto; }
-    #hg-lock-btn { background: var(--inset); color: var(--ink); padding: 5px 10px; }
-    .chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font-size: 11px; }
-    .hud-input-row { display: flex; gap: 5px; align-items: center; background: var(--inset); border: 1px solid var(--line); border-radius: 10px; padding: 5px; }
-    .hud-input-row:focus-within { border-color: var(--accent); }
-    .hud-input { flex: 1; min-width: 0; width: 0; background: transparent; border: none; padding: 7px 5px; color: var(--ink); font-size: 12px; user-select: text; }
-    .hud-input::placeholder { color: var(--muted); }
-    .hud-input:focus-visible { outline-offset: 0; border-radius: 4px; }
-    .hud-btn { background: var(--accent); color: var(--inset); border: 1px solid transparent; border-radius: 6px; padding: 7px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-    .hud-btn:hover { filter: brightness(1.08); }
-    #hg-mic-btn { background: var(--surface); color: var(--ink); }
-    #hg-mic-btn.listening { background: #783c3c; color: #fff; border-color: #edaaaa; }
-    .hud-reply { font-size: 13px; color: var(--ink); line-height: 1.65; border-top: 1px solid var(--line); padding-top: 14px; max-height: 230px; overflow-y: auto; overflow-wrap: anywhere; user-select: text; }
-    #gaze-explanation-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-    .hud-help { font-size: 10px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
-    .hud-help strong { font-weight: 500; color: var(--ink); }
-    @media (max-width: 480px) {
-      .hud-shell { right: 16px; bottom: 16px; }
-      .hud-dragbar { padding: 10px 12px; gap: 6px; }
-      .hud-body { padding: 12px; }
-      .plugin-identity { font-size: 12px; }
-      .ctrl-btn { padding: 4px 5px; }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { transition: none !important; animation: none !important; }
-    }
+    :host{--paper:#fffaf0;--ink:#292b27;--muted:#766f63;--accent:#bd3926;--rule:#d9ccba;color-scheme:light}
+    *{box-sizing:border-box} [hidden]{display:none!important}
+    button,input{font:inherit} button{cursor:pointer;color:inherit}
+    button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+    button:disabled{opacity:.4;cursor:default}
+    .hud-shell,.lens-card{position:relative;width:100%;background:var(--paper);color:var(--ink);font:18px/1.5 Georgia,serif;border:1px solid var(--rule);border-top:2px solid var(--accent);box-shadow:0 8px 28px #0002}
+    .hud-shell{padding:20px 22px 16px;max-height:var(--hg-max-height);overflow:auto;scrollbar-width:thin;clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
+    .hud-shell.entering{animation:rise .38s cubic-bezier(.2,.8,.2,1) both}
+    .note-head{display:flex;gap:12px;align-items:flex-start;padding-right:20px}
+    .folio{font:italic 36px/1 Georgia,serif;color:var(--accent)}
+    .target-name{font:11px/1.5 "Courier New",monospace;color:var(--accent);overflow-wrap:anywhere;flex:1}
+    .source{display:block;color:var(--muted);font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .note-close{position:absolute;right:8px;top:8px}
+    .icon-btn{display:inline-grid;place-items:center;width:32px;height:32px;flex-shrink:0;border:0;background:transparent;padding:7px;color:var(--muted)}
+    .icon-btn:hover,.icon-btn[aria-pressed=true]{color:var(--accent);background:#bc392610}
+    .icon-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+    .note-tools{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-top:16px;padding-top:9px;border-top:1px solid var(--rule)}
+    .note-tools .spacer{flex:1}
+    .hud-reply{max-height:min(430px,calc(var(--hg-max-height) - 200px));overflow:auto;scrollbar-width:thin;overflow-wrap:anywhere;user-select:text}
+    .question{font:italic 17px/1.5 Georgia,serif;border-bottom:1px solid var(--rule);padding-bottom:12px;margin:20px 0 14px}
+    .answer{white-space:pre-wrap;font:19px/1.5 Georgia,serif;margin:0 0 10px}
+    .answer.streaming:after{content:"";display:inline-block;height:17px;width:1px;background:var(--accent);margin-left:4px;animation:blink 1s steps(1) infinite}
+    .request{margin-bottom:18px}.request:last-child{margin-bottom:0}
+    .error{font:14px/1.5 "Courier New",monospace;color:var(--accent);white-space:pre-wrap;margin:12px 0}
+    .word-btn{border:0;background:transparent;border-bottom:1px solid var(--accent);padding:4px 0;margin:8px 18px 4px 0;color:var(--accent);font:16px Georgia,serif;min-height:32px}
+    .hud-input-row{display:flex;align-items:center;border-bottom:1px solid var(--accent);margin-top:16px;gap:5px}
+    .hud-input{min-width:0;width:100%;border:0;background:transparent;padding:8px 0;color:var(--ink);font:italic 18px/1.4 Georgia,serif}
+    .capture{display:flex;align-items:center;gap:12px;color:var(--accent);font:italic 19px Georgia,serif}
+    .ink-pulse{display:inline-flex;align-items:center;gap:3px;height:24px}
+    .ink-pulse i{display:block;background:var(--accent);width:2px;height:8px;animation:breath 1s ease-in-out infinite alternate}
+    .ink-pulse i:nth-child(2){height:20px;animation-delay:-.4s}.ink-pulse i:nth-child(3){height:14px;animation-delay:-.7s}
+    .capture.pending .ink-pulse i{height:2px;animation:blink 1.3s infinite}
+    .capture.disconnected .ink-pulse{display:none}
+    .queue-count{font:12px "Courier New",monospace;color:var(--accent);margin-left:auto}
+    .unread-button{width:42px;height:42px;border:0;background:var(--paper);color:var(--accent);font:italic 24px Georgia,serif;border-bottom:2px solid var(--accent);box-shadow:0 2px 12px #0002}
+    .index-list{display:flex;flex-direction:column;gap:0;margin-top:12px;max-height:calc(var(--hg-max-height) - 160px);overflow:auto}
+    .index-item{display:flex;align-items:center;text-align:left;gap:12px;border:0;border-bottom:1px solid var(--rule);background:transparent;padding:12px 0;color:var(--ink);font:italic 18px/1.4 Georgia,serif}
+    .index-item .folio{font-size:23px}.index-item.unread:after{content:"";width:5px;height:5px;transform:rotate(45deg);background:var(--accent);margin-left:auto;flex-shrink:0}
+    .expired{color:var(--muted)}
+    .confirmation{padding:22px;position:relative;background:var(--paper);border-top:2px solid var(--accent);color:var(--ink);font:21px/1.4 Georgia,serif}
+    .confirmation h2{font:inherit;margin:0 0 18px;overflow-wrap:anywhere}
+    .confirmation button{font:17px Georgia,serif;min-height:40px;padding:8px 15px;border:0;background:transparent;color:var(--ink)}
+    .confirmation button:first-of-type{background:var(--accent);color:var(--paper);margin-right:14px}
+    .lens-card{padding:14px 20px;text-align:left;display:flex;gap:16px;margin-bottom:8px;font:17px Georgia,serif}
+    .lens-card.primary{border-left:2px solid var(--accent)}.dwell-bar{position:absolute;bottom:0;left:0;height:2px;background:var(--accent);width:0}
+    .pin-box{position:fixed;pointer-events:none;overflow:hidden;color:inherit}
+    .proof-corner{position:absolute;width:23px;height:9px;border:solid currentColor;border-width:1.5px 0 0 1.5px;filter:drop-shadow(0 0 1px #fffaf0)}
+    .proof-corner.top-left{left:0;top:0}.proof-corner.top-right{right:0;top:0;transform:scaleX(-1)}
+    .proof-corner.bottom-right{right:0;bottom:0;transform:scale(-1)}.proof-corner.bottom-left{left:0;bottom:0;transform:scaleY(-1)}
+    .spotlight{position:fixed;pointer-events:none;border:1px dashed #c33d2670;border-radius:45%;transform:translate(-50%,-50%)}
+    @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes breath{to{transform:scaleY(.4)}}@keyframes blink{50%{opacity:.25}}
+    .errata-dark{--paper:#26312c;--ink:#f1ecdf;--muted:#b4b6a8;--accent:#ff8b70;--rule:#495448;color-scheme:dark}
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+    .hud-shell.capturing{padding:14px 80px 14px 16px}
+    .capturing .note-head,.capturing .hud-reply,.capturing .hud-input-row,.capturing .note-tools>*{display:none}
+    .capturing .note-tools{position:absolute;right:36px;top:7px;margin:0;padding:0;border:0}
+    .capturing .note-tools #hg-mic-btn{display:inline-grid}
   `;
   shadow.appendChild(style);
   visualShadow.appendChild(style.cloneNode(true));
-  const uiStyle = document.createElement("style");
-  uiStyle.textContent = ".hud-shell{position:relative!important;inset:auto!important;width:100%!important;max-width:none!important;max-height:var(--hg-max-height)!important;box-sizing:border-box}.lens-layer{position:relative!important;inset:auto!important}.lens-card{position:relative!important;inset:auto!important;width:auto!important;margin-bottom:8px}";
-  shadow.appendChild(uiStyle);
-
   const spotlight = document.createElement("div");
   spotlight.className = "spotlight";
-  const spotlightTag = document.createElement("div");
-  spotlightTag.className = "spotlight-tag";
-  spotlightTag.textContent = state.mode === "hover"
-    ? `☤ Pointer σ=${state.hoverSigmaPx}px`
-    : `☤ Gaze Cone σ=${state.sigmaPx}px`;
-  spotlight.appendChild(spotlightTag);
+  spotlight.style.opacity = "0";
   visualShadow.appendChild(spotlight);
-
   const pinsLayer = document.createElement("div");
   visualShadow.appendChild(pinsLayer);
-
   const svgLeaders = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svgLeaders.setAttribute("style", "position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;");
+  svgLeaders.setAttribute("style", "position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;fill:none;stroke:#c33d26;stroke-width:1.3");
   visualShadow.appendChild(svgLeaders);
-
   const lensLayer = document.createElement("div");
-  lensLayer.className = "lens-layer";
   shadow.appendChild(lensLayer);
-
-  const hud = document.createElement("div");
+  const hud = document.createElement("section");
   hud.className = "hud-shell";
+  hud.setAttribute("aria-label", "Errata note");
+  hud.hidden = true;
   hud.innerHTML = `
-    <div class="hud-dragbar" id="hg-dragbar" title="Drag to move the Hermes Gaze HUD anywhere">
-      <div class="plugin-identity">
-        <span class="drag-grip" aria-hidden="true"></span>
-        <span>Hermes Gaze</span>
-        <span class="plugin-pill" id="hg-tuck-summary">Ready</span>
-      </div>
-      <div class="hud-controls">
-        <button class="ctrl-btn" id="hg-mode-btn" title="Switch between precise pointer and simulated noisy gaze">Pointer</button>
-        <button class="ctrl-btn" id="hg-clear-btn" title="Clear highlights and reply (Esc)">Clear</button>
-        <button class="ctrl-btn" id="hg-tuck-btn" aria-expanded="true" aria-controls="hg-body" title="Minimize or expand Hermes Gaze">Minimize</button>
-      </div>
-    </div>
-    <div class="hud-body" id="hg-body">
-      <div class="target-bar" id="hg-target-bar">
-        <div class="target-info">
-          <div class="target-state-label" id="hg-lock-label" role="status">Following cursor</div>
-          <div class="target-name" id="hg-target-name">Point at something on the page</div>
-          <div class="target-sub" id="hg-target-sub">Your page, in context</div>
-        </div>
-        <button class="ctrl-btn" id="hg-lock-btn" title="Freeze target so you can move your mouse to the HUD">Lock</button>
-      </div>
-
-      <div class="chips-row">
-        <button class="chip" data-prompt="What does this do?">Explain this</button>
-        <button class="chip" data-prompt="Summarize this">Summarize</button>
-        <button class="chip" data-prompt="Compare these">Compare</button>
-      </div>
-
-      <div class="hud-input-row">
-        <input class="hud-input" id="hg-input" aria-label="Ask Hermes about the page" placeholder="Ask about this…" />
-        <button class="hud-btn" id="hg-mic-btn" title="Click to speak or hold Space">Speak</button>
-        <button class="hud-btn" id="hg-send" title="Send question">Ask</button>
-      </div>
-
-      <div class="hud-reply" id="hg-reply" style="display:none;"></div>
-
-      <div class="hud-help">
-        <span id="hg-hotkey-tip">Hold <strong>Space</strong> to speak · <strong>${hotkeyLabel()}</strong> to lock</span>
-        <span>Drag header to move</span>
-      </div>
-    </div>
-  `;
+    <header class="note-head"><span class="folio" id="hg-folio"></span><div class="target-name" id="hg-target-name"></div></header>
+    <button class="icon-btn note-close" id="hg-close" aria-label="Dismiss note"></button>
+    <div class="capture" id="hg-capture" hidden><span class="ink-pulse" aria-hidden="true"><i></i><i></i><i></i></span><span id="hg-lock-label"></span></div>
+    <div class="hud-reply" id="hg-reply" style="display:none"></div>
+    <div class="index-list" id="hg-index" hidden></div>
+    <div class="hud-input-row" id="hg-compose" hidden><input class="hud-input" id="hg-input" aria-label="Question about pointed source" autocomplete="off" spellcheck="true"><button class="icon-btn" id="hg-send" aria-label="Send question"></button></div>
+    <footer class="note-tools">
+      <button class="icon-btn" id="hg-index-btn" aria-label="Recall answers (Q)"></button>
+      <button class="icon-btn" id="hg-new" aria-label="New question at pointer"></button>
+      <button class="icon-btn" id="hg-followup" aria-label="Follow up on this note"></button>
+      <span class="spacer"></span><span class="queue-count" id="hg-queue"></span>
+      <button class="icon-btn" id="hg-speech" aria-label="Read answer aloud"></button>
+      <button class="icon-btn" id="hg-stop-speech" aria-label="Stop reading aloud"></button>
+      <button class="icon-btn" id="hg-auto-speech" aria-label="Automatically read completed answers" aria-pressed="false"></button>
+      <button class="icon-btn" id="hg-mic-btn" aria-label="Speak question (hold Space)"></button>
+      <button class="icon-btn" id="hg-move" aria-label="Move note to opposite side"></button>
+    </footer>`;
   shadow.appendChild(hud);
-
-  const dragbar = hud.querySelector("#hg-dragbar");
-  const tuckSummary = hud.querySelector("#hg-tuck-summary");
-  const modeBtn = hud.querySelector("#hg-mode-btn");
-  const clearBtn = hud.querySelector("#hg-clear-btn");
-  const tuckBtn = hud.querySelector("#hg-tuck-btn");
-  const targetBar = hud.querySelector("#hg-target-bar");
-  const lockLabel = hud.querySelector("#hg-lock-label");
+  const unreadMark = document.createElement("button");
+  unreadMark.className = "unread-button";
+  unreadMark.setAttribute("aria-label", "Recall unread answers");
+  unreadMark.hidden = true;
+  shadow.appendChild(unreadMark);
   const targetName = hud.querySelector("#hg-target-name");
-  const targetSub = hud.querySelector("#hg-target-sub");
-  const lockBtn = hud.querySelector("#hg-lock-btn");
+  const lockLabel = hud.querySelector("#hg-lock-label");
   const hudInput = hud.querySelector("#hg-input");
   const hudSend = hud.querySelector("#hg-send");
   const hudReply = hud.querySelector("#hg-reply");
-  if (prevInputVal && hudInput) {
-    hudInput.value = prevInputVal;
+  const compose = hud.querySelector("#hg-compose");
+  const captureStatus = hud.querySelector("#hg-capture");
+  const indexList = hud.querySelector("#hg-index");
+  const folio = hud.querySelector("#hg-folio");
+  const icons = {
+    close:"M4 4l10 10M14 4L4 14", index:"M3 4h12M3 9h12M3 14h8", new:"M9 3v12M3 9h12",
+    followup:"M7 4L3 8l4 4M3 8h8a4 4 0 0 1 4 4v3", send:"M3 9h12M10 4l5 5-5 5",
+    speech:"M3 7h3l4-4v12l-4-4H3zM13 5q5 4 0 8", auto:"M3 6l3-3 3 3M6 3v9a3 3 0 0 0 6 0V8M10 10l2-2 2 2",
+    mic:"M7 3a2 2 0 0 1 4 0v6a2 2 0 0 1-4 0zM4 8v1a5 5 0 0 0 10 0V8M9 14v3M6 17h6",
+    stop:"M4 4h10v10H4z",
+    move:"M2 9h14M5 5L1 9l4 4M13 5l4 4-4 4", expired:"M4 7V5a5 5 0 0 1 10 0v2M3 7h12v9H3z"
+  };
+  function icon(button, name) {
+    button.innerHTML = `<svg viewBox="0 0 18 18" aria-hidden="true"><path d="${icons[name]}"/></svg>`;
   }
-  if (prevReplyText && prevReplyDisplay === "block") {
-    hudReply.textContent = prevReplyText;
-    hudReply.style.display = "block";
+  for (const [id, name] of Object.entries({"hg-close":"close","hg-index-btn":"index","hg-new":"new","hg-followup":"followup","hg-send":"send","hg-speech":"speech","hg-stop-speech":"stop","hg-auto-speech":"auto","hg-mic-btn":"mic","hg-move":"move"}))
+    icon(hud.querySelector(`#${id}`), name);
+  hudInput.value = prevInputVal;
+  let noteOpen = false, indexOpen = false, composeOpen = false, noteItem = "";
+  let noteSide = 0, frameHeight = 1, cursorOverHud = false, collapseTimer = null;
+  let focusInput = false, micReady = false, localError = "";
+  const itemAnchors = new Map(), requestAnchors = new Map();
+  let pendingAnchor = null;
+  function control(action, itemId = "", requestId = "") {
+    return _emit({type:"inbox", action, item_id:itemId, request_id:requestId});
   }
-
-  // --- Draggable HUD Positioning ---
-  let isDragging = false;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-
-  dragbar.addEventListener("mousedown", (e) => {
-    if (e.target.closest("button")) return;
-    isDragging = true;
-    const rect = uiFrame.getBoundingClientRect();
-    dragOffsetX = e.clientX - rect.left;
-    dragOffsetY = e.clientY - rect.top;
-    uiFrame.style.left = `${rect.left}px`;
-    uiFrame.style.top = `${rect.top}px`;
-    uiFrame.style.right = "auto";
-    uiFrame.style.bottom = "auto";
-    e.preventDefault();
+  function selectedNote() { return inbox?.items.find(item => item.item_id === noteItem); }
+  function openComposer(followup = false) {
+    noteOpen = true; indexOpen = false; composeOpen = true; localError = "";
+    if (followup && noteItem) control("select", noteItem);
+    else { noteItem = ""; control("new"); setTargetLocked(true); }
+    pendingAnchor = {node:lockedNode};
+    focusInput = true;
+    renderNote();
+  }
+  function dismissNote() {
+    if (isListening) cancelListening();
+    noteOpen = false; composeOpen = false; indexOpen = false; localError = "";
+    clearTimeout(collapseTimer);
+    state.lensActive = false;
+    state.lensCandidates = [];
+    state.choosePending = false;
+    lensLayer.replaceChildren();
+    clearActionConfirmation();
+    setTargetLocked(false);
+    if (inbox?.selected_item_id) control("new");
+    renderNote();
+  }
+  function recallNotes() {
+    noteOpen = true; indexOpen = true; composeOpen = false; localError = "";
+    renderNote();
+  }
+  hud.querySelector("#hg-close").addEventListener("click", e => { if (trustedUi(e)) dismissNote(); });
+  unreadMark.addEventListener("click", e => { if (trustedUi(e)) recallNotes(); });
+  hud.querySelector("#hg-index-btn").addEventListener("click", e => { if (trustedUi(e)) recallNotes(); });
+  hud.querySelector("#hg-new").addEventListener("click", e => { if (trustedUi(e)) openComposer(); });
+  hud.querySelector("#hg-followup").addEventListener("click", e => { if (trustedUi(e)) openComposer(true); });
+  hud.querySelector("#hg-speech").addEventListener("click", e => {
+    if (trustedUi(e) && noteItem) control("speak", noteItem);
   });
-
-  let cursorOverHud = false;
-  function onWindowMouseMove(e) {
-    if (isDragging) {
-      const rect = uiFrame.getBoundingClientRect();
-      const maxX = window.innerWidth - rect.width - 8;
-      const maxY = window.innerHeight - rect.height - 8;
-      const nx = Math.max(8, Math.min(maxX, e.clientX - dragOffsetX));
-      const ny = Math.max(8, Math.min(maxY, e.clientY - dragOffsetY));
-      uiFrame.style.left = `${nx}px`;
-      uiFrame.style.top = `${ny}px`;
-      return;
-    }
-
-    // Ignore mouse movements inside our own HUD so moving to the HUD doesn't shift the pointer!
-    const hudRect = uiFrame.getBoundingClientRect();
-    const insideHud = (
-      e.clientX >= hudRect.left &&
-      e.clientX <= hudRect.right &&
-      e.clientY >= hudRect.top &&
-      e.clientY <= hudRect.bottom
-    );
-    cursorOverHud = insideHud;
-    if (!insideHud) {
-      recordPoint(e.clientX, e.clientY);
-    }
-  }
-
-  function onWindowMouseUp() {
-    isDragging = false;
-  }
-
-  window.addEventListener("mousemove", onWindowMouseMove, { passive: true });
-  window.addEventListener("mouseup", onWindowMouseUp);
-
-  // --- Tuck / Expand Toggle ---
-  tuckBtn.addEventListener("click", () => {
-    state.tucked = !state.tucked;
-    hud.classList.toggle("tucked", state.tucked);
-    tuckBtn.textContent = state.tucked ? "Expand" : "Minimize";
-    tuckBtn.setAttribute("aria-expanded", String(!state.tucked));
-    if (state.tucked && state.hoveredCandidate) {
-      tuckSummary.textContent = state.hoveredCandidate.label.slice(0, 18);
-    } else {
-      tuckSummary.textContent = "Ready";
-    }
+  hud.querySelector("#hg-auto-speech").addEventListener("click", e => { if (trustedUi(e)) control("auto_speak"); });
+  hud.querySelector("#hg-stop-speech").addEventListener("click", e => { if (trustedUi(e)) control("stop_speaking"); });
+  hud.querySelector("#hg-move").addEventListener("click", e => {
+    if (!trustedUi(e)) return;
+    const r = uiFrame.getBoundingClientRect(), v = window.visualViewport;
+    noteSide = r.left + r.width / 2 < (v?.offsetLeft || 0) + (v?.width || innerWidth) / 2 ? 1 : -1;
+    positionNote();
   });
-
-  // --- Mode Switcher (Hover vs Simulated Noisy Gaze) ---
-  function syncModeUI() {
-    if (state.mode === "hover") {
-      modeBtn.textContent = "Pointer";
-      modeBtn.classList.remove("active");
-    } else {
-      modeBtn.textContent = "Simulated";
-      modeBtn.classList.add("active");
+  function syncModeUI() { updateSpotlightPosition(state.pointerX, state.pointerY); }
+  function pageIsDark() {
+    const node = (noteItem ? itemAnchors.get(noteItem) : pendingAnchor)?.node;
+    for (let el = node || document.body; el; el = el.parentElement) {
+      const color = getComputedStyle(el).backgroundColor;
+      const parts = color?.match(/[\d.]+/g)?.map(Number);
+      if (parts?.length >= 3 && (parts.length < 4 || parts[3] > .5))
+        return parts[0] * .2126 + parts[1] * .7152 + parts[2] * .0722 < 110;
     }
-    const activeX = state.armed && state.lockedX !== null ? state.lockedX : state.pointerX;
-    const activeY = state.armed && state.lockedY !== null ? state.lockedY : state.pointerY;
-    updateSpotlightPosition(activeX, activeY);
+    return false;
   }
-
-  modeBtn.addEventListener("click", () => {
-    state.mode = state.mode === "hover" ? "simulated" : "hover";
-    syncModeUI();
-    _emit({ type: "configure", mode: state.mode });
-  });
-
-  clearBtn.addEventListener("click", () => {
-    clearOverlays("clearBtn");
-  });
-
-  function hotkeyLabel() {
-    return { Backquote: "`", AltRight: "Right Alt", AltLeft: "Left Alt", Space: "Space" }[state.hotkey] || state.hotkey;
-  }
-
-  function refreshHotkeyLabels() {
-    if (!state.armed) {
-      lockLabel.textContent = "Following cursor";
-      lockBtn.textContent = "Lock";
+  let lastPlacement = "";
+  function positionNote() {
+    const visible = noteOpen || !!confirmation || state.lensActive;
+    const unread = !!inbox?.items.some(item => item.unread);
+    const active = visible || unread;
+    const view = window.visualViewport;
+    const minX = (view?.offsetLeft || 0) + 16, minY = (view?.offsetTop || 0) + 16;
+    const maxX = minX + (view?.width || innerWidth) - 32;
+    const maxY = minY + (view?.height || innerHeight) - 32;
+    const width = visible ? Math.max(1, Math.min(isListening ? 250 : 344, maxX - minX)) : 42;
+    const height = visible ? frameHeight : 42;
+    let x = maxX - width, y = minY + 8, anchor = null;
+    const saved = noteItem ? itemAnchors.get(noteItem) : pendingAnchor;
+    const node = saved?.node;
+    if (node?.isConnected && rendered(node)) {
+      const r = node.getBoundingClientRect();
+      if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) anchor = r;
+    } else if (confirmation || state.lensActive) anchor = sourceRect();
+    if (saved?.snapshotId === activeSnapshot?.id) anchor = sourceRect() || anchor;
+    if (anchor) {
+      anchor = {left:Math.max(minX - 16, anchor.left), top:Math.max(minY - 16, anchor.top),
+        right:Math.min(maxX + 16, anchor.right), bottom:Math.min(maxY + 16, anchor.bottom)};
+      if (anchor.right <= anchor.left || anchor.bottom <= anchor.top) anchor = null;
     }
-    const tip = hud.querySelector("#hg-hotkey-tip");
-    if (tip) tip.innerHTML = `Hold <strong>Space</strong> to speak · <strong>${escapeHtml(hotkeyLabel())}</strong> to lock`;
-  }
-
-  // --- Target Lock / Unlock ---
-  function setTargetLocked(locked, triggerSource = "manual") {
-    if (locked && (typeof state.pointerX !== "number" || typeof state.pointerY !== "number")) {
-      return; // no real pointer position yet — nothing to lock onto
+    if (visible && anchor) {
+      const gap = 22;
+      const right = {x:anchor.right + gap, y:anchor.top - 8};
+      const left = {x:anchor.left - width - gap, y:anchor.top - 8};
+      if (noteSide < 0 && left.x >= minX) ({x,y} = left);
+      else if (noteSide > 0 && right.x + width < maxX) ({x,y} = right);
+      else if (right.x + width <= maxX) ({x,y} = right);
+      else if (left.x >= minX) ({x,y} = left);
+      else {
+        x = noteSide < 0 ? minX : maxX - width;
+        y = anchor.bottom + 18;
+        if (y + height > maxY && anchor.top - height - 18 >= minY)
+          y = anchor.top - height - 18;
+        else if (y + height > maxY) y = maxY - height;
+      }
     }
+    if (noteSide) x = noteSide < 0 ? minX : maxX - width;
+    x = Math.max(minX, Math.min(x, maxX - width));
+    for (let el = document.elementFromPoint(x + width / 2, minY); el && el !== host; el = el.parentElement) {
+      const style = getComputedStyle(el), r = el.getBoundingClientRect();
+      if (["fixed","sticky"].includes(style.position) && r.top <= minY && r.bottom < minY + (maxY - minY) / 3)
+        y = Math.max(y, r.bottom + 12);
+    }
+    y = Math.max(minY, Math.min(y, maxY - height));
+    const placement = `${x},${y},${width},${height},${active},${anchor?.left},${anchor?.top},${anchor?.right},${anchor?.bottom}`;
+    if (placement === lastPlacement) return;
+    lastPlacement = placement;
+    uiFrame.style.left = `${x}px`; uiFrame.style.top = `${y}px`;
+    uiFrame.style.width = `${active ? width : 1}px`; uiFrame.style.height = `${active ? height : 1}px`;
+    uiFrame.style.opacity = active ? "1" : "0";
+    uiFrame.style.pointerEvents = active ? "auto" : "none";
+    svgLeaders.replaceChildren();
+    if (visible && anchor && !indexOpen) {
+      const ax = x >= anchor.right ? anchor.right : x + width <= anchor.left ? anchor.left : Math.max(anchor.left, Math.min(x + width / 2, anchor.right));
+      const ay = Math.max(anchor.top, Math.min(y + 30, anchor.bottom));
+      const bx = ax <= x ? x : ax >= x + width ? x + width : ax;
+      const by = y > anchor.bottom ? y : y + height < anchor.top ? y + height : y + 30;
+      const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+      path.setAttribute("d", `M${ax},${ay} C${(ax+bx)/2},${ay} ${(ax+bx)/2},${by} ${bx},${by}`);
+      svgLeaders.appendChild(path);
+    }
+  }
+  function setTargetLocked(locked) {
+    if (locked && typeof state.pointerX !== "number") return;
     state.armed = locked;
-    if (locked) {
-      state.armedAt = Date.now() / 1000;
-      lockedNode = cursorRefs.get(cursorHistory[cursorHistory.length - 1]?.id) || null;
-      state.lockedX = state.pointerX;
-      state.lockedY = state.pointerY;
-      spotlight.classList.add("armed");
-      targetBar.classList.add("locked");
-      lockLabel.textContent = "Target locked · move freely";
-      lockBtn.textContent = "Unlock";
-      lockBtn.classList.add("active");
-    } else {
-      state.lockedX = null;
-      state.lockedY = null;
-      spotlight.classList.remove("armed");
-      targetBar.classList.remove("locked");
-      lockLabel.textContent = "Following cursor";
-      lockBtn.textContent = "Lock";
-      lockBtn.classList.remove("active");
-      if (!cursorOverHud && typeof state.pointerX === "number") rememberHit(hitNode(state.pointerX, state.pointerY));
-    }
-    const activeX = state.armed && state.lockedX !== null ? state.lockedX : state.pointerX;
-    const activeY = state.armed && state.lockedY !== null ? state.lockedY : state.pointerY;
-    updateSpotlightPosition(activeX, activeY);
+    lockedNode = locked ? cursorRefs.get(cursorHistory.at(-1)?.id) || null : null;
+    state.lockedX = locked ? state.pointerX : null;
+    state.lockedY = locked ? state.pointerY : null;
+    if (locked) state.armedAt = Date.now() / 1000;
+    updateSpotlightPosition(state.pointerX, state.pointerY);
   }
-
-  lockBtn.addEventListener("click", () => {
-    setTargetLocked(!state.armed, "button");
-  });
-
   function updateSpotlightPosition(x, y) {
-    if (typeof x !== "number" || typeof y !== "number") {
-      spotlight.style.opacity = "0";
-      spotlightTag.textContent = "";
-      return;
-    }
-    spotlight.style.opacity = "1";
-    const r = state.mode === "hover" ? 46 : Math.max(state.sigmaPx * 1.45, 110);
-    spotlight.style.width = `${r}px`;
-    spotlight.style.height = `${r}px`;
-    spotlight.style.left = `${x}px`;
-    spotlight.style.top = `${y}px`;
-    const sigmaLabel = state.mode === "hover" ? state.hoverSigmaPx : state.sigmaPx;
-    spotlightTag.textContent = state.armed
-      ? "Target locked"
-      : state.mode === "hover" ? "Pointer" : `Simulated · σ=${sigmaLabel}px`;
+    spotlight.style.opacity = state.mode === "simulated" && (noteOpen || isListening) && typeof x === "number" ? "1" : "0";
+    const diameter = Math.max(state.sigmaPx * 1.45, 110);
+    spotlight.style.cssText += `;width:${diameter}px;height:${diameter}px;left:${x}px;top:${y}px`;
   }
+  function onWindowMouseMove(e) {
+    const r = uiFrame.getBoundingClientRect();
+    cursorOverHud = uiFrame.style.pointerEvents !== "none" && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!cursorOverHud) recordPoint(e.clientX, e.clientY);
+  }
+  window.addEventListener("mousemove", onWindowMouseMove, {passive:true});
 
   // Identities stay in this closure: a selector is metadata, never a historical lookup.
   const cursorIds = new WeakMap();
@@ -1072,26 +918,21 @@
     if (destroyed || !activeSnapshot || info?.resolution_id !== activeSnapshot.resolutionId ||
         typeof info.action_id !== "string" || !info.action_id)
       return { ok: false, error: "Stale confirmation" };
+    noteItem = "";
+    pendingAnchor = null;
     const card = document.createElement("section");
-    card.className = "lens-card open";
-    card.style.cssText = "right:24px;top:80px;cursor:default;";
+    card.className = "confirmation";
     card.setAttribute("role", "dialog");
     card.setAttribute("aria-label", "Confirm page action");
     const title = document.createElement("h2");
-    title.className = "lens-title";
-    title.textContent = String(info.label || "Confirm action");
-    const description = document.createElement("p");
-    description.className = "lens-desc";
-    description.textContent = String(info.description || "Click Confirm to perform this page action.");
+    title.textContent = String(info.label || "");
     card.appendChild(title);
-    card.appendChild(description);
     const pending = { card, actionId: info.action_id, resolutionId: info.resolution_id };
     confirmation = pending;
     for (const approved of [true, false]) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "ctrl-btn";
-      button.textContent = approved ? "Confirm action" : "Cancel";
+      button.textContent = approved ? "Confirm" : "Cancel";
       button.addEventListener("click", event => {
         if (!trustedUi(event) || event.button !== 0 || event.detail < 1 ||
             event.pointerType && event.pointerType !== "mouse" ||
@@ -1105,50 +946,128 @@
       card.appendChild(button);
     }
     shadow.appendChild(card);
+    noteOpen = true;
+    renderNote();
     return { ok: true };
   }
   function showPlainMessage(text) {
-    hudReply.style.display = "block";
-    hudReply.style.whiteSpace = "pre-wrap";
-    hudReply.textContent = String(text);
+    localError = String(text);
+    noteOpen = true;
+    indexOpen = false;
+    renderNote();
+  }
+  function renderNote() {
+    const item = selectedNote();
+    hud.hidden = !noteOpen || !!confirmation;
+    hud.classList.toggle("capturing", isListening);
+    const unread = inbox?.items.filter(i => i.unread).length || 0;
+    unreadMark.hidden = noteOpen || !!confirmation || state.lensActive || !unread;
+    unreadMark.textContent = String(unread || "");
+    pinsLayer.style.display = noteOpen || isListening || !!confirmation || state.lensActive ? "" : "none";
+    svgLeaders.style.display = pinsLayer.style.display;
+    if (!noteOpen && !isListening && !confirmation && !state.lensActive) {
+      stopTrackingPins();
+      pinsLayer.replaceChildren();
+    }
+    compose.hidden = !composeOpen;
+    indexList.hidden = !indexOpen;
+    hudReply.style.display = indexOpen || !item && !localError && !prevReplyText ? "none" : "block";
+    const disconnected = inbox?.session_connected === false;
+    captureStatus.hidden = !isListening && !["recording","transcribing"].includes(inbox?.capture_state) && !disconnected;
+    captureStatus.classList.toggle("pending", !micReady);
+    captureStatus.classList.toggle("disconnected", disconnected && !isListening);
+    lockLabel.textContent = micReady ? "Listening" : disconnected ? "Disconnected" : "";
+    folio.textContent = item ? String(item.capture_order) : "";
+    targetName.replaceChildren();
+    targetName.textContent = item?.target_label || (composeOpen ? state.hoveredCandidate?.label : "") || "";
+    if (item?.source_url) {
+      const source = document.createElement("span");
+      source.className = "source";
+      try { source.textContent = new URL(item.source_url).hostname; } catch (_) { source.textContent = ""; }
+      source.setAttribute("title", item.source_url);
+      targetName.appendChild(source);
+    }
+    hud.querySelector("#hg-followup").disabled = !item;
+    hud.querySelector("#hg-followup").setAttribute("aria-pressed", String(composeOpen && !!item));
+    hudInput.setAttribute("aria-label", composeOpen && item ? `Follow up on ${item.target_label}` : "Question about pointed source");
+    hudMic.setAttribute("aria-label", isListening ? "Stop recording; 30-second limit" : "Speak question (hold Space)");
+    hud.querySelector("#hg-speech").disabled = !item?.conversation.some(run => run.text);
+    hud.querySelector("#hg-auto-speech").setAttribute("aria-pressed", String(!!inbox?.auto_speak));
+    hud.querySelector("#hg-auto-speech").setAttribute("aria-label", inbox?.speech_error || "Automatically read completed answers");
+    hud.querySelector("#hg-queue").textContent = String(item?.conversation.at(-1)?.queue_position || "") || "";
+    hudReply.replaceChildren();
+    const textNode = (tag, className, text, parent = hudReply) => {
+      const node = document.createElement(tag); node.className = className; node.textContent = text;
+      parent.appendChild(node); return node;
+    };
+    const button = (label, action, itemId = "", requestId = "", parent = hudReply) => {
+      const b = textNode("button", "word-btn", label, parent);
+      b.type = "button";
+      b.addEventListener("click", e => { if (trustedUi(e)) control(action, itemId, requestId); });
+    };
+    if (localError) textNode("p", "error", localError);
+    else if (item && !indexOpen) {
+      for (const run of item.conversation) {
+        const section = textNode("section", "request", "");
+        section.setAttribute("aria-label", run.status);
+        if (run.utterance) textNode("p", "question", run.utterance, section);
+        if (run.text) textNode("p", `answer${run.status === "streaming" ? " streaming" : ""}`, run.text, section);
+        else if (["thinking","queued","transcribing"].includes(run.status)) {
+          const pulse = textNode("span", "ink-pulse", "", section);
+          pulse.setAttribute("aria-label", run.status);
+          pulse.innerHTML = "<i></i><i></i><i></i>";
+        }
+        if (run.error) textNode("p", "error", run.error, section);
+        if (["failed","interrupted"].includes(run.status)) {
+          button("Retry","retry",item.item_id,run.request_id,section);
+          button("Skip","skip",item.item_id,run.request_id,section);
+        }
+      }
+      const expired = textNode("span", "icon-btn expired", "");
+      expired.setAttribute("aria-label", item.action_state || "Actions expired; point again to act");
+      icon(expired, "expired");
+    } else if (prevReplyText && !indexOpen && !localError) textNode("p", "answer", prevReplyText);
+    if (inbox?.speech_error) textNode("p", "error", inbox.speech_error);
+    if (inbox?.paused) button("Resume", "resume");
+    indexList.replaceChildren();
+    if (indexOpen) for (const entry of inbox?.items || []) {
+      const b = textNode("button", `index-item${entry.unread ? " unread" : ""}`, "", indexList);
+      b.type = "button";
+      textNode("span", "folio", String(entry.capture_order), b);
+      textNode("span", "", entry.target_label, b);
+      b.setAttribute("aria-label", `${entry.target_label}${entry.unread ? ", unread" : ""}`);
+      b.addEventListener("click", e => {
+        if (!trustedUi(e)) return;
+        noteItem = entry.item_id; indexOpen = false; noteSide = 0; localError = "";
+        control("select", noteItem); renderNote();
+      });
+    }
+    positionNote();
   }
   function renderInbox(event) {
     if (event.revision <= inboxRevision) return;
+    const previous = inbox;
     inboxRevision = event.revision;
     inbox = event;
     if (event.session_connected === false) cancelListening();
-    tuckSummary.textContent = `${event.session_connected ? "INBOX" : "DISCONNECTED"} · ${event.items.filter(i => i.unread).length} unread`;
-    lockLabel.textContent = event.session_connected === false ? "Disconnected · /gaze connect to resume" :
-      event.capture_state === "recording" ? "Listening…" :
-      event.paused ? "Queue paused" : "Questions answered in order";
-    hudReply.style.display = "block";
-    hudReply.style.whiteSpace = "pre-wrap";
-    hudReply.replaceChildren();
-    const button = (label, action, itemId = "", requestId = "") => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.style.display = "block";
-      b.textContent = label;
-      b.addEventListener("click", () => _emit({ type: "inbox", action, item_id: itemId, request_id: requestId }));
-      hudReply.appendChild(b);
-    };
-    button("New question at pointer", "new");
-    if (event.paused) button("Resume", "resume");
-    for (const item of event.items) {
-      const last = item.conversation.at(-1);
-      button(`${item.item_id === event.selected_item_id ? "Selected · " : ""}${item.unread ? "● " : ""}#${item.capture_order} ${item.target_label} · ${last?.status || "captured"}${last?.queue_position ? ` · waiting ${last.queue_position}` : ""}`, "select", item.item_id);
-      if (item.item_id !== event.selected_item_id) continue;
-      const detail = document.createElement("div");
-      detail.textContent = `${item.source_url}\n${item.action_state}\n` + item.conversation.map(m =>
-        `Q: ${m.utterance || "(transcribing)"}\n${m.status}${m.queue_position ? ` · queue ${m.queue_position}` : ""}\n${m.text}${m.error ? `\n${m.error}` : ""}`).join("\n\n");
-      hudReply.appendChild(detail);
-      for (const message of item.conversation) {
-        if (!["failed", "interrupted"].includes(message.status)) continue;
-        button("Retry", "retry", item.item_id, message.request_id);
-        button("Skip", "skip", item.item_id, message.request_id);
+    const newest = event.items.at(-1);
+    if (newest && !previous?.items.some(i => i.item_id === newest.item_id)) {
+      const status = newest.conversation.at(-1)?.status;
+      if (!indexOpen && !composeOpen && !["complete","failed","interrupted"].includes(status)) {
+        noteItem = newest.item_id; noteOpen = true; noteSide = 0;
+        hud.classList.add("entering");
       }
     }
-    hudInput.placeholder = event.selected_item_id ? "Follow up on selected item…" : DEFAULT_PLACEHOLDER;
+    if (event.selected_item_id && !noteItem) noteItem = event.selected_item_id;
+    const last = selectedNote()?.conversation.at(-1);
+    if (last && ["complete","failed","interrupted"].includes(last.status) &&
+        previous?.items.find(i => i.item_id === noteItem)?.conversation.at(-1)?.status !== last.status) {
+      clearTimeout(collapseTimer);
+      collapseTimer = setTimeout(() => {
+        if (!cursorOverHud && !composeOpen && !indexOpen) { noteOpen = false; renderNote(); }
+      }, 12000);
+    }
+    renderNote();
   }
   function onSessionEvent(event) {
     if (!destroyed && event?.type === "inbox") renderInbox(event);
@@ -1172,29 +1091,14 @@
   function onCursorScroll() {
     if (!state.armed && !cursorOverHud && typeof state.pointerX === "number")
       rememberHit(hitNode(state.pointerX, state.pointerY));
+    positionNote();
   }
   window.addEventListener("scroll", onCursorScroll, { passive: true, capture: true });
 
   function updateLiveInspector(x, y) {
-    if (typeof x !== "number" || typeof y !== "number") {
-      state.hoveredCandidate = null;
-      targetName.textContent = "Point at something on the page";
-      targetSub.textContent = "Your page, in context";
-      return;
-    }
     const el = state.armed ? lockedNode : hitNode(x, y);
-    const best = el ? cursorMetadata(el) : null;
-    state.hoveredCandidate = best;
-    if (best) {
-      targetName.textContent = best.label || "Page element";
-      targetSub.textContent = best.consequence || best.summary || formatRoleDisplayName(best.role || best.tag);
-      if (state.tucked) {
-        tuckSummary.textContent = best.label.slice(0, 18);
-      }
-    } else {
-      targetName.textContent = "No target under the pointer";
-      targetSub.textContent = "Point at text, a link or a control";
-    }
+    state.hoveredCandidate = el ? cursorMetadata(el) : null;
+    if (composeOpen && !noteItem) targetName.textContent = state.hoveredCandidate?.label || "";
   }
 
   function recordPoint(x, y) {
@@ -1252,16 +1156,7 @@
     }
   }
 
-  function armInteraction(triggerSource) {
-    setTargetLocked(true, triggerSource);
-    if (state.tucked) {
-      state.tucked = false;
-      hud.classList.remove("tucked");
-      tuckBtn.textContent = "Minimize";
-      tuckBtn.setAttribute("aria-expanded", "true");
-      tuckSummary.textContent = "Ready";
-    }
-  }
+  function armInteraction() { openComposer(); }
 
   // --- Resolver Intent Channel (the Python session resolves, explains, transcribes & clicks) ---
   let _intentSeq = 0;
@@ -1280,6 +1175,11 @@
       showPlainMessage("Resolver offline. Run /gaze in the Hermes session, then retry.");
       return false;
     }
+    if (["submit","record_stop"].includes(intent.type)) {
+      pendingAnchor = {node:state.armed ? lockedNode : cursorRefs.get(cursorHistory.at(-1)?.id),
+        snapshotId:intent.cursor_context?.snapshot_id};
+      requestAnchors.set(intent.id, pendingAnchor);
+    }
     window.__hermesGazeIntent(JSON.stringify(intent));
     return true;
   }
@@ -1292,8 +1192,8 @@
   function emitResolve(utterance, words, captured) {
     const text = (utterance || "").trim();
     if (!text) return false;
-    if (inbox?.selected_item_id) {
-      return _emit({ type: "followup", item_id: inbox.selected_item_id, utterance: text });
+    if (composeOpen && noteItem) {
+      return _emit({ type: "followup", item_id: noteItem, utterance: text });
     }
     state.scopePending = false;
     state.scopes = [];
@@ -1338,15 +1238,6 @@
   }
 
 
-  function escapeHtml(value) {
-    return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    }[ch]));
-  }
 
   function onIntentResult(msg) {
     if (typeof msg === "string") {
@@ -1357,8 +1248,14 @@
       }
     }
     if (!msg || typeof msg !== "object") return;
+    if (msg.item_id && requestAnchors.has(msg.id)) {
+      itemAnchors.set(msg.item_id, requestAnchors.get(msg.id));
+      requestAnchors.delete(msg.id);
+      noteItem = msg.item_id;
+      positionNote();
+    }
     if (msg.type === "inbox" || msg.type === "followup") {
-      if (!msg.ok) lockLabel.textContent = String(msg.error || "Inbox request failed.");
+      if (!msg.ok) showPlainMessage(msg.error || "Inbox request failed.");
       return;
     }
 
@@ -1367,9 +1264,8 @@
         isListening = false;
         resetMicUiIdle(msg.error || "Microphone unavailable.");
       } else if (isListening) {
-        hudMic.textContent = "Stop";
-        hudInput.placeholder = "Listening…";
-        lockLabel.textContent = `Listening · release Space to send · cancels after 30s (${msg.ready_ms}ms startup)`;
+        micReady = true;
+        renderNote();
       }
       return;
     }
@@ -1380,19 +1276,17 @@
       return;
     }
     if (msg.type === "record_stop") {
-      if (!isListening) resetMicUiIdle(msg.ok ? (msg.delivery === "one_shot" ? "complete" : "queued") : msg.error || "Recording failed.");
+      if (!isListening) resetMicUiIdle(msg.ok ? "" : msg.error || "Recording failed.");
       if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
-        showPlainMessage(`${msg.message || "Read-only one-shot fallback"}\n${msg.explanation || ""}`);
+        showPlainMessage(msg.explanation || "");
       } else if (!msg.ok) showPlainMessage(msg.error || "Recording failed.");
       return;
     }
     if (msg.type === "confirm_action") {
       if (msg.resolution_id !== state.resolutionId) return;
-      const outcome = msg.outcome === "unknown" ? "unknown outcome" : !msg.ok ? "failed" :
-        msg.cancelled ? "cancelled" : msg.executed ? "executed" : "not executed";
-      lockLabel.textContent = outcome;
-      showPlainMessage(msg.error || `Action ${outcome}.`);
+      if (!msg.ok && msg.error) showPlainMessage(msg.error);
+      else dismissNote();
       return;
     }
 
@@ -1402,11 +1296,13 @@
       if (!msg.ok) {
         showPlainMessage(msg.error || "Connect Hermes with /gaze, then retry.");
       } else if (msg.delivery === "session") {
-        tuckSummary.textContent = "INBOX";
+        composeOpen = false;
+        hudInput.value = "";
+        renderNote();
       } else if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         if (msg.mode !== "hover" && Array.isArray(msg.ranked)) renderPins(msg.ranked);
-        showPlainMessage(`${msg.message || "Read-only one-shot fallback — no conversation or actions."}\n${msg.explanation || msg.text || msg.answer || ""}`);
+        showPlainMessage(msg.explanation || msg.text || msg.answer || "");
       }
       return;
     }
@@ -1435,17 +1331,8 @@
     }
 
     if (msg.type === "explain") {
-      if (msg.scope_id !== state.selectedScopeId) return;
-      const expEl = shadow.querySelector("#gaze-explanation-text");
-      // correlate the reply with the pin that asked for it (a newer pin wins the element)
-      if (expEl && String(expEl.dataset.rid || "") === String(msg.resolution_id || "")) {
-        if (msg.ok && msg.explanation) {
-          expEl.textContent = msg.explanation;
-        } else {
-          const fallback = msg.error || _pendingExplainFallback || "Explanation unavailable.";
-          expEl.textContent = fallback;
-        }
-      }
+      if (msg.scope_id !== state.selectedScopeId || msg.resolution_id !== state.resolutionId) return;
+      showPlainMessage(msg.explanation || msg.error || _pendingExplainFallback || "Explanation unavailable.");
       return;
     }
 
@@ -1463,57 +1350,25 @@
     // "configure" acks and unknown types are no-ops
   }
 
-  function formatRoleDisplayName(role) {
-    const r = (role || "").toLowerCase();
-    switch (r) {
-      case "columnheader":
-      case "th":
-        return "Column Header";
-      case "cell":
-      case "td":
-        return "Table Cell";
-      case "button":
-        return "Button";
-      case "link":
-      case "a":
-        return "Link";
-      case "table":
-        return "Table";
-      case "section":
-        return "Section";
-      case "article":
-      case "card":
-        return "Card";
-      case "textbox":
-      case "input":
-        return "Input Field";
-      case "select":
-        return "Dropdown";
-      default:
-        return r ? r.charAt(0).toUpperCase() + r.slice(1) : "Element";
-    }
-  }
 
-  const DEFAULT_PLACEHOLDER = "Ask about this…";
   const TALK_KEY = "Space";
   const hudMic = hud.querySelector("#hg-mic-btn");
   let isListening = false;
   let spaceHeld = false;
 
-  function resetMicUiIdle(statusMessage) {
-    hudMic.classList.remove("listening");
-    hudMic.textContent = "Speak";
-    hudInput.placeholder = DEFAULT_PLACEHOLDER;
-    if (statusMessage) lockLabel.textContent = statusMessage;
+  function resetMicUiIdle(error) {
+    micReady = false;
+    if (error) localError = error;
+    renderNote();
   }
 
   function startListening() {
     if (isListening || document.visibilityState !== "visible" || !document.hasFocus()) return;
     isListening = true;
-    hudMic.classList.add("listening");
-    hudMic.textContent = "Opening…";
-    hudInput.placeholder = "Wait for Listening, then speak…";
-    lockLabel.textContent = "Opening microphone · wait for Listening";
+    noteOpen = true;
+    localError = "";
+    pendingAnchor = {node:state.armed ? lockedNode : cursorRefs.get(cursorHistory.at(-1)?.id)};
+    renderNote();
     if (!_emit({ type: "record_start" })) {
       isListening = false;
       resetMicUiIdle("Microphone offline.");
@@ -1523,7 +1378,7 @@
   function stopListening() {
     if (!isListening) return;
     isListening = false;
-    resetMicUiIdle("Transcribing audio locally…");
+    resetMicUiIdle();
     // Freeze evidence at release, before transcription and before routing can change it.
     const locked = state.armed && state.lockedX !== null;
     const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
@@ -1540,7 +1395,7 @@
     isListening = false;
     spaceHeld = false;
     _emit({ type: "record_cancel" });
-    resetMicUiIdle("Recording cancelled: tab or page lost focus.");
+    resetMicUiIdle();
   }
 
   hudMic.addEventListener("click", (e) => {
@@ -1550,19 +1405,10 @@
     else startListening();
   });
 
-  // --- Wire Chips & Input ---
-  hud.querySelectorAll(".chip").forEach((chip) => {
-    chip.addEventListener("click", (e) => {
-      if (!trustedUi(e)) return;
-      const prompt = chip.getAttribute("data-prompt") || "";
-      hudInput.value = prompt;
-      emitResolve(prompt);
-    });
-  });
 
   hudSend.addEventListener("click", (e) => {
     if (!trustedUi(e)) return;
-    emitResolve(hudInput.value);
+    submitQuestion();
   });
 
   hudInput.addEventListener("keydown", (e) => {
@@ -1570,11 +1416,19 @@
     e.stopPropagation();
     if (e.key === "Enter") {
       e.preventDefault();
-      emitResolve(hudInput.value);
+      submitQuestion();
     } else if (e.key === "Escape") {
-      clearOverlays("inputEscape");
+      dismissNote();
     }
   });
+
+  function submitQuestion() {
+    if (!emitResolve(hudInput.value)) return;
+    composeOpen = false;
+    hudInput.value = "";
+    setTargetLocked(false);
+    renderNote();
+  }
 
   function isEditableTarget(e) {
     const path = e.composedPath ? e.composedPath() : [e.target];
@@ -1592,6 +1446,11 @@
   function onWindowKeyDown(e) {
     if (!trustedUi(e) || document.visibilityState !== "visible") return;
     if (isEditableTarget(e)) return;
+    if (!e.altKey && !e.metaKey && !e.ctrlKey && e.code === "KeyQ") {
+      e.preventDefault();
+      if (!e.repeat) recallNotes();
+      return;
+    }
     if (e.code === TALK_KEY && !e.altKey && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
@@ -1603,7 +1462,7 @@
     }
     if (e.code === (state.hotkey || "Backquote")) {
       e.preventDefault();
-      setTargetLocked(!state.armed, "hotkey");
+      if (!e.repeat) openComposer();
     } else if (state.lensActive && /^Digit[1-9]$/.test(e.code)) {
       const idx = parseInt(e.code.replace("Digit", ""), 10) - 1;
       if (idx >= 0 && idx < state.lensCandidates.length) {
@@ -1611,7 +1470,7 @@
         selectLensCandidate(idx, "key");
       }
     } else if (e.key === "Escape") {
-      clearOverlays("windowEscape");
+      dismissNote();
     }
   }
 
@@ -1861,26 +1720,15 @@
     activeSnapshot = null;
     snapshots.clear();
     clearActionConfirmation();
-    sessionFinished = true;
     svgLeaders.innerHTML = "";
     lensLayer.innerHTML = "";
     state.lensActive = false;
     state.lensCandidates = [];
     setTargetLocked(false);
-    hudReply.style.display = "none";
+    dismissNote();
   }
 
-  function showHudMessage(htmlText) {
-    if (state.tucked) {
-      state.tucked = false;
-      hud.classList.remove("tucked");
-      tuckBtn.textContent = "Minimize";
-      tuckBtn.setAttribute("aria-expanded", "true");
-      tuckSummary.textContent = "Ready";
-    }
-    hudReply.style.display = "block";
-    hudReply.innerHTML = htmlText;
-  }
+  function showHudMessage(text) { showPlainMessage(text); }
 
   let livePins = [];
   let pinFrame = null;
@@ -1889,9 +1737,26 @@
     pinFrame = null;
     livePins = [];
   }
+  function sourceRect() {
+    let union = null;
+    for (const { candidate, box, rect } of livePins) {
+      if (!rect || box.style.display === "none" || !candidate.node.isConnected ||
+          !snapshots.has(candidate.snapshotId) || candidate.resolutionId &&
+          (activeSnapshot?.id !== candidate.snapshotId || activeSnapshot.resolutionId !== candidate.resolutionId)) continue;
+      if (!union) union = { ...rect };
+      else {
+        union.left = Math.min(union.left, rect.left);
+        union.top = Math.min(union.top, rect.top);
+        union.right = Math.max(union.right, rect.right);
+        union.bottom = Math.max(union.bottom, rect.bottom);
+      }
+    }
+    return union ? { ...union, width: union.right - union.left, height: union.bottom - union.top } : null;
+  }
   function refreshPins() {
     pinFrame = null;
-    livePins = livePins.filter(({ candidate, box }) => {
+    livePins = livePins.filter(pin => {
+      const { candidate, box } = pin;
       const { node, snapshotId, resolutionId } = candidate;
       if (destroyed || !node.isConnected || !snapshots.has(snapshotId) ||
           resolutionId && (activeSnapshot?.id !== snapshotId || activeSnapshot.resolutionId !== resolutionId)) {
@@ -1912,46 +1777,54 @@
         if (clipY) { top = Math.max(top, r.top); bottom = Math.min(bottom, r.top + r.height); }
       }
       box.style.display = right > left && bottom > top && rendered(node) && !sensitive(node) ? "" : "none";
+      pin.rect = box.style.display === "none" ? null : { left, top, right, bottom };
       box.style.left = `${left}px`;
       box.style.top = `${top}px`;
       box.style.width = `${Math.max(0, right - left)}px`;
       box.style.height = `${Math.max(0, bottom - top)}px`;
       return true;
     });
+    positionNote();
     if (livePins.length) pinFrame = requestAnimationFrame(refreshPins);
   }
 
   function renderPins(candidates, messageHtml) {
     stopTrackingPins();
     pinsLayer.innerHTML = "";
-    svgLeaders.innerHTML = "";
+    pinsLayer.style.display = "";
     lensLayer.innerHTML = "";
     state.lensActive = false;
 
-    (candidates || []).forEach((cand, idx) => {
-      if (!cand.node && activeSnapshot) {
-        const entry = snapshotEntry(activeSnapshot.id, activeSnapshot.resolutionId, cand.id);
-        if (entry?.node) cand = { ...cand, node: entry.node, snapshotId: activeSnapshot.id,
-          resolutionId: activeSnapshot.resolutionId };
+    for (let cand of candidates || []) {
+      const entry = !cand.node && activeSnapshot
+        ? snapshotEntry(activeSnapshot.id, activeSnapshot.resolutionId, cand.id) : null;
+      if (entry) cand = { ...cand, snapshotId: activeSnapshot.id, resolutionId: activeSnapshot.resolutionId };
+      const nodes = cand.members || entry?.members || [cand.node || entry?.node || null];
+      for (const node of nodes) {
+        if (!node && (!Array.isArray(cand.rect_vp) || cand.rect_vp.length !== 4 || !cand.rect_vp.every(Number.isFinite))) continue;
+        const box = document.createElement("div");
+        box.className = "pin-box";
+        box.setAttribute("aria-hidden", "true");
+        for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
+          const mark = document.createElement("span");
+          mark.className = `proof-corner ${corner}`;
+          box.appendChild(mark);
+        }
+        pinsLayer.appendChild(box);
+        if (node) livePins.push({ candidate: { ...cand, node }, box, rect: null });
+        else {
+          const [x, y, w, h] = cand.rect_vp;
+          const left = Math.max(0, x), top = Math.max(0, y);
+          const right = Math.min(window.innerWidth, x + w), bottom = Math.min(window.innerHeight, y + h);
+          box.style.display = right > left && bottom > top ? "" : "none";
+          box.style.left = `${left}px`;
+          box.style.top = `${top}px`;
+          box.style.width = `${Math.max(0, right - left)}px`;
+          box.style.height = `${Math.max(0, bottom - top)}px`;
+        }
       }
-      if (!Array.isArray(cand.rect_vp) || cand.rect_vp.length !== 4 || !cand.rect_vp.every(Number.isFinite)) return;
-      const [x, y, w, h] = cand.rect_vp;
-      const box = document.createElement("div");
-      box.className = "pin-box";
-      box.style.left = `${x - 4}px`;
-      box.style.top = `${y - 4}px`;
-      box.style.width = `${w + 8}px`;
-      box.style.height = `${h + 8}px`;
-
-      const badge = document.createElement("div");
-      badge.className = "pin-badge";
-      const probPct = cand.probability !== undefined ? ` · ${Math.round(cand.probability * 100)}%` : "";
-      badge.textContent = `[${idx + 1}] ${cand.label.slice(0, 26)}${probPct}`;
-      box.appendChild(badge);
-      pinsLayer.appendChild(box);
-      if (cand.node) livePins.push({ candidate: cand, box });
-    });
-    if (livePins.length) refreshPins();
+    }
+    refreshPins();
 
     if (messageHtml) {
       showHudMessage(messageHtml);
@@ -1959,68 +1832,37 @@
   }
 
   function renderSemanticLens(candidates, promptMessage, resolutionId) {
-    stopTrackingPins();
-    pinsLayer.innerHTML = "";
-    svgLeaders.innerHTML = "";
-    lensLayer.innerHTML = "";
+    renderPins(candidates);
     state.lensActive = true;
     state.lensCandidates = candidates || [];
     state.resolutionId = resolutionId || 0;
 
-    if (promptMessage) {
-      showPlainMessage(promptMessage);
-    }
-
-    const count = state.lensCandidates.length;
-    if (!count) return;
-
-    const anchorX = state.lensCandidates[0].rect_vp[0];
-    const anchorY = state.lensCandidates[0].rect_vp[1] + state.lensCandidates[0].rect_vp[3] + 26;
-    const startX = Math.max(20, Math.min(window.innerWidth - count * 282 - 20, anchorX - 80));
-    const cardY = Math.min(window.innerHeight - 190, Math.max(76, anchorY));
-
     state.lensCandidates.forEach((cand, idx) => {
-      const [rx, ry, rw, rh] = cand.rect_vp;
-      const pin = document.createElement("div");
-      pin.className = "pin-box";
-      pin.style.left = `${rx - 2}px`;
-      pin.style.top = `${ry - 2}px`;
-      pin.style.width = `${rw + 4}px`;
-      pin.style.height = `${rh + 4}px`;
-      pinsLayer.appendChild(pin);
-
-      const cardX = startX + idx * 280;
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", String(rx + rw / 2));
-      line.setAttribute("y1", String(ry + rh));
-      line.setAttribute("x2", String(cardX + 134));
-      line.setAttribute("y2", String(cardY));
-      line.setAttribute("stroke", idx === 0 ? "#38bdf8" : "#6366f1");
-      line.setAttribute("stroke-width", idx === 0 ? "2" : "1.5");
-      line.setAttribute("stroke-dasharray", "4 4");
-      svgLeaders.appendChild(line);
-
-      const card = document.createElement("div");
-      card.className = `lens-card ${idx === 0 ? "primary" : ""}`;
-      card.style.left = `${cardX}px`;
-      card.style.top = `${cardY}px`;
-      const probPct = Math.round((cand.probability || 0) * 100);
-      card.innerHTML = `
-        <div class="lens-header">
-          <span class="lens-key">[${idx + 1}] Select</span>
-          <span class="lens-prob">P = ${probPct}%</span>
-        </div>
-        <div class="lens-title">${escapeHtml(cand.label || cand.selector)}</div>
-        <div class="lens-desc">↳ ${escapeHtml(cand.consequence_preview || cand.consequence || "Execute action")}</div>
-        <div class="lens-desc" style="margin-top:5px;font-size:10px;color:#64748b;">Dwell ${state.dwellMs}ms · Key ${idx + 1} · Click</div>
-        <div class="dwell-bar" id="dwell-${idx}"></div>
-      `;
-
-      const dwellBar = card.querySelector(`#dwell-${idx}`);
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "lens-card open";
+      card.setAttribute("aria-label", `Choose ${idx + 1}${cand.label ? `: ${cand.label}` : ""}`);
+      const key = document.createElement("span");
+      key.className = "lens-key";
+      key.textContent = String(idx + 1);
+      const title = document.createElement("span");
+      title.className = "lens-title";
+      title.textContent = cand.label || "";
+      const dwellBar = document.createElement("span");
+      dwellBar.className = "dwell-bar";
+      dwellBar.setAttribute("aria-hidden", "true");
+      card.append(key, title, dwellBar);
       let dwellStart = 0;
       let rafId = null;
 
+      function currentLens() {
+        return !destroyed && state.lensActive && !state.choosePending &&
+          state.resolutionId === (resolutionId || 0) && state.lensCandidates[idx] === cand &&
+          lensLayer.contains(card) && document.visibilityState === "visible" && document.hasFocus();
+      }
       function tickDwell() {
+        rafId = null;
+        if (!currentLens()) return;
         const elapsed = performance.now() - dwellStart;
         const pct = Math.min(100, (elapsed / state.dwellMs) * 100);
         if (dwellBar) dwellBar.style.width = `${pct}%`;
@@ -2031,22 +1873,27 @@
         }
       }
 
-      card.addEventListener("mouseenter", () => {
+      card.addEventListener("mouseenter", event => {
+        if (!trustedUi(event) || !currentLens()) return;
+        if (rafId !== null) cancelAnimationFrame(rafId);
         dwellStart = performance.now();
         rafId = requestAnimationFrame(tickDwell);
       });
-      card.addEventListener("mouseleave", () => {
-        if (rafId) cancelAnimationFrame(rafId);
-        if (dwellBar) dwellBar.style.width = "0%";
+      card.addEventListener("mouseleave", event => {
+        if (!trustedUi(event)) return;
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = null;
+        dwellBar.style.width = "0%";
       });
       card.addEventListener("click", (e) => {
+        if (!trustedUi(e) || !currentLens()) return;
         e.stopPropagation();
         selectLensCandidate(idx, "click");
       });
 
       lensLayer.appendChild(card);
-      requestAnimationFrame(() => card.classList.add("open"));
     });
+    renderNote();
   }
 
   function selectLensCandidate(idx, modality) {
@@ -2060,6 +1907,7 @@
   function destroy() {
     destroyed = true;
     uiObserver.disconnect();
+    clearTimeout(collapseTimer);
     window.removeEventListener("resize", onUiResize);
     stopTrackingPins();
     activeSnapshot = null;
@@ -2067,9 +1915,10 @@
     clearActionConfirmation();
     window.removeEventListener("pagehide", onNavigation);
     window.removeEventListener("scroll", onCursorScroll, true);
+    window.visualViewport?.removeEventListener("resize", onUiResize);
+    window.visualViewport?.removeEventListener("scroll", onUiResize);
     cancelListening();
     window.removeEventListener("mousemove", onWindowMouseMove, { passive: true });
-    window.removeEventListener("mouseup", onWindowMouseUp);
     window.removeEventListener("keydown", onWindowKeyDown, { capture: true });
     window.removeEventListener("keyup", onWindowKeyUp, { capture: true });
     window.removeEventListener("blur", onWindowBlur);
@@ -2093,7 +1942,6 @@
     Configure(opts) {
       Object.assign(state, opts || {});
       syncModeUI();
-      refreshHotkeyLabels();
       updateLiveInspector(state.pointerX, state.pointerY);
     },
     setIntentNonce(n) {
