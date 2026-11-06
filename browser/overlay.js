@@ -718,7 +718,10 @@
   const sensitiveSelector = 'input[type="password"],[autocomplete^="cc-"],[autocomplete="current-password"],[autocomplete="new-password"],[name*="card" i],[name*="payment" i],[name*="cvv" i],[name*="cvc" i],[name^="cc-" i],[id*="card" i],[id*="payment" i],[id*="cvv" i],[id*="cvc" i],[id^="cc-" i]';
   function sensitive(el) {
     const field = el && el.closest("input,textarea,select,[contenteditable]");
-    return !!field && field.matches(sensitiveSelector);
+    if (!field) return false;
+    const tokens = (field.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
+    return field.matches(sensitiveSelector) ||
+      tokens.some(token => token.startsWith("cc-") || token === "current-password" || token === "new-password");
   }
   function safeText(el, max = 160) {
     if (!el) return "";
@@ -796,7 +799,7 @@
       return id;
     }
     const blocks = new Map();
-    const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean))].slice(-64);
+    const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean).reverse())].slice(0, 64).reverse();
     for (const id of refs) {
       const el = cursorRefs.get(id);
       if (!el || !el.isConnected) { capture.targets.push({ id, available: false, reason: "historical node detached" }); continue; }
@@ -810,9 +813,14 @@
         const bid = handle(table);
         if (!blocks.has(bid)) {
           const rowNodes = [...table.querySelectorAll("tr,[role=row]")].filter(row => row.closest("table,[role=grid]") === table);
-          const headerRow = rowNodes.find(row => row.querySelector("th,[role=columnheader]"));
           const allCells = row => [...row.querySelectorAll("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]")]
             .filter(cell => cell.closest("tr,[role=row]") === row);
+          const headerRow = rowNodes.find(row => {
+            const cells = allCells(row);
+            return cells.some(cell => cell.matches("[role=columnheader],th[scope=col],th[scope=colgroup]")) ||
+              (cells.length > 0 && cells.every(cell => cell.matches("th") &&
+                !cell.matches("[scope=row],[scope=rowgroup],[role=rowheader]")));
+          });
           const cellsOf = row => allCells(row).slice(0, 12);
           const dataRows = rowNodes.filter(row => row !== headerRow);
           blocks.set(bid, { id: bid, kind: "table", label: safeText(table.querySelector("caption"), 80),

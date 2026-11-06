@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const test = require('node:test');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../browser/overlay.js'), 'utf8');
 function element(tag, children = [], attrs = {}) {
   const el = { nodeType: 1, tagName: tag.toUpperCase(), children, attrs, isConnected: true,
@@ -12,6 +13,10 @@ function element(tag, children = [], attrs = {}) {
         s = s.trim();
         if (s === 'input' || s === 'textarea' || s === 'select' || s === 'script' || s === 'style' || s === 'label') return tag === s;
         if (s === 'input[type="password"]') return tag === 'input' && attrs.type === 'password';
+        if (s === '[contenteditable]') return Object.hasOwn(attrs, 'contenteditable');
+        if (s === '[scope=row]' || s === '[scope=rowgroup]') return attrs.scope === s.slice(7, -1);
+        if (s === '[role=rowheader]' || s === '[role=columnheader]') return attrs.role === s.slice(6, -1);
+        if (s === 'th[scope=col]' || s === 'th[scope=colgroup]') return tag === 'th' && attrs.scope === s.slice(9, -1);
         if (s.startsWith('[autocomplete')) return !!attrs.autocomplete && attrs.autocomplete.startsWith('cc-');
         if (['table', 'tr', 'td', 'th', 'section', 'ul', 'ol', 'li', 'article', 'p', 'h2'].includes(s)) return tag === s;
         return false;
@@ -130,3 +135,41 @@ for (const [kind, content] of [['ul', 'First item Second item'], ['article', 'Pr
   assert.equal(block.text, content);
 }
 console.log('cursor DOM privacy, dwell, and detached-identity checks passed');
+
+test('tokenized payment autocomplete never enters the wire or ancestors', () => {
+  const field = element('div', [text('TOKEN-CARD-SECRET')], {
+    contenteditable: 'true', autocomplete: 'section-checkout shipping cc-number',
+  });
+  const parent = element('section', [field]);
+  api.rememberHit(field, 8);
+  const snapshot = api.captureCursorContext();
+  const current = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  assert.equal(current.available, false);
+  assert.ok(!JSON.stringify(snapshot).includes('TOKEN-CARD-SECRET'));
+  assert.ok(!api.safeText(parent).includes('TOKEN-CARD-SECRET'));
+});
+
+test('revisiting an old node keeps the latest target after the snapshot cap', () => {
+  const nodes = Array.from({ length: 65 }, (_, i) => element('p', [text(`Visited ${i}`)]));
+  nodes.forEach((node, i) => api.rememberHit(node, 9 + i / 100));
+  api.rememberHit(nodes[0], 10);
+  const snapshot = api.captureCursorContext();
+  const current = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  assert.ok(current && current.available, 'latest real node must survive the target cap');
+  assert.equal(current.label, 'Visited 0');
+});
+
+test('native row headers remain data rows rather than becoming column headers', () => {
+  const rows = ['Alpha', 'Beta'].map(name => element('tr', [
+    element('th', [text(name)], { scope: 'row' }), element('td', [text('42')]),
+  ]));
+  element('table', rows);
+  api.rememberHit(rows[0].children[1], 11);
+  const snapshot = api.captureCursorContext();
+  const current = snapshot.targets.find(t => t.id === snapshot.history.at(-1).id);
+  const block = snapshot.blocks.find(b => b.id === current.cell.block);
+  assert.equal(current.cell.row, 1);
+  assert.equal(block.total_rows, 2);
+  assert.equal(block.headers.length, 0);
+  assert.ok(block.rows.some(row => row.cells[0] === 'Alpha' && row.cells[1] === '42'));
+});
