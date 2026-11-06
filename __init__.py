@@ -72,6 +72,7 @@ def register(ctx: Any) -> None:
         dwell_ms=cfg.dwell_ms,
         wiggle_trigger=cfg.wiggle_trigger,
         hotkey=cfg.hotkey,
+        answer_turn_seconds=cfg.answer_turn_seconds,
     )
     service.set_runtime(cfg, llm=getattr(ctx, "llm", None))
 
@@ -101,6 +102,7 @@ def register(ctx: Any) -> None:
     from .voice_turns import VoiceTurns
 
     turns = VoiceTurns(ctx, session)
+    turns.model_names = cfg.model_subject_names
     service.set_voice_turns(turns)
     answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
 

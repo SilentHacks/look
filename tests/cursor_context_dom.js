@@ -93,7 +93,6 @@ const document = {
 };
 const rendered = [];
 const intents = [];
-const shadow = element('div');
 const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
   window: { listeners: {}, innerWidth: 1200, innerHeight: 800,
     addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
@@ -101,7 +100,6 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   getComputedStyle: node => ({ display: node.style.display || 'block', position: node.style.position || 'static' }),
   location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
-  shadow, pinsLayer: element('div'), lensLayer: element('div'),
   renderPins: candidates => rendered.push(candidates), stopTrackingPins() {},
   trustedUi: event => event.isTrusted,
   _emit: intent => intents.push(intent), cancelListening() {} });
@@ -109,11 +107,10 @@ const start = source.indexOf('  const cursorIds =');
 const uiStart = source.indexOf('  function showPlainMessage', start);
 const lifecycle = source.indexOf('  function revokeActionAuthority', uiStart);
 const end = source.indexOf('  function updateLiveInspector', lifecycle);
-context.hud = element('section');
 context.positionNote = () => {};
 context.renderNote = () => {};
 vm.runInContext(source.slice(start, uiStart) + source.slice(lifecycle, end) +
-  '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, revokeActionAuthority };', context);
+  '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, confirmClick, revokeActionAuthority };', context);
 const api = context.collect;
 assert.equal(api.safeText(section), 'Visible content');
 assert.equal(api.safeText(payment), '[redacted]');
@@ -234,52 +231,29 @@ test('linked fragments with different structures are not invented as peer offers
   assert.ok(!wire.blocks.some(b => current.block_ids.includes(b.id) && b.kind === 'group'));
 });
 
-test('live pins track layout and clipped scrolling, stop on detach and do no idle work', () => {
-  const pinsLayer = element('div'), node = element('span', [text('deal')]);
+test('rings track layout and clipped scrolling, and find nothing once detached', () => {
+  const node = element('span', [text('deal')]);
   const parent = element('div', [node]);
   parent.rect = { left: 0, top: 50, width: 200, height: 100 };
+  parent.getBoundingClientRect = () => ({ ...parent.rect, right: parent.rect.left + parent.rect.width, bottom: parent.rect.top + parent.rect.height });
   parent.style.overflowY = 'auto';
   node.rect = { left: 10, top: 70, width: 100, height: 20 };
-  let frame, reads = 0;
-  const rect = node.getBoundingClientRect;
-  node.getBoundingClientRect = () => { reads++; return rect.call(node); };
-  const ctx = vm.createContext({
-    document, pinsLayer, svgLeaders: element('div'), lensLayer: element('div'), state: {},
-    window: { innerWidth: 1200, innerHeight: 800 }, location: { href: 'https://demo.invalid/' },
-    snapshots: new Map([['s', { pageUrl: 'https://demo.invalid/' }]]),
-    activeSnapshot: { id: 's', resolutionId: 1 }, destroyed: false,
-    getComputedStyle: n => n.style, rendered: n => n.isConnected, sensitive: () => false,
-    positionNote() {},
-    requestAnimationFrame: fn => { frame = fn; return 1; },
-    cancelAnimationFrame: () => { frame = null; },
-  });
-  const from = source.indexOf('  let livePins =');
-  const to = source.indexOf('  function renderSemanticLens', from);
-  vm.runInContext(source.slice(from, to), ctx);
-  assert.equal(reads, 0);
-  ctx.renderPins([{ label: 'deal', node, snapshotId: 's', resolutionId: 1, rect_vp: [10, 70, 100, 20] }]);
-  const box = pinsLayer.children[0];
-  assert.equal(box.style.top, '70px');
+  node.getBoundingClientRect = () => ({ ...node.rect, right: node.rect.left + node.rect.width, bottom: node.rect.top + node.rect.height });
+  const ctx = vm.createContext({ document, scrollX: 0, scrollY: 0, REGION_W: 360, REGION_H: 225,
+    getComputedStyle: n => ({ overflowX: n.style.overflowX || 'visible', overflowY: n.style.overflowY || 'visible' }),
+    rendered: n => n.isConnected, sensitive: () => false });
+  const from = source.indexOf('  function targetRect(t)');
+  const to = source.indexOf('  // ---------- rings ----------', from);
+  vm.runInContext(source.slice(from, to) + '\nthis.clippedRect = clippedRect; this.targetRect = targetRect;', ctx);
+  const target = { el: node };
+  assert.equal(ctx.clippedRect(target).top, 70);
   node.rect.top = 140;
-  ctx.location.href = 'https://demo.invalid/deals#details';
-  frame();
-  assert.equal(box.style.top, '140px');
-  assert.equal(box.style.height, '10px');
+  assert.equal(ctx.clippedRect(target).height, 10, 'clipped by its scroller');
   node.rect.top = 160;
-  frame();
-  assert.equal(box.style.display, 'none');
-  node.rect.top = 90;
-  frame();
-  assert.equal(box.style.display, '');
+  assert.equal(ctx.clippedRect(target), null, 'scrolled out of its own scroller');
+  assert.ok(ctx.targetRect(target), 'still exists');
   node.isConnected = false;
-  const tick = frame;
-  frame = null;
-  tick();
-  assert.equal(box.isConnected, false);
-  assert.equal(frame, null);
-  const stoppedReads = reads;
-  ctx.stopTrackingPins();
-  assert.equal(reads, stoppedReads);
+  assert.equal(ctx.targetRect(target), null, 'detached targets fail honestly; nothing rematches');
 });
 api.rememberHit(password, 1);
 let capture = api.captureCursorContext();
@@ -547,22 +521,21 @@ test('confirmation rejects synthetic clicks, emits once, and expires on capture'
   api.activateSnapshot(snapshot.snapshot_id, 7);
   assert.equal(api.requestActionConfirmation({ action_id: 'opaque-action', resolution_id: 7,
     label: '<img src=x onerror=alert(1)>' }).ok, true);
-  const card = shadow.children.at(-1);
-  assert.equal(card.children[0].textContent, '<img src=x onerror=alert(1)>');
-  const approve = card.children.find(c => c.tagName === 'BUTTON');
   const before = intents.length;
-  approve.click();
-  for (const fn of approve.listeners.click) fn({ isTrusted: false, button: 0, detail: 1 });
+  assert.equal(api.confirmClick(true, { isTrusted: false, button: 0, detail: 1 }), false);
+  assert.equal(api.confirmClick(true, { isTrusted: true, button: 0, detail: 0 }), false, 'keyboard activation has detail 0');
+  assert.equal(api.confirmClick(true, { isTrusted: true, button: 2, detail: 1 }), false);
+  assert.equal(api.confirmClick(true, { isTrusted: true, button: 0, detail: 1, pointerType: 'touch' }), false);
   assert.equal(intents.length, before);
-  const physicalClick = { isTrusted: true, button: 0, detail: 1, stopPropagation() {} };
-  for (let i = 0; i < 2; i++) for (const fn of approve.listeners.click) fn(physicalClick);
+  const physicalClick = { isTrusted: true, button: 0, detail: 1, pointerType: 'mouse' };
+  assert.equal(api.confirmClick(true, physicalClick), true);
+  assert.equal(api.confirmClick(true, physicalClick), false, 'single use');
   assert.equal(intents.length, before + 1);
   assert.equal(intents.at(-1).type, 'confirm_action');
   assert.equal(intents.at(-1).approved, true);
   api.requestActionConfirmation({ action_id: 'expired', resolution_id: 7 });
-  const stale = shadow.children.at(-1).children.find(c => c.tagName === 'BUTTON');
   api.captureCursorContext();
-  for (const fn of stale.listeners.click) fn(physicalClick);
+  assert.equal(api.confirmClick(true, physicalClick), false, 'a new capture revokes');
   assert.equal(intents.length, before + 1);
 });
 
@@ -595,3 +568,70 @@ test('routing retains captured identities; pagehide revokes their availability',
   context.location.href = previousUrl;
 });
 
+// ---------- answer markdown: allow-list only, no raw markers, no remote anything ----------
+const mdContext = vm.createContext({ URL });
+vm.runInContext(fs.readFileSync(require('node:path').join(__dirname, '../browser/markdown.js'), 'utf8'), mdContext);
+const MD = mdContext.__HG_MD__;
+const walkView = (views, visit) => { for (const v of views) { visit(v); if (v.kids) walkView(v.kids, visit); } };
+const words = views => { const out = []; walkView(views, v => { if (v.text != null) out.push(v.text); }); return out.join(''); };
+const tags = views => { const out = []; walkView(views, v => { if (v.tag) out.push(v.tag); }); return out; };
+
+test('renders bold, italic, code, blocks, lists, headings, quotes, links and tables', () => {
+  const view = MD.view('# Title\n\n**bold** and *italic* and `code`\n\n- one\n- two\n\n1. first\n\n> said\n\n```py\nx = 1\n```\n\n[guide](https://example.com/a)\n\n| A | B |\n|---|--:|\n| 1 | 2 |\n');
+  const seen = tags(view);
+  for (const tag of ['strong', 'em', 'code', 'ul', 'ol', 'li', 'blockquote', 'pre', 'table', 'th', 'td']) assert.ok(seen.includes(tag), tag);
+  assert.ok(!words(view).includes('**') && !words(view).includes('`') && !words(view).includes('|'));
+  const link = []; walkView(view, v => { if (v.url) link.push(v); });
+  assert.equal(link[0].url, 'https://example.com/a');
+  assert.ok(words(link).includes('example.com'), 'links show where they go');
+});
+
+test('hostile model text only ever makes allow-listed nodes', () => {
+  const hostile = [
+    '<script>alert(1)</script>', '<img src=https://evil.test/x.png onerror=alert(1)>',
+    '![tracking pixel](https://evil.test/pixel.png)', '[![a](https://evil.test/i.png)](https://evil.test/)',
+    '[click](javascript:alert(1))', '[click](JaVaScRiPt:alert(1))', '[d](data:text/html,<script>1</script>)',
+    '[x](file:///etc/passwd)', '[x](//evil.test/)', '[cred](https://user:pass@evil.test/)',
+    '<a href="javascript:alert(1)">x</a>', '<iframe src="https://evil.test"></iframe>', '<style>*{display:none}</style>',
+    'Confirm <button data-act="confirm" data-value="yes">Confirm</button>',
+  ].join('\n\n');
+  for (const streaming of [false, true]) {
+    const view = MD.view(hostile, { streaming });
+    walkView(view, v => {
+      if (v.tag) assert.ok(MD.ALLOWED.has(v.tag), v.tag);
+      if (v.url) { assert.match(v.url, /^https?:/); assert.ok(!/pass/.test(v.url)); }
+      for (const key of Object.keys(v)) assert.ok(['tag', 'cls', 'kids', 'text', 'words', 'url', 'align', 'start'].includes(key), key);
+      if (v.cls) assert.ok(['link', 'host', 'imgalt', 'tablewrap', 'h1', 'h2', 'h3'].includes(v.cls), v.cls);
+    });
+    assert.ok(!tags(view).includes('img') && !tags(view).includes('script') && !tags(view).includes('a'));
+    assert.ok(!words(view).includes('https://evil.test/pixel.png'), 'image destinations are dropped');
+  }
+  const js = []; walkView(MD.view('[click](javascript:alert(1))'), v => { if (v.url) js.push(v.url); });
+  assert.deepEqual(js, [], 'a scripted link keeps its words and loses its destination');
+});
+
+test('mid-stream markup never shows raw markers and only grows', () => {
+  const answer = '## Heading here\n\nThe **bold claim** is *really* `good` and [a link](https://example.com/x) follows.\n\n- first item\n- **second** item\n\n| Name | Price |\n|------|-------|\n| Mac | 1 |\n\n```js\nlet a = 1 ** 2;\n```\n\nDone now.\n';
+  let previous = '';
+  for (let cut = 1; cut <= answer.length; cut++) {
+    const view = MD.view(answer.slice(0, cut), { streaming: true });
+    const shown = []; walkView(view, v => { if (v.text != null && v.tag !== 'code') shown.push(v.text); });
+    const prose = []; walkView(view, v => { if (v.tag === 'pre') v.kids = []; });
+    walkView(view, v => { if (v.text != null && v.words) prose.push(v.text); });
+    const joined = prose.join(' ');
+    for (const raw of ['**', '`', '##', '](', '|---', '| Name']) assert.ok(!joined.includes(raw), `${JSON.stringify(raw)} at ${cut}: ${joined}`);
+    assert.ok(!/(^|\s)[*_#](\s|$)/.test(joined), `lone marker at ${cut}: ${joined}`);
+    previous = joined;
+  }
+  assert.ok(previous.includes('Done now.'));
+  const final = MD.view(answer);
+  assert.ok(tags(final).includes('table') && tags(final).includes('pre'));
+});
+
+test('ordinary asterisks and underscores stay readable', () => {
+  assert.equal(words(MD.view('2 * 3 * 4')), '2 * 3 * 4');
+  assert.equal(words(MD.view('snake_case_name and 5*3')), 'snake_case_name and 5*3');
+  assert.equal(words(MD.view('*terms apply')), '*terms apply');
+  assert.ok(tags(MD.view('**never closed')).includes('strong'), 'no raw ** even in a finished answer');
+  assert.ok(!words(MD.view('**never closed')).includes('*'));
+});

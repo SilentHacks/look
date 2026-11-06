@@ -50,6 +50,8 @@ from ..tracker.simulated_gaze import FixationRingBuffer, FixationSample, Simulat
 logger = logging.getLogger(__name__)
 
 _OVERLAY_JS_PATH = Path(__file__).with_name("overlay.js")
+_PANEL_SOURCES = ("markdown.js", "panel.js")
+_UI_FRAMES = ("card", "pill")
 _INTENT_BINDING = "__hermesGazeIntent"
 _WORLD = "hermes-gaze"
 _overlay_cache: Tuple[float, str] = (0.0, "")
@@ -126,6 +128,9 @@ class CdpSession:
         self._context_unique_id: Optional[str] = None
         self._ui_context_id: Optional[int] = None
         self._ui_context_unique_id: Optional[str] = None
+        self._ui_frames: Dict[str, Tuple[int, str]] = {}
+        self._level_busy = False
+        self._arm_lock: Optional[asyncio.Lock] = None
         self._route_id = 0
         self._contexts: Dict[int, str] = {}
         self._ready = False
@@ -279,27 +284,55 @@ class CdpSession:
         await self._eval_coro(expr, timeout=5.0)
 
     async def _init_ui(self) -> None:
-        remote = await self._send_cmd("Runtime.evaluate", {
-            "expression": "window.__HERMES_GAZE_OVERLAY__.uiFrame",
-            "uniqueContextId": self._context_unique_id}, timeout=5.)
-        object_id = remote["result"]["objectId"]
-        try:
-            node = await self._send_cmd("DOM.describeNode", {"objectId": object_id}, timeout=5.)
-        finally:
-            await self._send_cmd("Runtime.releaseObject", {"objectId": object_id}, timeout=5.)
-        world = await self._send_cmd("Page.createIsolatedWorld", {
-            "frameId": node["node"]["frameId"], "worldName": _WORLD}, timeout=5.)
-        self._ui_context_id = world["executionContextId"]
-        self._ui_context_unique_id = self._contexts[self._ui_context_id]
-        await self._eval_coro(Path(__file__).with_name("panel.js").read_text(),
-                              timeout=5., context_id=self._ui_context_unique_id)
-        snapshot = await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.takeUiSnapshot()", timeout=5.)
-        await self._render_ui(snapshot)
+        frames: Dict[str, Tuple[int, str]] = {}
+        panel = "\n".join(Path(__file__).with_name(name).read_text() for name in _PANEL_SOURCES)
+        for name in _UI_FRAMES:
+            remote = await self._send_cmd("Runtime.evaluate", {
+                "expression": f"window.__HERMES_GAZE_OVERLAY__.uiFrames.{name}",
+                "uniqueContextId": self._context_unique_id}, timeout=5.)
+            object_id = remote["result"]["objectId"]
+            try:
+                node = await self._send_cmd("DOM.describeNode", {"objectId": object_id}, timeout=5.)
+            finally:
+                await self._send_cmd("Runtime.releaseObject", {"objectId": object_id}, timeout=5.)
+            world = await self._send_cmd("Page.createIsolatedWorld", {
+                "frameId": node["node"]["frameId"], "worldName": _WORLD}, timeout=5.)
+            frames[name] = (world["executionContextId"], await self._context_key(world["executionContextId"]))
+            await self._eval_coro(panel, timeout=5., context_id=frames[name][1])
+        self._ui_frames = frames
+        self._ui_context_id, self._ui_context_unique_id = frames["card"]
+        self._displayed_event = None  # Everything is new to this renderer, including recall.
+        await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.uiReady();true", timeout=5.)
 
     async def _render_ui(self, message: dict) -> None:
-        if self._ui_context_unique_id:
+        frame = self._ui_frames.get(str(message.get("frame") or "card"))
+        if frame:
             await self._eval_coro("window.__HERMES_GAZE_PANEL__?.render(" + json.dumps(message) + ")",
-                                  timeout=5., context_id=self._ui_context_unique_id)
+                                  timeout=5., context_id=frame[1])
+
+    def push_level(self, level: float) -> None:
+        """Voice level to the protected capsule only. Drop frames rather than queue them."""
+        loop, frame = self._loop, self._ui_frames.get("pill")
+        if loop is None or frame is None or self._level_busy or not loop.is_running():
+            return
+        self._level_busy = True
+
+        async def send() -> None:
+            try:
+                await self._eval_coro(f"window.__HERMES_GAZE_PANEL__?.level({float(level):.3f})",
+                                      timeout=1., context_id=frame[1])
+            except Exception:
+                logger.debug("Waveform frame dropped", exc_info=True)
+            finally:
+                self._level_busy = False
+        asyncio.run_coroutine_threadsafe(send(), loop)
+
+    async def _replay_key(self, message: dict) -> None:
+        # A quick tap belongs to the website: send it back as real trusted input.
+        modifiers = 8 if message.get("shift") else 0
+        base = {"key": " ", "code": "Space", "windowsVirtualKeyCode": 32, "modifiers": modifiers}
+        await self._send_cmd("Input.dispatchKeyEvent", {"type": "keyDown", "text": " ", **base}, timeout=2.)
+        await self._send_cmd("Input.dispatchKeyEvent", {"type": "keyUp", **base}, timeout=2.)
 
     async def _deliver_reply(self, document: str, message: dict) -> None:
         if document != self._context_unique_id:
@@ -320,28 +353,28 @@ class CdpSession:
         for document, message in queued:
             await self._deliver_reply(document, message)
 
-    async def _ui_message(self, payload: Any, *, from_ui: bool) -> None:
+    async def _ui_message(self, payload: Any, *, frame: str = "") -> None:
         try:
             message = json.loads(payload)
             if not isinstance(message, dict):
                 return
-            if not from_ui and message.get("type") == "_ui_render":
-                await self._render_ui(message)
-            elif from_ui and message.get("type") == "_ui_size":
-                height = max(1, min(2000, int(message["height"])))
-                await self._eval_coro(
-                    f"window.__HERMES_GAZE_OVERLAY__.fitUiFrame({height});true", timeout=5.)
-            elif from_ui and message.get("type") == "_ui_event":
-                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.onUiEvent("
+            if frame:
+                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.fromPanel(" + json.dumps(frame) + ","
                                       + json.dumps(message) + ");true", timeout=5.)
+            elif message.get("type") == "_ui_render":
+                await self._render_ui(message)
+            elif message.get("type") == "_ui_replay_key":
+                await self._replay_key(message)
         except Exception:
             logger.debug("Private UI unavailable", exc_info=True)
+
     async def _drop_ws(self) -> None:
         self._ready = False
         self._context_id = None
         self._context_unique_id = None
         self._ui_context_id = None
         self._ui_context_unique_id = None
+        self._ui_frames = {}
         self._contexts.clear()
         self._fail_pending(ConnectionError("CDP connection reset"))
         task, self._pump_task = self._pump_task, None
@@ -387,16 +420,17 @@ class CdpSession:
     def _handle_event(self, method: str, params: Dict[str, Any]) -> None:
         if method == "Runtime.bindingCalled" and params.get("name") == _INTENT_BINDING:
             context = params.get("executionContextId")
-            if context == self._ui_context_id:
-                asyncio.ensure_future(self._ui_message(params.get("payload"), from_ui=True))
+            frame = next((name for name, (uid, _) in self._ui_frames.items() if uid == context), "")
+            if frame:
+                asyncio.ensure_future(self._ui_message(params.get("payload"), frame=frame))
             elif context == self._context_id:
                 payload = params.get("payload")
                 try:
-                    internal = json.loads(payload).get("type") == "_ui_render"
+                    internal = json.loads(payload).get("type") in ("_ui_render", "_ui_replay_key")
                 except (TypeError, ValueError, AttributeError):
                     return
                 if internal:
-                    asyncio.ensure_future(self._ui_message(payload, from_ui=False))
+                    asyncio.ensure_future(self._ui_message(payload))
                 else:
                     self._dispatch_intent(payload)
         elif method == "Runtime.executionContextCreated":
@@ -409,6 +443,7 @@ class CdpSession:
             self._contexts.clear()
             self._ui_context_id = None
             self._ui_context_unique_id = None
+            self._ui_frames = {}
         elif method == "Page.loadEventFired" or (
                 method == "Page.frameNavigated" and params.get("type") == "BackForwardCacheRestore"):
             asyncio.ensure_future(self._on_new_context())
@@ -419,27 +454,47 @@ class CdpSession:
                     "window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.))
 
     async def _on_new_context(self, force: bool = False) -> bool:
-        """Re-register the intent binding + re-inject the overlay in a new main-frame context."""
+        """Re-register the intent binding + re-inject the overlay in a new main-frame context.
+
+        Serialized, and retried: during a navigation a frame or context can be momentarily
+        missing, and a half-armed page would swallow keys with nowhere to send them.
+        """
         if self._ws is None:
             return False
-        try:
-            tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
-            frame_id = tree["frameTree"]["frame"]["id"]
-            self._main_frame_id = frame_id
-            world = await self._send_cmd("Page.createIsolatedWorld",
-                                         {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
-            self._context_id = world["executionContextId"]
-            self._context_unique_id = self._contexts.get(self._context_id)
-            src = _overlay_source()
-            if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
-                await self._eval_coro(_guarded_inject(src), timeout=8.0)
-            await self._init_ui()
-            await self._push_overlay_config()
-            self._ready = True
-            return True
-        except Exception as exc:
-            logger.debug("context re-arm failed: %s", exc)
+        if self._arm_lock is None:
+            self._arm_lock = asyncio.Lock()
+        async with self._arm_lock:
+            for attempt in range(5):
+                if self._ws is None:
+                    return False
+                try:
+                    tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
+                    frame_id = tree["frameTree"]["frame"]["id"]
+                    self._main_frame_id = frame_id
+                    world = await self._send_cmd("Page.createIsolatedWorld",
+                                                 {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
+                    self._context_id = world["executionContextId"]
+                    self._context_unique_id = await self._context_key(self._context_id)
+                    src = _overlay_source()
+                    if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
+                        await self._eval_coro(_guarded_inject(src), timeout=8.0)
+                    await self._init_ui()
+                    await self._push_overlay_config()
+                    self._ready = True
+                    return True
+                except Exception as exc:
+                    logger.debug("context re-arm attempt %d failed: %r", attempt + 1, exc)
+                    await asyncio.sleep(.1 * (attempt + 1))
             return False
+
+    async def _context_key(self, context_id: int) -> str:
+        # The creation event can still be on its way when the command's reply arrives.
+        for _ in range(50):
+            key = self._contexts.get(context_id)
+            if key:
+                return key
+            await asyncio.sleep(.01)
+        raise ConnectionError("Chrome did not announce the isolated context")
 
     def _dispatch_intent(self, payload: Any) -> None:
         handler = self._intent_handler
@@ -555,7 +610,8 @@ class GazeSession:
         self.last_candidate_wire: List[Dict[str, Any]] = []
         self.last_resolution_input: Dict[str, Any] = {}
         self.scope_page_url: Optional[str] = None
-        self._dwell_ms, self._wiggle_trigger, self._hotkey = 450, True, "AltRight"
+        self._dwell_ms, self._wiggle_trigger, self._hotkey = 450, False, "AltRight"
+        self._answer_turn_seconds = 12.0
         self._candidate_radius_px = 380.0
         self._ingested_keys: set = set()
         # Intents must carry this nonce; pushed into the overlay via setIntentNonce so a
@@ -616,11 +672,13 @@ class GazeSession:
             "mode": self.tracker.mode, "sigmaPx": self.tracker.sigma_px,
             "dwellMs": self._dwell_ms, "wiggleTrigger": self._wiggle_trigger,
             "hotkey": self._hotkey, "candidateRadiusPx": self._candidate_radius_px,
+            "answerTurnMs": round(self._answer_turn_seconds * 1000),
         }
 
     def configure(self, mode: Optional[str] = None, sigma_px: Optional[float] = None,
                   dwell_ms: Optional[int] = None, wiggle_trigger: Optional[bool] = None,
-                  hotkey: Optional[str] = None, candidate_radius_px: Optional[float] = None) -> bool:
+                  hotkey: Optional[str] = None, candidate_radius_px: Optional[float] = None,
+                  answer_turn_seconds: Optional[float] = None) -> bool:
         """Store overlay config (None keeps stored). Pushes to the overlay ONLY when a
         websocket is already live — never connects or injects, so callers inside plugin
         registration cannot block on CDP I/O. Stored opts are pushed post-inject anyway."""
@@ -637,6 +695,8 @@ class GazeSession:
                 self._hotkey = str(hotkey)
             if candidate_radius_px is not None:
                 self._candidate_radius_px = float(candidate_radius_px)
+            if answer_turn_seconds is not None:
+                self._answer_turn_seconds = max(1., float(answer_turn_seconds))
             self._sync_overlay_config()
         if not self._cdp.is_connected:
             return False

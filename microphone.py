@@ -1,6 +1,8 @@
 """Bounded native microphone capture; audio never enters a website origin."""
 from __future__ import annotations
 
+import array
+import math
 import threading
 import time
 
@@ -18,8 +20,10 @@ class Microphone:
         self._epoch = 0.
         self._error = ""
         self._generation = 0
+        self._level = 0.
 
-    def start(self, owner: str, check_loss, sample_rate: int = 16000, on_cancel=None, on_warning=None) -> dict:
+    def start(self, owner: str, check_loss, sample_rate: int = 16000, on_cancel=None, on_warning=None,
+              on_level=None) -> dict:
         import sounddevice as sd
 
         with self._lock:
@@ -42,6 +46,12 @@ class Microphone:
                     self._epoch = time.time() - (clock.currentTime - clock.inputBufferAdcTime)
                 if status:
                     self._error = str(status)
+                if on_level is not None:
+                    # Speech RMS sits near .03 to .1 of full scale; sqrt spreads that for the bars.
+                    samples = array.array("h", bytes(data)[:len(data) & ~1])[::4]
+                    if samples:
+                        rms = math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768
+                        self._level = min(1., math.sqrt(rms) * 2.6)
                 if len(self._audio) + len(data) <= MAX_AUDIO_BYTES:
                     self._audio.extend(data)
                 else:
@@ -103,6 +113,20 @@ class Microphone:
                     if on_warning:
                         on_warning(5)
 
+        def levels():
+            while True:
+                time.sleep(.04)
+                with self._lock:
+                    if self._stream is None or self._generation != generation:
+                        return
+                    level = self._level
+                try:
+                    on_level(level)
+                except Exception:
+                    return  # The waveform is decoration; capture never depends on it.
+
+        if on_level is not None:
+            threading.Thread(target=levels, name="hermes-gaze-mic-level", daemon=True).start()
         threading.Thread(target=check_foreground, name="hermes-gaze-mic-focus", daemon=True).start()
         threading.Thread(target=watch, name="hermes-gaze-mic", daemon=True).start()
         return {"ok": True, "ready_ms": round((time.monotonic() - started) * 1000)}

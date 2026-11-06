@@ -195,7 +195,7 @@ class TestSessionDelivery(unittest.TestCase):
             return "What is this?", []
         def reply(result):
             replies.append(result)
-            if len(replies) == 2:
+            if len([r for r in replies if r.get("type") != "record_reserved"]) == 2:
                 finished.set()
         intent = {"type": "record_stop", "nonce": self.session._intent_nonce,
                   "_browser_target": "source", "_browser_document": "document",
@@ -208,7 +208,7 @@ class TestSessionDelivery(unittest.TestCase):
                 self.assertTrue(entered.wait(1))
                 service.handle_intent({**intent, "cursor_context": capture()}, reply)
                 self.assertEqual([r["status"] for r in turns.pending], ["transcribing", "transcribing"])
-                self.assertEqual(replies, [])
+                self.assertEqual([r for r in replies if r.get('type') != 'record_reserved'], [])
             finally:
                 release.set()
                 self.assertTrue(finished.wait(3))

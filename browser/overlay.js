@@ -1,13 +1,11 @@
 (function () {
   // Main frame only — addScriptToEvaluateOnNewDocument runs in EVERY frame; untrusted
-  // iframes must not render a second HUD or reach the intent binding.
+  // iframes must not render a second overlay or reach the intent binding.
   if (window.top !== window.self) return;
 
   // Always tear down any prior overlay instance cleanly (removing window listeners & streams)
   const prevApi = window.__HERMES_GAZE_OVERLAY__;
   const prevState = prevApi && prevApi.state ? prevApi.state : null;
-  const prevInputVal = prevApi && typeof prevApi.getInputValue === "function" ? prevApi.getInputValue() : "";
-  const prevReplyText = prevApi?.getReplyText?.() || "";
   const existingRoot = document.getElementById("hermes-gaze-root");
   if (prevApi && typeof prevApi.destroy === "function") {
     try {
@@ -23,14 +21,15 @@
     sigmaPx: (prevState && prevState.sigmaPx) || 120,
     hoverSigmaPx: (prevState && prevState.hoverSigmaPx) || 24,
     dwellMs: (prevState && prevState.dwellMs) || 450,
-    wiggleTrigger: prevState && prevState.wiggleTrigger !== undefined ? prevState.wiggleTrigger : true,
+    wiggleTrigger: prevState && prevState.wiggleTrigger !== undefined ? prevState.wiggleTrigger : false,
     candidateRadiusPx: (prevState && prevState.candidateRadiusPx) || 380,
     hotkey: (prevState && prevState.hotkey) || "Backquote",
+    answerTurnMs: (prevState && prevState.answerTurnMs) || 12000,
     resolutionId: 0,
     scopes: [],
     selectedScopeId: null,
     scopePending: false,
-    armed: false, // When true, lockedX / lockedY stay frozen while user interacts with HUD
+    armed: false, // When true, lockedX / lockedY stay frozen while the typed-question card is up
     armedAt: 0,
     // null until the first real mousemove — a fabricated center point is never a valid pointer
     pointerX: prevState && typeof prevState.pointerX === "number" ? prevState.pointerX : null,
@@ -45,362 +44,190 @@
     hoveredCandidate: null,
   };
 
-  // Only geometry lives in the website DOM. Private UI nodes stay detached here
-  // and are rendered by CDP in a script-disabled, opaque-origin iframe.
+  // ---------- tuning ----------
+  const CARD_W = 348, PILL_H = 36, ARM_MS = 130, MIN_HOLD_MS = 220, DWELL_MS = 170, MAX_TARGETS = 5;
+  const REGION_W = 360, REGION_H = 225, MARGIN = 14, FOLLOW_UP_PX = 90, READING_WPS = 3.6;
+  const SPRING = {k: 420, c: 36};        // general: quick, barely overshoots
+  const SNAPPY = {k: 620, c: 40};        // rings
+  const FOLLOW = {k: 300, c: 28};        // waveform trailing the cursor
+  const GAZE = {k: 60, c: 15};           // soft region: slow, heavy, like smoothed gaze
+
+  // ---------- local view state; what must survive a tab or navigation lives in Python ----------
+  const S = {
+    pointer: {moved: 0},
+    keyDown: false, keyArmed: false, armShift: false, armTimer: 0, hold: null,
+    items: [], cur: "", view: null, pos: null, capSpot: null, hoverCard: false, retreatTimer: 0, retreatAt: 0,
+    ids: 0, sizes: {prevH: 0, cardH: 0, nextH: 0, contentH: 0, bodyH: 0}, maxBody: 420, dark: false, dir: null,
+    coach: {greeted: false, heard: 0, answered: 0, retreated: false}, pillMode: "none", pillW: 96, pillLast: "",
+    micReady: false, micWarning: "", micSlow: false, localPending: [], compose: null, note: null, frameY: 0, frameH: 0,
+    wasBusy: false, cardFade: 0, shown: new Set(), reposition: new Set(), ready: false,
+  };
+  const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedTransparency = () => matchMedia("(prefers-reduced-transparency: reduce)").matches;
+
+  // ---------- springs ----------
+  const springs = new Set(), fades = new Set();
+  class Spring {
+    constructor(v, p = SPRING) { this.x = this.t = v; this.v = 0; this.k = p.k; this.c = p.c; }
+    to(t) { if (reduced()) this.snap(t); else { this.t = t; springs.add(this); wake(); } return this; }
+    snap(t) { this.x = this.t = t; this.v = 0; springs.delete(this); wake(); return this; }
+    kick(v) { if (!reduced()) { this.v += v; springs.add(this); wake(); } }
+    step(dt) {
+      for (let i = 0; i < 4; i++) {
+        this.v += (-this.k * (this.x - this.t) - this.c * this.v) * dt / 4;
+        this.x += this.v * dt / 4;
+      }
+      if (Math.abs(this.x - this.t) < .02 && Math.abs(this.v) < .3) { this.x = this.t; this.v = 0; springs.delete(this); }
+    }
+  }
+  // Opacity on a calmer curve, so reduced motion still gets a crossfade rather than a jump.
+  class Fade {
+    constructor(v) { this.x = this.t = v; }
+    to(t) { this.t = t; if (this.x !== t) { fades.add(this); wake(); } return this; }
+    snap(t) { this.x = this.t = t; fades.delete(this); wake(); return this; }
+    step(dt) {
+      const d = this.t - this.x, r = dt / (reduced() ? .16 : .11);
+      if (Math.abs(d) < .004) { this.x = this.t; fades.delete(this); } else this.x += d * Math.min(1, r);
+    }
+  }
+  // Pinch zoom shrinks what's visible; the card fits the visible part.
+  const cardWidth = () => {
+    const v = window.visualViewport, zoomed = v && v.scale > 1.01;
+    return Math.min(CARD_W, zoomed ? v.width - 8 : innerWidth - 2 * MARGIN);
+  };
+  const box = (x, y, w, h, p) => ({x: new Spring(x, p), y: new Spring(y, p), w: new Spring(w, p), h: new Spring(h, p), o: new Fade(0)});
+
+  // ---------- geometry-only DOM: rings and text-free glass plates, in a closed shadow ----------
+  // Words, voice level and input all live in the two sandboxed frames, reached only over CDP.
   const host = document.createElement("div");
   host.id = "hermes-gaze-root";
   host.setAttribute("popover", "manual");
-  host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;pointer-events:none!important;background:transparent!important";
+  host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;pointer-events:none!important;background:transparent!important;overflow:visible!important;contain:none!important";
   const hostStyle = host.style.cssText;
   document.documentElement.appendChild(host);
   host.showPopover();
   const visualShadow = host.attachShadow({ mode: "closed" });
-  const shadow = document.implementation.createHTMLDocument("").createElement("div");
-  const uiFrame = document.createElement("iframe");
-  uiFrame.setAttribute("sandbox", "");
-  uiFrame.setAttribute("aria-label", "Hermes Gaze private controls");
-  uiFrame.style.cssText = "position:fixed;z-index:1;left:0;top:0;width:1px;height:1px;border:0;pointer-events:none;background:transparent;color-scheme:normal";
-  visualShadow.appendChild(uiFrame);
-  let uiRevision = 0;
-  let uiEvent = null;
-  let uiSerial = 0;
-  const uiNodes = new Map();
-  function trustedUi(event) { return event.isTrusted || event === uiEvent; }
-  function takeUiSnapshot() {
-    for (const node of shadow.querySelectorAll("*")) {
-      if (!node.dataset.hgUi) {
-        node.dataset.hgUi = String(++uiSerial);
-        uiNodes.set(node.dataset.hgUi, node);
-      }
-    }
-    for (const [id, node] of uiNodes) if (!shadow.contains(node)) uiNodes.delete(id);
-    const focus = focusInput;
-    focusInput = false;
-    const dark = pageIsDark();
-    pinsLayer.style.color = dark ? "#ff8b70" : "#c33d26";
-    svgLeaders.style.stroke = pinsLayer.style.color;
-    return { revision: ++uiRevision, html: shadow.innerHTML, value: hudInput.value, focusInput:focus,
-      viewportHeight: Math.max(1, (window.visualViewport?.height || window.innerHeight) - 32), dark, hotkey:state.hotkey, lensActive:state.lensActive };
+  const layerCss = new CSSStyleSheet();
+  layerCss.replaceSync(`
+    * { box-sizing:border-box; }
+    .ring { position:fixed; left:0; top:0; pointer-events:none; will-change:transform,width,height; border-radius:9px;
+      background:rgba(var(--a),var(--fill)); box-shadow:0 0 0 var(--stroke) rgba(var(--a),var(--edge)), 0 0 0 calc(var(--stroke) + 4px) rgba(var(--a),var(--halo)); }
+    .ring.region { border-radius:50%; box-shadow:none; background:radial-gradient(closest-side, rgba(var(--a),calc(var(--fill)*3.2)) 0%, rgba(var(--a),calc(var(--fill)*2.6)) 45%, rgba(var(--a),calc(var(--fill)*.8)) 78%, rgba(var(--a),0) 100%); }
+    .plate { position:fixed; left:0; top:0; pointer-events:none; will-change:transform,width,height,opacity;
+      background:var(--fill); -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur); box-shadow:var(--shadow); }
+    .plate.sliver { background:var(--fill-2); box-shadow:var(--shadow-2); }
+    .light { --fill:rgba(250,250,252,.8); --fill-2:rgba(247,247,250,.68); --blur:blur(34px) saturate(1.9);
+      --shadow:0 0 0 .5px rgba(0,0,0,.13), 0 12px 36px rgba(0,0,0,.17), 0 3px 8px rgba(0,0,0,.07), inset 0 .5px 0 rgba(255,255,255,.75);
+      --shadow-2:0 0 0 .5px rgba(0,0,0,.11), 0 8px 22px rgba(0,0,0,.11), inset 0 .5px 0 rgba(255,255,255,.6); }
+    .dark { --fill:rgba(40,40,44,.76); --fill-2:rgba(50,50,54,.66); --blur:blur(34px) saturate(1.7);
+      --shadow:0 0 0 .5px rgba(255,255,255,.15), 0 14px 44px rgba(0,0,0,.55), 0 3px 8px rgba(0,0,0,.3), inset 0 .5px 0 rgba(255,255,255,.1);
+      --shadow-2:0 0 0 .5px rgba(255,255,255,.12), 0 8px 24px rgba(0,0,0,.4), inset 0 .5px 0 rgba(255,255,255,.08); }
+    .solid.light { --fill:rgb(250,250,252); --fill-2:rgb(240,240,243); --blur:none; }
+    .solid.dark { --fill:rgb(44,44,47); --fill-2:rgb(58,58,62); --blur:none; }
+    .wrap { position:fixed; left:0; top:0; overflow:hidden; will-change:transform,width,height,opacity; }
+    iframe { display:block; border:0; background:transparent; color-scheme:normal; }
+    #pill { overflow:hidden; }
+  `);
+  visualShadow.adoptedStyleSheets = [layerCss];
+  const add = (tag, cls, parent) => { const n = document.createElement(tag); if (cls) n.className = cls; parent.append(n); return n; };
+  function privateFrame(parent, width, height) {
+    const f = document.createElement("iframe");
+    f.setAttribute("sandbox", "");
+    f.setAttribute("aria-label", "Hermes private surface");
+    f.style.width = `${width}px`; f.style.height = `${height}px`;
+    parent.append(f);
+    return f;
   }
-  const uiObserver = new MutationObserver(() => {
-    if (_intentNonce && !destroyed)
-      window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
+  const rings = add("div", "", visualShadow);
+  const plates = [];   // [prev, next2, next, front]
+  for (let i = 0; i < 4; i++) {
+    const plate = add("div", "plate light" + (i < 3 ? " sliver" : ""), visualShadow);
+    plate.style.opacity = 0;
+    plates.push(plate);
+  }
+  const cardWrap = add("div", "wrap", visualShadow);
+  cardWrap.style.opacity = 0; cardWrap.style.pointerEvents = "none";
+  const uiFrame = privateFrame(cardWrap, CARD_W, Math.max(900, innerHeight));
+  const pillEl = add("div", "plate light", visualShadow);
+  pillEl.id = "pill";
+  pillEl.style.opacity = 0;
+  const pillWrap = add("div", "wrap", pillEl);
+  pillWrap.style.pointerEvents = "none";
+  const pillFrame = privateFrame(pillWrap, 460, PILL_H);
+  pillFrame.style.pointerEvents = "none";
+  const uiFrames = {card: uiFrame, pill: pillFrame};
+  const front = box(0, 0, CARD_W, 0), prev = box(0, 0, CARD_W, 0), next = box(0, 0, CARD_W, 0), next2 = box(0, 0, CARD_W, 0);
+  const P = {pill: box(0, 0, 0, PILL_H)};
+  const lift = new Spring(0, {k: 500, c: 30}); // nudge when you hit the end of the stack
+
+  function rawSend(message) { try { window.__hermesGazeIntent(JSON.stringify(message)); } catch (_) {} }
+  function trustedUi(event) { return event.isTrusted === true; }
+
+  // A website dialog opened after us would otherwise sit on top of the top layer.
+  function raise() { try { host.hidePopover(); host.showPopover(); } catch (_) {} }
+  let raisedFor = 0;
+  function raiseIfShowing() {
+    if (destroyed || (!S.view && S.pillMode === "none" && !S.hold)) return;
+    const now = performance.now();
+    if (now - raisedFor < 120) return;
+    raisedFor = now;
+    raise();
+  }
+  const dialogWatch = new MutationObserver(records => {
+    if (records.some(r => r.target !== host && r.target.hasAttribute?.("open"))) raiseIfShowing();
   });
-  uiObserver.observe(shadow, { childList: true, subtree: true, characterData: true, attributes: true,
-    attributeFilter: ["style", "class", "hidden", "aria-expanded", "aria-pressed", "aria-label", "disabled"] });
-  function fitUiFrame(height) {
-    frameHeight = Math.max(1, Math.min(height, (window.visualViewport?.height || window.innerHeight) - 32));
-    positionNote();
-  }
-  function onUiResize() {
-    fitUiFrame(uiFrame.getBoundingClientRect().height);
-    if (_intentNonce && !destroyed)
-      window.__hermesGazeIntent(JSON.stringify({ type: "_ui_render", ...takeUiSnapshot() }));
-  }
-  window.addEventListener("resize", onUiResize);
-  window.visualViewport?.addEventListener("resize", onUiResize);
-  window.visualViewport?.addEventListener("scroll", onUiResize);
-  function onUiEvent(message) {
-    if (document.visibilityState !== "visible" || !document.hasFocus()) return;
+  dialogWatch.observe(document.documentElement, {subtree: true, attributes: true, attributeFilter: ["open"]});
+  // Only someone else's popover opening matters; our own re-raise fires toggle too.
+  const onTopLayer = e => { if (e.target !== host && (e.type !== "toggle" || e.newState === "open")) raiseIfShowing(); };
+  document.addEventListener("toggle", onTopLayer, true);
+  document.addEventListener("fullscreenchange", onTopLayer, true);
+
+  // Tampered geometry or visibility rejects private input: a site may hide us, not fake a click.
+  function surfaceIntact() {
+    if (document.visibilityState !== "visible" || !document.hasFocus()) return false;
     const surface = getComputedStyle(host);
-    if (host.style.cssText !== hostStyle || !host.matches(":popover-open") ||
-        surface.visibility !== "visible" || surface.opacity !== "1" ||
-        surface.transform !== "none" || surface.filter !== "none" ||
-        surface.clipPath !== "none" || surface.maskImage !== "none" ||
-        surface.scale !== "none" || surface.rotate !== "none" || surface.translate !== "none") return;
-    const node = uiNodes.get(message.target);
-    // A dismissed iframe may retain browser focus. Its trusted shortcut keys must
-    // reopen it; hidden controls still cannot submit text or activate actions.
-    if (!node || !shadow.contains(node) ||
-        node.closest("[hidden]") && !(node === hud && message.event.startsWith("key"))) return;
-    hudInput.value = String(message.value || "");
-    if (message.event === "input") return;
-    const EventType = message.event.startsWith("key") ? KeyboardEvent : message.pointerType ? PointerEvent : MouseEvent;
-    const frame = uiFrame.getBoundingClientRect();
-    uiEvent = new EventType(message.event, { ...message, clientX: frame.left + (message.clientX || 0),
-      clientY: frame.top + (message.clientY || 0),
-      bubbles: !["mouseenter", "mouseleave"].includes(message.event), cancelable: true });
-    if (message.event === "mousemove") cursorOverHud = true;
-    try { node.dispatchEvent(uiEvent); } finally { uiEvent = null; }
+    return host.style.cssText === hostStyle && host.matches(":popover-open") &&
+      surface.visibility === "visible" && surface.opacity === "1" &&
+      surface.transform === "none" && surface.filter === "none" &&
+      surface.clipPath === "none" && surface.maskImage === "none" &&
+      surface.scale === "none" && surface.rotate === "none" && surface.translate === "none";
   }
 
-
-  // System fonts only. Private paper and controls never enter the website DOM.
-  const style = document.createElement("style");
-  style.textContent = `
-    :host{--paper:#fffaf0;--ink:#292b27;--muted:#766f63;--accent:#bd3926;--rule:#d9ccba;color-scheme:light}
-    *{box-sizing:border-box} [hidden]{display:none!important}
-    button,input{font:inherit} button{cursor:pointer;color:inherit}
-    button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-    button:disabled{opacity:.4;cursor:default}
-    .hud-shell,.lens-card{position:relative;width:100%;background:var(--paper);color:var(--ink);font:18px/1.5 Georgia,serif;border:1px solid var(--rule);border-top:2px solid var(--accent);box-shadow:0 8px 28px #0002}
-    .hud-shell{padding:20px 22px 16px;max-height:var(--hg-max-height);overflow:auto;scrollbar-width:thin;clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
-    .hud-shell.entering{animation:rise .38s cubic-bezier(.2,.8,.2,1) both}
-    .note-head{display:flex;gap:12px;align-items:flex-start;padding-right:20px}
-    .folio{font:italic 36px/1 Georgia,serif;color:var(--accent)}
-    .target-name{font:11px/1.5 "Courier New",monospace;color:var(--accent);overflow-wrap:anywhere;flex:1}
-    .source{display:block;color:var(--muted);font-size:10px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .note-close{position:absolute;right:8px;top:8px}
-    .icon-btn{display:inline-grid;place-items:center;width:32px;height:32px;flex-shrink:0;border:0;background:transparent;padding:7px;color:var(--muted)}
-    .icon-btn:hover,.icon-btn[aria-pressed=true]{color:var(--accent);background:#bc392610}
-    .icon-btn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
-    .note-tools{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin-top:16px;padding-top:9px;border-top:1px solid var(--rule)}
-    .note-tools .spacer{flex:1}
-    .hud-reply{max-height:min(430px,calc(var(--hg-max-height) - 200px));overflow:auto;scrollbar-width:thin;overflow-wrap:anywhere;user-select:text}
-    .question{font:italic 17px/1.5 Georgia,serif;border-bottom:1px solid var(--rule);padding-bottom:12px;margin:20px 0 14px}
-    .answer{white-space:pre-wrap;font:19px/1.5 Georgia,serif;margin:0 0 10px}
-    .answer.streaming:after{content:"";display:inline-block;height:17px;width:1px;background:var(--accent);margin-left:4px;animation:blink 1s steps(1) infinite}
-    .request{margin-bottom:18px}.request:last-child{margin-bottom:0}
-    .error{font:14px/1.5 "Courier New",monospace;color:var(--accent);white-space:pre-wrap;margin:12px 0}
-    .word-btn{border:0;background:transparent;border-bottom:1px solid var(--accent);padding:4px 0;margin:8px 18px 4px 0;color:var(--accent);font:16px Georgia,serif;min-height:32px}
-    .hud-input-row{display:flex;align-items:center;border-bottom:1px solid var(--accent);margin-top:16px;gap:5px}
-    .hud-input{min-width:0;width:100%;border:0;background:transparent;padding:8px 0;color:var(--ink);font:italic 18px/1.4 Georgia,serif}
-    .capture{display:flex;align-items:center;gap:12px;color:var(--accent);font:italic 19px Georgia,serif}
-    .ink-pulse{display:inline-flex;align-items:center;gap:3px;height:24px}
-    .ink-pulse i{display:block;background:var(--accent);width:2px;height:8px;animation:breath 1s ease-in-out infinite alternate}
-    .ink-pulse i:nth-child(2){height:20px;animation-delay:-.4s}.ink-pulse i:nth-child(3){height:14px;animation-delay:-.7s}
-    .capture.pending .ink-pulse i{height:2px;animation:blink 1.3s infinite}
-    .capture.disconnected .ink-pulse{display:none}
-    .queue-count{font:12px "Courier New",monospace;color:var(--accent);margin-left:auto}
-    .unread-button{width:42px;height:42px;border:0;background:var(--paper);color:var(--accent);font:italic 24px Georgia,serif;border-bottom:2px solid var(--accent);box-shadow:0 2px 12px #0002}
-    .index-list{display:flex;flex-direction:column;gap:0;margin-top:12px;max-height:calc(var(--hg-max-height) - 160px);overflow:auto}
-    .index-item{display:flex;align-items:center;text-align:left;gap:12px;border:0;border-bottom:1px solid var(--rule);background:transparent;padding:12px 0;color:var(--ink);font:italic 18px/1.4 Georgia,serif}
-    .index-item .folio{font-size:23px}.index-item.unread:after{content:"";width:5px;height:5px;transform:rotate(45deg);background:var(--accent);margin-left:auto;flex-shrink:0}
-    .expired{color:var(--muted)}
-    .confirmation{padding:22px;position:relative;background:var(--paper);border-top:2px solid var(--accent);color:var(--ink);font:21px/1.4 Georgia,serif}
-    .confirmation h2{font:inherit;margin:0 0 18px;overflow-wrap:anywhere}
-    .confirmation button{font:17px Georgia,serif;min-height:40px;padding:8px 15px;border:0;background:transparent;color:var(--ink)}
-    .confirmation button:first-of-type{background:var(--accent);color:var(--paper);margin-right:14px}
-    .lens-card{padding:14px 20px;text-align:left;display:flex;gap:16px;margin-bottom:8px;font:17px Georgia,serif}
-    .lens-card.primary{border-left:2px solid var(--accent)}.dwell-bar{position:absolute;bottom:0;left:0;height:2px;background:var(--accent);width:0}
-    .pin-box{position:fixed;pointer-events:none;overflow:hidden;color:inherit}
-    .proof-corner{position:absolute;width:23px;height:9px;border:solid currentColor;border-width:1.5px 0 0 1.5px;filter:drop-shadow(0 0 1px #fffaf0)}
-    .proof-corner.top-left{left:0;top:0}.proof-corner.top-right{right:0;top:0;transform:scaleX(-1)}
-    .proof-corner.bottom-right{right:0;bottom:0;transform:scale(-1)}.proof-corner.bottom-left{left:0;bottom:0;transform:scaleY(-1)}
-    .spotlight{position:fixed;pointer-events:none;border:1px dashed #c33d2670;border-radius:45%;transform:translate(-50%,-50%)}
-    @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-    @keyframes breath{to{transform:scaleY(.4)}}@keyframes blink{50%{opacity:.25}}
-    .errata-dark{--paper:#26312c;--ink:#f1ecdf;--muted:#b4b6a8;--accent:#ff8b70;--rule:#495448;color-scheme:dark}
-    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
-    .hud-shell.capturing{padding:14px 80px 14px 16px}
-    .capturing .note-head,.capturing .hud-reply,.capturing .hud-input-row,.capturing .note-tools>*{display:none}
-    .capturing .note-tools{position:absolute;right:36px;top:7px;margin:0;padding:0;border:0}
-    .capturing .note-tools #hg-mic-btn{display:inline-grid}
-  `;
-  shadow.appendChild(style);
-  visualShadow.appendChild(style.cloneNode(true));
-  const spotlight = document.createElement("div");
-  spotlight.className = "spotlight";
-  spotlight.style.opacity = "0";
-  visualShadow.appendChild(spotlight);
-  const pinsLayer = document.createElement("div");
-  visualShadow.appendChild(pinsLayer);
-  const svgLeaders = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svgLeaders.setAttribute("style", "position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;fill:none;stroke:#c33d26;stroke-width:1.3");
-  visualShadow.appendChild(svgLeaders);
-  const lensLayer = document.createElement("div");
-  shadow.appendChild(lensLayer);
-  const hud = document.createElement("section");
-  hud.className = "hud-shell";
-  hud.setAttribute("aria-label", "Errata note");
-  hud.hidden = true;
-  hud.innerHTML = `
-    <header class="note-head"><span class="folio" id="hg-folio"></span><div class="target-name" id="hg-target-name"></div></header>
-    <button class="icon-btn note-close" id="hg-close" aria-label="Dismiss note"></button>
-    <div class="capture" id="hg-capture" hidden><span class="ink-pulse" aria-hidden="true"><i></i><i></i><i></i></span><span id="hg-lock-label"></span></div>
-    <div class="hud-reply" id="hg-reply" style="display:none"></div>
-    <div class="index-list" id="hg-index" hidden></div>
-    <div class="hud-input-row" id="hg-compose" hidden><input class="hud-input" id="hg-input" aria-label="Question about pointed source" autocomplete="off" spellcheck="true"><button class="icon-btn" id="hg-send" aria-label="Send question"></button></div>
-    <footer class="note-tools">
-      <button class="icon-btn" id="hg-index-btn" aria-label="Recall answers (Q)"></button>
-      <button class="icon-btn" id="hg-new" aria-label="New question at pointer"></button>
-      <button class="icon-btn" id="hg-followup" aria-label="Follow up on this note"></button>
-      <span class="spacer"></span><span class="queue-count" id="hg-queue"></span>
-      <button class="icon-btn" id="hg-speech" aria-label="Read answer aloud"></button>
-      <button class="icon-btn" id="hg-stop-speech" aria-label="Stop reading aloud"></button>
-      <button class="icon-btn" id="hg-auto-speech" aria-label="Automatically read completed answers" aria-pressed="false"></button>
-      <button class="icon-btn" id="hg-mic-btn" aria-label="Speak question (hold Space)"></button>
-      <button class="icon-btn" id="hg-move" aria-label="Move note to opposite side"></button>
-    </footer>`;
-  shadow.appendChild(hud);
-  const unreadMark = document.createElement("button");
-  unreadMark.className = "unread-button";
-  unreadMark.setAttribute("aria-label", "Recall unread answers");
-  unreadMark.hidden = true;
-  shadow.appendChild(unreadMark);
-  const targetName = hud.querySelector("#hg-target-name");
-  const lockLabel = hud.querySelector("#hg-lock-label");
-  const hudInput = hud.querySelector("#hg-input");
-  const hudSend = hud.querySelector("#hg-send");
-  const hudReply = hud.querySelector("#hg-reply");
-  const compose = hud.querySelector("#hg-compose");
-  const captureStatus = hud.querySelector("#hg-capture");
-  const indexList = hud.querySelector("#hg-index");
-  const folio = hud.querySelector("#hg-folio");
-  const icons = {
-    close:"M4 4l10 10M14 4L4 14", index:"M3 4h12M3 9h12M3 14h8", new:"M9 3v12M3 9h12",
-    followup:"M7 4L3 8l4 4M3 8h8a4 4 0 0 1 4 4v3", send:"M3 9h12M10 4l5 5-5 5",
-    speech:"M3 7h3l4-4v12l-4-4H3zM13 5q5 4 0 8", auto:"M3 6l3-3 3 3M6 3v9a3 3 0 0 0 6 0V8M10 10l2-2 2 2",
-    mic:"M7 3a2 2 0 0 1 4 0v6a2 2 0 0 1-4 0zM4 8v1a5 5 0 0 0 10 0V8M9 14v3M6 17h6",
-    stop:"M4 4h10v10H4z",
-    move:"M2 9h14M5 5L1 9l4 4M13 5l4 4-4 4", expired:"M4 7V5a5 5 0 0 1 10 0v2M3 7h12v9H3z"
-  };
-  function icon(button, name) {
-    button.innerHTML = `<svg viewBox="0 0 18 18" aria-hidden="true"><path d="${icons[name]}"/></svg>`;
+  // ---------- page tone ----------
+  function luminance(c) {
+    const m = c.match(/rgba?\(([^)]+)\)/);
+    if (!m) return null;
+    const [r, g, b, a = 1] = m[1].split(/[ ,/]+/).map(Number);
+    if (a < .5) return null;
+    return (.2126 * r + .7152 * g + .0722 * b) / 255;
   }
-  for (const [id, name] of Object.entries({"hg-close":"close","hg-index-btn":"index","hg-new":"new","hg-followup":"followup","hg-send":"send","hg-speech":"speech","hg-stop-speech":"stop","hg-auto-speech":"auto","hg-mic-btn":"mic","hg-move":"move"}))
-    icon(hud.querySelector(`#${id}`), name);
-  hudInput.value = prevInputVal;
-  let noteOpen = false, indexOpen = false, composeOpen = false, noteItem = "";
-  let noteSide = 0, frameHeight = 1, cursorOverHud = false, collapseTimer = null;
-  let focusInput = false, micReady = false, micWarning = "", localError = "";
-  const itemAnchors = new Map(), requestAnchors = new Map();
-  let pendingAnchor = null;
-  function control(action, itemId = "", requestId = "") {
-    return _emit({type:"inbox", action, item_id:itemId, request_id:requestId});
-  }
-  function selectedNote() { return inbox?.items.find(item => item.item_id === noteItem); }
-  function openComposer(followup = false) {
-    noteOpen = true; indexOpen = false; composeOpen = true; localError = "";
-    if (followup && noteItem) control("select", noteItem);
-    else { noteItem = ""; control("new"); setTargetLocked(true); }
-    pendingAnchor = {node:lockedNode};
-    focusInput = true;
-    renderNote();
-  }
-  function dismissNote() {
-    if (isListening) cancelListening();
-    noteOpen = false; composeOpen = false; indexOpen = false; localError = "";
-    clearTimeout(collapseTimer);
-    state.lensActive = false;
-    state.lensCandidates = [];
-    state.choosePending = false;
-    lensLayer.replaceChildren();
-    clearActionConfirmation();
-    setTargetLocked(false);
-    if (inbox?.selected_item_id) control("new");
-    renderNote();
-  }
-  function recallNotes() {
-    noteOpen = true; indexOpen = true; composeOpen = false; localError = "";
-    renderNote();
-  }
-  hud.querySelector("#hg-close").addEventListener("click", e => { if (trustedUi(e)) dismissNote(); });
-  unreadMark.addEventListener("click", e => { if (trustedUi(e)) recallNotes(); });
-  hud.querySelector("#hg-index-btn").addEventListener("click", e => { if (trustedUi(e)) recallNotes(); });
-  hud.querySelector("#hg-new").addEventListener("click", e => { if (trustedUi(e)) openComposer(); });
-  hud.querySelector("#hg-followup").addEventListener("click", e => { if (trustedUi(e)) openComposer(true); });
-  hud.querySelector("#hg-speech").addEventListener("click", e => {
-    if (trustedUi(e) && noteItem) control("speak", noteItem);
-  });
-  hud.querySelector("#hg-auto-speech").addEventListener("click", e => { if (trustedUi(e)) control("auto_speak"); });
-  hud.querySelector("#hg-stop-speech").addEventListener("click", e => { if (trustedUi(e)) control("stop_speaking"); });
-  hud.querySelector("#hg-move").addEventListener("click", e => {
-    if (!trustedUi(e)) return;
-    const r = uiFrame.getBoundingClientRect(), v = window.visualViewport;
-    noteSide = r.left + r.width / 2 < (v?.offsetLeft || 0) + (v?.width || innerWidth) / 2 ? 1 : -1;
-    positionNote();
-  });
-  function syncModeUI() { updateSpotlightPosition(state.pointerX, state.pointerY); }
-  function pageIsDark() {
-    const node = (noteItem ? itemAnchors.get(noteItem) : pendingAnchor)?.node;
-    for (let el = node || document.body; el; el = el.parentElement) {
-      const color = getComputedStyle(el).backgroundColor;
-      const parts = color?.match(/[\d.]+/g)?.map(Number);
-      if (parts?.length >= 3 && (parts.length < 4 || parts[3] > .5))
-        return parts[0] * .2126 + parts[1] * .7152 + parts[2] * .0722 < 110;
-    }
-    return false;
-  }
-  let lastPlacement = "";
-  function positionNote() {
-    const visible = noteOpen || !!confirmation || state.lensActive;
-    const unread = !!inbox?.items.some(item => item.unread);
-    const active = visible || unread;
-    const view = window.visualViewport;
-    const minX = (view?.offsetLeft || 0) + 16, minY = (view?.offsetTop || 0) + 16;
-    const maxX = minX + (view?.width || innerWidth) - 32;
-    const maxY = minY + (view?.height || innerHeight) - 32;
-    const width = visible ? Math.max(1, Math.min(isListening ? 250 : 344, maxX - minX)) : 42;
-    const height = visible ? frameHeight : 42;
-    let x = maxX - width, y = minY + 8, anchor = null;
-    const saved = noteItem ? itemAnchors.get(noteItem) : pendingAnchor;
-    const node = saved?.node;
-    if (node?.isConnected && rendered(node)) {
-      const r = node.getBoundingClientRect();
-      if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) anchor = r;
-    } else if (confirmation || state.lensActive) anchor = sourceRect();
-    if (saved?.snapshotId === activeSnapshot?.id) anchor = sourceRect() || anchor;
-    if (anchor) {
-      anchor = {left:Math.max(minX - 16, anchor.left), top:Math.max(minY - 16, anchor.top),
-        right:Math.min(maxX + 16, anchor.right), bottom:Math.min(maxY + 16, anchor.bottom)};
-      if (anchor.right <= anchor.left || anchor.bottom <= anchor.top) anchor = null;
-    }
-    if (visible && anchor) {
-      const gap = 22;
-      const right = {x:anchor.right + gap, y:anchor.top - 8};
-      const left = {x:anchor.left - width - gap, y:anchor.top - 8};
-      if (noteSide < 0 && left.x >= minX) ({x,y} = left);
-      else if (noteSide > 0 && right.x + width < maxX) ({x,y} = right);
-      else if (right.x + width <= maxX) ({x,y} = right);
-      else if (left.x >= minX) ({x,y} = left);
-      else {
-        x = noteSide < 0 ? minX : maxX - width;
-        y = anchor.bottom + 18;
-        if (y + height > maxY && anchor.top - height - 18 >= minY)
-          y = anchor.top - height - 18;
-        else if (y + height > maxY) y = maxY - height;
+  function darkAt(x0, y0, w, h) {
+    let dark = 0, light = 0;
+    for (const fx of [.15, .5, .85]) for (const fy of [.15, .5, .85]) {
+      const stack = document.elementsFromPoint(x0 + w * fx, y0 + h * fy);
+      for (const n of stack) {
+        if (n === host) continue;
+        const l = luminance(getComputedStyle(n).backgroundColor);
+        if (l != null) { l < .42 ? dark++ : light++; break; }
       }
     }
-    if (noteSide) x = noteSide < 0 ? minX : maxX - width;
-    x = Math.max(minX, Math.min(x, maxX - width));
-    for (let el = document.elementFromPoint(x + width / 2, minY); el && el !== host; el = el.parentElement) {
-      const style = getComputedStyle(el), r = el.getBoundingClientRect();
-      if (["fixed","sticky"].includes(style.position) && r.top <= minY && r.bottom < minY + (maxY - minY) / 3)
-        y = Math.max(y, r.bottom + 12);
+    if (!dark && !light) {
+      // Transparent all the way down: trust the root, then the page's own scheme.
+      const l = luminance(getComputedStyle(document.documentElement).backgroundColor) ?? (document.body && luminance(getComputedStyle(document.body).backgroundColor));
+      return l != null ? l < .42 : getComputedStyle(document.documentElement).colorScheme.startsWith("dark");
     }
-    y = Math.max(minY, Math.min(y, maxY - height));
-    const placement = `${x},${y},${width},${height},${active},${anchor?.left},${anchor?.top},${anchor?.right},${anchor?.bottom}`;
-    if (placement === lastPlacement) return;
-    lastPlacement = placement;
-    uiFrame.style.left = `${x}px`; uiFrame.style.top = `${y}px`;
-    uiFrame.style.width = `${active ? width : 1}px`; uiFrame.style.height = `${active ? height : 1}px`;
-    uiFrame.style.opacity = active ? "1" : "0";
-    uiFrame.style.pointerEvents = active ? "auto" : "none";
-    svgLeaders.replaceChildren();
-    if (visible && anchor && !indexOpen) {
-      const ax = x >= anchor.right ? anchor.right : x + width <= anchor.left ? anchor.left : Math.max(anchor.left, Math.min(x + width / 2, anchor.right));
-      const ay = Math.max(anchor.top, Math.min(y + 30, anchor.bottom));
-      const bx = ax <= x ? x : ax >= x + width ? x + width : ax;
-      const by = y > anchor.bottom ? y : y + height < anchor.top ? y + height : y + 30;
-      const path = document.createElementNS("http://www.w3.org/2000/svg","path");
-      path.setAttribute("d", `M${ax},${ay} C${(ax+bx)/2},${ay} ${(ax+bx)/2},${by} ${bx},${by}`);
-      svgLeaders.appendChild(path);
-    }
+    return dark > light;
   }
-  function setTargetLocked(locked) {
-    if (locked && typeof state.pointerX !== "number") return;
-    state.armed = locked;
-    lockedNode = locked ? cursorRefs.get(cursorHistory.at(-1)?.id) || null : null;
-    state.lockedX = locked ? state.pointerX : null;
-    state.lockedY = locked ? state.pointerY : null;
-    if (locked) state.armedAt = Date.now() / 1000;
-    updateSpotlightPosition(state.pointerX, state.pointerY);
+  function setTone(dark) {
+    S.dark = dark;
+    const cls = (dark ? " dark" : " light") + (reducedTransparency() ? " solid" : "");
+    plates.forEach((p, i) => { p.className = "plate" + (i < 3 ? " sliver" : "") + cls; });
+    pillEl.className = "plate" + cls;
   }
-  function updateSpotlightPosition(x, y) {
-    spotlight.style.opacity = state.mode === "simulated" && (noteOpen || isListening) && typeof x === "number" ? "1" : "0";
-    const diameter = Math.max(state.sigmaPx * 1.45, 110);
-    spotlight.style.cssText += `;width:${diameter}px;height:${diameter}px;left:${x}px;top:${y}px`;
-  }
-  function onWindowMouseMove(e) {
-    const r = uiFrame.getBoundingClientRect();
-    cursorOverHud = uiFrame.style.pointerEvents !== "none" && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    if (!cursorOverHud) recordPoint(e.clientX, e.clientY);
-  }
-  window.addEventListener("mousemove", onWindowMouseMove, {passive:true});
 
   // Identities stay in this closure: a selector is metadata, never a historical lookup.
   const cursorIds = new WeakMap();
+  let litIds = [], cursorOverHud = false;
   const cursorRefs = new Map();
   const cursorHistory = [];
   let cursorSerial = 0;
@@ -606,7 +433,8 @@
     const identities = new Map();
     const capture = { version: 1, snapshot_id: snapshotId, captured_at: Date.now() / 1000, page_url: location.origin + location.pathname,
       page_title: String(document.title || "").slice(0, 160),
-      history: cursorHistory.map(h => ({ ...h })), targets: [], blocks: [], controls: [], handles: {} };
+      history: cursorHistory.map(h => ({ ...h })), targets: [], blocks: [], controls: [], handles: {},
+      lit: litIds.slice(0, 5) };
     let capturedMembers = 0;
     function handle(node) {
       const id = cursorId(node);
@@ -909,8 +737,9 @@
     return { ok: true, executed: true };
   }
   function clearActionConfirmation() {
-    if (confirmation) confirmation.card.remove();
+    const had = !!confirmation;
     confirmation = null;
+    if (had) renderNote();
     return true;
   }
   function requestActionConfirmation(info) {
@@ -918,156 +747,1210 @@
     if (destroyed || !activeSnapshot || info?.resolution_id !== activeSnapshot.resolutionId ||
         typeof info.action_id !== "string" || !info.action_id)
       return { ok: false, error: "Stale confirmation" };
-    noteItem = "";
-    pendingAnchor = null;
-    const card = document.createElement("section");
-    card.className = "confirmation";
-    card.setAttribute("role", "dialog");
-    card.setAttribute("aria-label", "Confirm page action");
-    const title = document.createElement("h2");
-    title.textContent = String(info.label || "");
-    card.appendChild(title);
-    const pending = { card, actionId: info.action_id, resolutionId: info.resolution_id };
-    confirmation = pending;
-    for (const approved of [true, false]) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = approved ? "Confirm" : "Cancel";
-      button.addEventListener("click", event => {
-        if (!trustedUi(event) || event.button !== 0 || event.detail < 1 ||
-            event.pointerType && event.pointerType !== "mouse" ||
-            confirmation !== pending || !activeSnapshot ||
-            activeSnapshot.resolutionId !== pending.resolutionId) return;
-        event.stopPropagation();
-        clearActionConfirmation();
-        _emit({ type: "confirm_action", action_id: pending.actionId,
-          resolution_id: pending.resolutionId, approved });
-      });
-      card.appendChild(button);
-    }
-    shadow.appendChild(card);
-    noteOpen = true;
+    // Plain text only: the label comes from the page.
+    confirmation = { label: String(info.label || ""), actionId: info.action_id, resolutionId: info.resolution_id,
+      handle: info.handle || "" };
     renderNote();
     return { ok: true };
   }
-  function showPlainMessage(text) {
-    localError = String(text);
-    noteOpen = true;
-    indexOpen = false;
-    renderNote();
+  // Only a real primary mouse click in the protected frame may spend this approval, once.
+  function confirmClick(approved, event) {
+    const pending = confirmation;
+    if (!pending || !trustedUi(event) || event.button !== 0 || event.detail < 1 ||
+        event.pointerType && event.pointerType !== "mouse" || !activeSnapshot ||
+        activeSnapshot.resolutionId !== pending.resolutionId) return false;
+    clearActionConfirmation();
+    _emit({ type: "confirm_action", action_id: pending.actionId, resolution_id: pending.resolutionId, approved });
+    return true;
   }
-  function renderNote() {
-    const item = selectedNote();
-    hud.hidden = !noteOpen || !!confirmation;
-    hud.classList.toggle("capturing", isListening);
-    const unread = inbox?.items.filter(i => i.unread).length || 0;
-    unreadMark.hidden = noteOpen || !!confirmation || state.lensActive || !unread;
-    unreadMark.textContent = String(unread || "");
-    pinsLayer.style.display = noteOpen || isListening || !!confirmation || state.lensActive ? "" : "none";
-    svgLeaders.style.display = pinsLayer.style.display;
-    if (!noteOpen && !isListening && !confirmation && !state.lensActive) {
-      stopTrackingPins();
-      pinsLayer.replaceChildren();
+  function showPlainMessage(text, answer = false) {
+    const words = String(text || "").trim();
+    if (!words) return;
+    // A short sentence is a passing line; an answer or anything longer gets a card you can read.
+    if (!answer && words.length <= 90 && !words.includes("\n")) coachLine(words, 4600);
+    else if (confirmation || S.view === "compose") S.laterNote = words; // Never knock a decision or typing aside.
+    else {
+      S.note = {id: ++S.ids, text: words};
+      openView("note", null);
     }
-    compose.hidden = !composeOpen;
-    indexList.hidden = !indexOpen;
-    hudReply.style.display = indexOpen || !item && !localError && !prevReplyText ? "none" : "block";
-    const disconnected = inbox?.session_connected === false;
-    captureStatus.hidden = !isListening && !["recording","transcribing"].includes(inbox?.capture_state) && !disconnected;
-    captureStatus.classList.toggle("pending", !micReady);
-    captureStatus.classList.toggle("disconnected", disconnected && !isListening);
-    lockLabel.textContent = micReady ? micWarning || "Listening · 30s limit" : disconnected ? "Disconnected" : "";
-    folio.textContent = item ? String(item.capture_order) : "";
-    targetName.replaceChildren();
-    targetName.textContent = item?.target_label || (composeOpen ? state.hoveredCandidate?.label : "") || "";
-    if (item?.source_url) {
-      const source = document.createElement("span");
-      source.className = "source";
-      try { source.textContent = new URL(item.source_url).hostname; } catch (_) { source.textContent = ""; }
-      source.setAttribute("title", item.source_url);
-      targetName.appendChild(source);
+  }
+
+  // ---------- pointing ----------
+  const SEMANTIC = "img,video,canvas,svg,picture,button,a,input,select,textarea,label,td,th,li,h1,h2,h3,h4,h5,h6,p,blockquote,figcaption,pre,summary,dt,dd,[role=button],[role=link],[role=row],[role=cell],[role=listitem]";
+  const CARDLIKE = 'article,[class*="card" i],[class*="deal" i],[class*="product" i],[class*="listing" i],[class*="result" i],[role=listitem]';
+  const ours = n => !n || n === host || n === document.documentElement || n === document.body;
+
+  function pickElement(x, y) {
+    const start = hitNode(x, y);
+    if (ours(start) || sensitive(start)) return null;
+    const vw = innerWidth, vh = innerHeight;
+    let n = start.closest(SEMANTIC) || start;
+    if (ours(n)) return null;
+    const area = r => r.width * r.height;
+    // Whole-column links and giant list items: step down to the thing actually under the cursor.
+    if (area(n.getBoundingClientRect()) > vw * vh * .45) n = start;
+    if (area(n.getBoundingClientRect()) > vw * vh * .55) return null;
+    // A compact card reads better as one thing than as its image or title alone.
+    let up = n.parentElement, hops = 0;
+    while (up && hops++ < 5 && !ours(up)) {
+      if (up.matches(CARDLIKE) && !up.matches("td,th")) {
+        const r = up.getBoundingClientRect();
+        if (area(r) < vw * vh * .22 && r.width < vw * .6 && up.querySelector("img,picture") && safeText(up, 40).length > 8) return up;
+      }
+      up = up.parentElement;
     }
-    hud.querySelector("#hg-followup").disabled = !item;
-    hud.querySelector("#hg-followup").setAttribute("aria-pressed", String(composeOpen && !!item));
-    hudInput.setAttribute("aria-label", composeOpen && item ? `Follow up on ${item.target_label}` : "Question about pointed source");
-    hudMic.setAttribute("aria-label", isListening ? "Stop recording; 30-second limit" : "Speak question (hold Space)");
-    hud.querySelector("#hg-speech").disabled = !item?.conversation.some(run => run.text);
-    hud.querySelector("#hg-auto-speech").setAttribute("aria-pressed", String(!!inbox?.auto_speak));
-    hud.querySelector("#hg-auto-speech").setAttribute("aria-label", inbox?.speech_error || "Automatically read completed answers");
-    hud.querySelector("#hg-queue").textContent = String(item?.conversation.at(-1)?.queue_position || "") || "";
-    hudReply.replaceChildren();
-    const textNode = (tag, className, text, parent = hudReply) => {
-      const node = document.createElement(tag); node.className = className; node.textContent = text;
-      parent.appendChild(node); return node;
-    };
-    const button = (label, action, itemId = "", requestId = "", parent = hudReply) => {
-      const b = textNode("button", "word-btn", label, parent);
-      b.type = "button";
-      b.addEventListener("click", e => { if (trustedUi(e)) control(action, itemId, requestId); });
-    };
-    if (localError) textNode("p", "error", localError);
-    else if (item && !indexOpen) {
-      for (const run of item.conversation) {
-        const section = textNode("section", "request", "");
-        section.setAttribute("aria-label", run.status);
-        if (run.utterance) textNode("p", "question", run.utterance, section);
-        if (run.text) textNode("p", `answer${run.status === "streaming" ? " streaming" : ""}`, run.text, section);
-        else if (["thinking","queued","transcribing"].includes(run.status)) {
-          const pulse = textNode("span", "ink-pulse", "", section);
-          pulse.setAttribute("aria-label", run.status);
-          pulse.innerHTML = "<i></i><i></i><i></i>";
+    return n;
+  }
+
+  // ---------- subject names: bounded safeText only, never values or ancestor innerText ----------
+  const clean = t => (t || "").replace(/\[[^\]]{1,8}\]/g, "").replace(/\s+/g, " ").trim();
+  const WEAK_END = new Set(["a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "over", "that", "the", "to", "with", "which", "who", "is", "are", "gives", "can", "using", "via", "your", "my"]);
+  function humanName(raw, limit = 30) {
+    let t = clean(raw).replace(/[*`#|<>{}]/g, " ").replace(/\s+/g, " ").trim();
+    t = t.replace(/^\(?(?:new|sale|hot|ad|sponsored)\)?[:\s-]+/i, "").replace(/^[\d.,#)\s]+(?=\D)/, "");
+    t = t.replace(/^(?:[$£€]\s?[\d.,]+[\s–—-]*)+/, "").replace(/^(?:a|an|the)\s+/i, "");
+    t = t.replace(/^[\s.,:;–—"'“”-]+|[\s.,:;–—"'“”-]+$/g, "");
+    if (t.length <= limit) return t;
+    for (const mark of [": ", " – ", " — ", " - ", " | ", ", ", ". ", " ("]) {
+      const head = t.split(mark)[0].trim();
+      if (head.length >= 6 && head.length <= limit) return head;
+    }
+    const kept = [];
+    for (const word of t.split(" ")) {
+      if ((kept.join(" ") + " " + word).trim().length > limit) break;
+      kept.push(word);
+    }
+    while (kept.length > 1 && WEAK_END.has(kept[kept.length - 1].toLowerCase().replace(/[,.:;]+$/, ""))) kept.pop();
+    return (kept.join(" ") || t.slice(0, limit)).replace(/[\s.,:;–—-]+$/, "");
+  }
+  function ownText(n) {
+    if (sensitive(n)) return "";
+    if (n.matches("input,select,textarea")) return clean(n.getAttribute("aria-label") || n.getAttribute("placeholder") || n.getAttribute("name") || ""); // never .value
+    if (n.matches("img,picture,video,svg,canvas")) return clean(n.getAttribute("alt") || n.querySelector?.("img")?.getAttribute("alt") || n.getAttribute("aria-label") || n.getAttribute("title") || "");
+    if (n.matches("iframe,frame")) return clean(n.getAttribute("title") || "Embedded frame");
+    if (n.matches("p,blockquote,dd,figcaption,pre")) {
+      const lead = n.querySelector("b,strong"), opening = clean(safeText(n, 200));
+      const bold = lead ? clean(safeText(lead, 80)) : "";
+      return bold && opening.startsWith(bold) ? bold : opening;
+    }
+    const titled = n.matches("a,h1,h2,h3,h4,h5,h6,button") ? n : n.querySelector('h1,h2,h3,h4,[class*="title" i] a,[class*="title" i],a[title],a');
+    return clean(titled && safeText(titled, 160) || safeText(n, 160) || n.getAttribute("aria-label") || n.getAttribute("title") || "");
+  }
+  const dataTable = t => t && t.getAttribute("role") !== "presentation" && !!(t.tHead || t.querySelector("th")) && t.rows?.length > 1;
+  function nameOf(n) {
+    const cell = n.closest?.("td,th");
+    if (cell && dataTable(cell.closest("table"))) {
+      const row = cell.closest("tr"), table = cell.closest("table");
+      if (row === (table?.tHead?.rows?.[0] || table?.rows?.[0]) && cell.tagName === "TH") {
+        // A column header names the column, in sentence case unless it's an abbreviation.
+        const own = clean(safeText(cell, 60));
+        return {short: humanName(own.length > 4 && own === own.toUpperCase() ? own[0] + own.slice(1).toLowerCase() : own)};
+      }
+      const first = row?.cells?.[0];
+      const label = clean(safeText(row?.querySelector("th") || first, 60));
+      if (cell === first || (cell.tagName === "TH" && row?.querySelector("th") === cell)) return {short: humanName(label || ownText(n)), base: label};
+      const headRow = table?.tHead?.rows?.[0] || table?.rows?.[0];
+      let header = headRow && headRow !== row ? clean(safeText(headRow.cells[cell.cellIndex], 40)) : "";
+      header = header.replace(/\s*\([^)]*\)\s*$/, "");
+      if (header.length > 4 && header === header.toUpperCase()) header = header[0] + header.slice(1).toLowerCase();
+      const col = humanName(header, 14);
+      const short = [humanName(label, 18), col].filter(Boolean).join(" · ");
+      if (short) return {short, base: label, col};
+    }
+    const name = humanName(ownText(n));
+    return {short: name || "This part of the page"};
+  }
+  function subjectFor(targets) {
+    if (!targets.length) return {name: humanName(document.title || "") || "This page", count: 1};
+    const names = targets.map(t => {
+      if (!t.soft) return nameOf(t.el || t.els?.[0] || document.body);
+      const raw = nameOf(t.anchor || document.body);
+      return {short: `Around ${humanName(raw.short, 24)}`, base: raw.base || raw.short, around: true};
+    });
+    const short = n => humanName(n.base || n.short, 18);
+    let name;
+    if (names.length === 1) name = names[0].short;
+    else if (names.length === 2 && names[0].base && names[0].base === names[1].base && names[0].col && names[1].col)
+      name = `${humanName(names[0].base, 18)} · ${names[0].col} and ${names[1].col}`;
+    else name = `${names[0].around ? "Around " : ""}${short(names[0])} and ${names.length > 2 ? "others" : short(names[1])}`;
+    return {name, count: names.length};
+  }
+
+  // ---------- targets ----------
+  // Thin anchor so a soft region survives scrolling and inner scrollers.
+  function regionAt(cx, cy) {
+    const anchor = pickElement(cx, cy) || hitNode(cx, cy);
+    const r = anchor?.getBoundingClientRect?.();
+    return {soft: true, anchor, dx: r ? cx - r.left : cx + scrollX, dy: r ? cy - r.top : cy + scrollY, cx: cx + scrollX, cy: cy + scrollY};
+  }
+  function targetRect(t) {
+    if (t.soft) {
+      let cx, cy;
+      if (t.anchor?.isConnected) { const r = t.anchor.getBoundingClientRect(); cx = r.left + t.dx; cy = r.top + t.dy; }
+      else { cx = t.cx - scrollX; cy = t.cy - scrollY; }
+      return {left: cx - REGION_W / 2, top: cy - REGION_H / 2, right: cx + REGION_W / 2, bottom: cy + REGION_H / 2, width: REGION_W, height: REGION_H};
+    }
+    if (t.doc) {
+      const [x, y, w, h] = t.doc;
+      return {left: x - scrollX, top: y - scrollY, right: x - scrollX + w, bottom: y - scrollY + h, width: w, height: h};
+    }
+    const nodes = t.els || (t.el ? [t.el] : []);
+    let u = null;
+    for (const node of nodes) {
+      if (!node.isConnected || !rendered(node) || sensitive(node)) continue;
+      const r = node.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      if (!u) u = {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
+      else { u.left = Math.min(u.left, r.left); u.top = Math.min(u.top, r.top); u.right = Math.max(u.right, r.right); u.bottom = Math.max(u.bottom, r.bottom); }
+    }
+    return u ? {...u, width: u.right - u.left, height: u.bottom - u.top} : null;
+  }
+  // Scrolling ancestors clip the ring as they clip the thing. Found once; read each frame.
+  function clipAncestors(node) {
+    const out = [];
+    for (let p = node?.parentElement, n = 0; p && n < 32; p = p.parentElement, n++) {
+      const cs = getComputedStyle(p);
+      const x = /auto|scroll|hidden|clip/.test(cs.overflowX), y = /auto|scroll|hidden|clip/.test(cs.overflowY);
+      if ((x || y) && p !== document.body && p !== document.documentElement) out.push({p, x, y});
+    }
+    return out;
+  }
+  function clippedRect(t) {
+    const r = targetRect(t);
+    if (!r || t.soft || t.doc) return r;
+    if (!t.clips) t.clips = clipAncestors(t.el || t.els?.[0]);
+    let {left, top, right, bottom} = r;
+    for (const {p, x, y} of t.clips) {
+      const b = p.getBoundingClientRect();
+      if (x) { left = Math.max(left, b.left); right = Math.min(right, b.right); }
+      if (y) { top = Math.max(top, b.top); bottom = Math.min(bottom, b.bottom); }
+    }
+    if (right <= left || bottom <= top) return null;
+    return {left, top, right, bottom, width: right - left, height: bottom - top};
+  }
+
+  // ---------- rings ----------
+  const lit = new Map(); // key -> {node, g:box, style, target}
+  const RING_STYLES = {
+    tentative: {fill: .06, edge: .45, halo: .0, stroke: 1.5},
+    live:      {fill: .1, edge: 1,   halo: .16, stroke: 1.75},
+    answer:    {fill: .08, edge: .9,  halo: .14, stroke: 1.5},
+    relit:     {fill: .16, edge: 1,   halo: .32, stroke: 2.5},
+  };
+  function ringFor(key, target, style) {
+    let r = lit.get(key);
+    if (!r) {
+      const node = add("div", "ring" + (target.soft ? " region" : ""), rings);
+      const rect = clippedRect(target) || targetRect(target) || {left: 0, top: 0, width: 0, height: 0};
+      const grow = reduced() || target.soft ? 0 : 16;
+      const pad = ringPad(rect);
+      r = {node, target, key, g: box(rect.left - pad - grow, rect.top - pad - grow, rect.width + 2 * (pad + grow), rect.height + 2 * (pad + grow), SNAPPY), style};
+      r.g.o.snap(0);
+      lit.set(key, r);
+    }
+    r.style = style; r.dying = false; r.fly = null;
+    r.g.x.k = r.g.y.k = r.g.w.k = r.g.h.k = SNAPPY.k;
+    r.g.x.c = r.g.y.c = r.g.w.c = r.g.h.c = SNAPPY.c;
+    r.g.o.to(1);
+    wake();
+    return r;
+  }
+  function ringPad(rect) { return rect.height > 120 ? 6 : rect.height < 26 ? 2 : 3; }
+  function dropRing(key) { const r = lit.get(key); if (r) { r.dying = true; r.g.o.to(0); wake(); } }
+  function dropAllRings() { for (const [k] of lit) dropRing(k); }
+  function drawRings(level) {
+    const vw = innerWidth, vh = innerHeight;
+    for (const [key, r] of lit) {
+      const rect = clippedRect(r.target);
+      if (!rect) {
+        // Gone, hidden, or scrolled out of its own scroller: no light on anything else.
+        if (!targetRect(r.target)) dropRing(key);
+        else r.g.o.to(0);
+      } else {
+        if (!r.dying) r.g.o.to(1);
+        const pad = r.target.soft ? 0 : ringPad(rect);
+        let x = rect.left - pad, y = rect.top - pad, w = rect.width + 2 * pad, h = rect.height + 2 * pad;
+        if (!r.target.soft) {
+          // Off-screen: squash into a glow on the edge it went past, so it's still visibly held.
+          if (y + h < 2) { w = Math.min(w, 140); x = Math.max(8, Math.min(vw - w - 8, x)); y = 3; h = 4; }
+          else if (y > vh - 2) { w = Math.min(w, 140); x = Math.max(8, Math.min(vw - w - 8, x)); y = vh - 7; h = 4; }
         }
-        if (run.error) textNode("p", "error", run.error, section);
-        if (["failed","interrupted"].includes(run.status)) {
-          button("Retry","retry",item.item_id,run.request_id,section);
-          button("Skip","skip",item.item_id,run.request_id,section);
+        if (r.fly) { x = r.fly.x(); y = r.fly.y(); w = 20; h = 10; }
+        r.g.x.to(x); r.g.y.to(y); r.g.w.to(w); r.g.h.to(h);
+        // Track scroll exactly; the spring is only for arrival and for moving between states.
+        if (r.seen && !r.fly && (S.scrollingAt && performance.now() - S.scrollingAt < 140)) { r.g.x.snap(x); r.g.y.snap(y); r.g.w.snap(w); r.g.h.snap(h); }
+        r.seen = true;
+      }
+      const st = RING_STYLES[r.style] || RING_STYLES.live;
+      const breathe = r.style === "live" ? level : 0;
+      const n = r.node.style;
+      n.setProperty("--a", S.dark ? "95,172,255" : "0,122,255");
+      n.setProperty("--fill", (st.fill + breathe * .05).toFixed(3));
+      n.setProperty("--edge", st.edge.toFixed(3));
+      n.setProperty("--halo", (st.halo + breathe * .22).toFixed(3));
+      n.setProperty("--stroke", `${st.stroke}px`);
+      n.transform = `translate3d(${r.g.x.x}px,${r.g.y.x}px,0)`;
+      n.width = `${Math.max(0, r.g.w.x)}px`; n.height = `${Math.max(0, r.g.h.x)}px`;
+      n.opacity = r.g.o.x.toFixed(3);
+      if (r.dying && r.g.o.x < .01) { r.node.remove(); lit.delete(key); }
+    }
+  }
+  function stopTrackingPins() {
+    for (const [, r] of lit) r.node.remove();
+    lit.clear();
+    anchors.clear();
+    snapshotOwner.clear();
+    S.localPending = [];
+  }
+  // A highlight names captured nodes. Questions keep their pointed things lit until scope widens.
+  function renderPins(candidates) {
+    const targets = [];
+    let owner = null, column = null;
+    for (const cand of candidates || []) {
+      const entry = !cand.node && activeSnapshot ? snapshotEntry(activeSnapshot.id, activeSnapshot.resolutionId, cand.id) : null;
+      const nodes = cand.members || entry?.members || (cand.node || entry?.node ? [cand.node || entry.node] : null);
+      if (cand.snapshotId && !owner) owner = snapshotOwner.get(cand.snapshotId);
+      if (!owner && activeSnapshot) owner = snapshotOwner.get(activeSnapshot.id);
+      // One column's cells share one light.
+      if (cand.label === "Column" && nodes) {
+        if (!column) targets.push(column = {els: [], key: `t${++S.ids}`});
+        column.els.push(...nodes);
+      } else if (nodes) targets.push(nodes.length > 1 ? {els: nodes, key: `t${++S.ids}`} : {el: nodes[0], key: `t${++S.ids}`});
+      else if (Array.isArray(cand.rect_doc) && cand.rect_doc.length === 4 && cand.rect_doc.every(Number.isFinite))
+        targets.push({doc: cand.rect_doc, key: `t${++S.ids}`});
+    }
+    if (!targets.length) return;
+    const cur = S.view === "answer" ? current() : null;
+    if (owner) {
+      const nested = targets.every(t => owner.targets.some(o => {
+        const a = o.el, b = t.el || t.els?.[0];
+        return a && b && (a === b || a.contains(b));
+      }));
+      const answered = cur && owner === anchors.get(cur.id) && !isBusyItem(cur);
+      // The pointed things are already lit and named. Only a wider scope changes what's shown.
+      if (nested && !answered) return;
+      owner.targets = targets;
+      if (cur && owner === anchors.get(cur.id)) { lightCurrent(cur, "answer"); return; }
+      if (S.hold || S.view) return;
+    }
+    if (S.hold) return;
+    const keep = new Set(targets.map(t => t.key));
+    for (const [k] of lit) if (!keep.has(k)) dropRing(k);
+    for (const t of targets) ringFor(t.key, t, "answer");
+  }
+
+  // ---------- free-space placement ----------
+  const CELL = 26;
+  function occupancy() {
+    const vw = innerWidth, vh = innerHeight, cols = Math.ceil(vw / CELL), rows = Math.ceil(vh / CELL);
+    const grid = new Float32Array((cols + 1) * (rows + 1)); // summed-area table
+    const hit = (x, y) => {
+      const n = document.elementFromPoint(x, y);
+      if (!n || n === host) return 0;
+      if (n.matches("img,video,canvas,svg,path,picture,input,select,textarea,button,iframe")) return 1;
+      const c = document.caretRangeFromPoint?.(x, y);
+      const node = c?.startContainer;
+      if (node?.nodeType === 3 && node.data.trim()) {
+        const rng = document.createRange();
+        rng.setStart(node, Math.max(0, c.startOffset - 1));
+        rng.setEnd(node, Math.min(node.length, c.startOffset + 1));
+        const r = rng.getBoundingClientRect();
+        if (x >= r.left - 8 && x <= r.right + 8 && y >= r.top - 5 && y <= r.bottom + 5) return 1;
+      }
+      const cs = getComputedStyle(n);
+      if (cs.backgroundImage !== "none" && n.getBoundingClientRect().width < vw * .5) return .7;
+      return 0;
+    };
+    for (let r = 1; r <= rows; r++) for (let c = 1; c <= cols; c++) {
+      const v = hit((c - .5) * CELL, (r - .5) * CELL);
+      grid[r * (cols + 1) + c] = v + grid[(r - 1) * (cols + 1) + c] + grid[r * (cols + 1) + c - 1] - grid[(r - 1) * (cols + 1) + c - 1];
+    }
+    return (x, y, w, h) => {
+      const c0 = Math.max(0, Math.floor(x / CELL)), c1 = Math.min(cols, Math.ceil((x + w) / CELL));
+      const r0 = Math.max(0, Math.floor(y / CELL)), r1 = Math.min(rows, Math.ceil((y + h) / CELL));
+      const sum = grid[r1 * (cols + 1) + c1] - grid[r0 * (cols + 1) + c1] - grid[r1 * (cols + 1) + c0] + grid[r0 * (cols + 1) + c0];
+      return sum / Math.max(1, (c1 - c0) * (r1 - r0));
+    };
+  }
+  const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  const inflate = (r, p) => ({left: r.left - p, right: r.right + p, top: r.top - p, bottom: r.bottom + p});
+  // Things you asked about must stay visible; for a table cell, so should its row and column.
+  function avoidance(item) {
+    const hard = [], soft = [];
+    for (const t of item?.targets || []) {
+      const r = targetRect(t);
+      if (r && r.bottom > 0 && r.top < innerHeight) hard.push(inflate(r, 14));
+      const cell = t.el?.closest?.("td,th");
+      if (cell && dataTable(cell.closest("table"))) {
+        const row = cell.closest("tr")?.getBoundingClientRect();
+        if (row) soft.push(row);
+        const table = cell.closest("table");
+        const first = table?.rows?.[0]?.cells?.[cell.cellIndex]?.getBoundingClientRect?.();
+        const last = table?.rows?.[table.rows.length - 1]?.cells?.[cell.cellIndex]?.getBoundingClientRect?.();
+        if (first && last) soft.push({left: first.left, right: first.right, top: first.top, bottom: last.bottom});
+      }
+    }
+    return {hard, soft};
+  }
+  function place(item, want) {
+    const vw = innerWidth, vh = innerHeight;
+    const W = Math.min(CARD_W, vw - 2 * MARGIN);
+    const occ = occupancy();
+    const {hard, soft} = avoidance(item);
+    const focus = hard[0] ? {x: (hard[0].left + hard[0].right) / 2, y: (hard[0].top + hard[0].bottom) / 2}
+      : {x: state.pointerX ?? vw * .7, y: state.pointerY ?? vh * .3};
+    const vmax = Math.max(vw, vh);
+    let best = null;
+    const heights = [want, Math.max(170, want * .66), 170].filter((h, i, a) => a.indexOf(h) === i && h <= vh - 2 * MARGIN);
+    if (!heights.length) heights.push(vh - 2 * MARGIN);
+    heights.forEach((H, hi) => {
+      for (let y = MARGIN; y <= Math.max(MARGIN, vh - H - MARGIN); y += 13) {
+        for (let x = MARGIN; x <= Math.max(MARGIN, vw - W - MARGIN); x += 13) {
+          const rect = {left: x, top: y, right: x + W, bottom: y + H};
+          let covers = 0, softCovers = 0;
+          for (const r of hard) covers += overlap(rect, r);
+          for (const r of soft) softCovers += overlap(rect, r);
+          const frac = occ(x, y, W, H);
+          const dx = Math.max(hard[0]?.left - rect.right || 0, rect.left - (hard[0]?.right ?? 1e9), 0);
+          const dy = Math.max(hard[0]?.top - rect.bottom || 0, rect.top - (hard[0]?.bottom ?? 1e9), 0);
+          const near = hard[0] ? Math.hypot(dx, dy) : Math.hypot(x + W / 2 - focus.x, y + H / 2 - focus.y);
+          let cost = covers * 1000 + softCovers / (W * H) * 26 + frac * 110 + near / vmax * 20 + hi * 7;
+          // No margins anywhere: hug an edge rather than float over the middle of the content.
+          if (frac > .15) cost += Math.min(vw - rect.right, rect.left, vh - rect.bottom) / vmax * 26;
+          if (hard[0]) {
+            if (rect.right <= hard[0].left) cost += 2;                       // prefer right of or below
+            cost += Math.abs(y - hard[0].top) / vmax * 9;                    // and lined up with it
+          }
+          if (S.pos) cost += Math.hypot(x - S.pos.x, y - S.pos.y) / vmax * 5; // don't wander
+          if (!best || cost < best.cost) best = {x, y, H, cost, frac, covers};
         }
       }
-      const expired = textNode("span", "icon-btn expired", "");
-      expired.setAttribute("aria-label", item.action_state || "Actions expired; point again to act");
-      icon(expired, "expired");
-    } else if (prevReplyText && !indexOpen && !localError) textNode("p", "answer", prevReplyText);
-    if (inbox?.speech_error) textNode("p", "error", inbox.speech_error);
-    if (inbox?.paused) button("Resume", "resume");
-    indexList.replaceChildren();
-    if (indexOpen) for (const entry of inbox?.items || []) {
-      const b = textNode("button", `index-item${entry.unread ? " unread" : ""}`, "", indexList);
-      b.type = "button";
-      textNode("span", "folio", String(entry.capture_order), b);
-      textNode("span", "", entry.target_label, b);
-      b.setAttribute("aria-label", `${entry.target_label}${entry.unread ? ", unread" : ""}`);
-      b.addEventListener("click", e => {
-        if (!trustedUi(e)) return;
-        noteItem = entry.item_id; indexOpen = false; noteSide = 0; localError = "";
-        control("select", noteItem); renderNote();
-      });
-    }
-    positionNote();
+    });
+    return best;
   }
+
+  // ---------- stack: a view over the Python inbox ----------
+  const anchors = new Map();       // item id -> {targets}, only for items captured in this document
+  const snapshotOwner = new Map(); // snapshot id -> same record
+  const requestOwner = new Map();  // intent id -> same record
+  const WAITING = ["transcribing", "queued", "thinking"];
+  const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, "") || "that page"; } catch (_) { return "that page"; } };
+  function itemView(raw) {
+    const turns = (raw.conversation || []).filter(r => !["retried", "skipped"].includes(r.status)).map(r => ({
+      id: r.request_id, q: r.utterance || "", a: r.text || "", status: r.status,
+      error: ["failed", "interrupted"].includes(r.status) ? r.plain_error || "Hermes couldn’t finish this answer." : "",
+    }));
+    const local = anchors.get(raw.item_id);
+    return {id: raw.item_id, subject: raw.subject || raw.target_label || "This part of the page", turns,
+      targets: local?.targets || [], local: !!local, archived: !!raw.archived,
+      presented: !!raw.presented || S.shown.has(raw.item_id), unread: !!raw.unread, count: raw.target_count || 1,
+      notice: raw.notice || "", host: hostOf(raw.source_url), url: raw.source_url || ""};
+  }
+  const visible = () => S.items.filter(i => !i.archived && i.turns.length);
+  const current = () => S.items.find(i => i.id === S.cur) || null;
+  const isBusyItem = i => i.turns.some(t => WAITING.includes(t.status) || t.status === "streaming");
+  const started = i => i.turns.length && !WAITING.includes(i.turns[0].status);
+  const inProgress = () => S.items.filter(i => i.turns.some(t => WAITING.includes(t.status)) && !(S.view === "answer" && S.cur === i.id));
+  function stateWord(i) {
+    if (i.turns.some(t => t.error)) return "Didn’t finish";
+    if (i.turns.some(t => t.status === "streaming")) return "Answering";
+    if (i.turns.some(t => t.status === "thinking")) return "Looking into it";
+    if (i.turns.some(t => WAITING.includes(t.status))) return "Waiting";
+    return i.presented ? "" : "Ready";
+  }
+  function hintFor(item) {
+    if (S.coach.answered > 6 || item.turns.at(-1)?.error) return "";
+    return "Hold Space to ask more";
+  }
+  const viewItem = () => {
+    if (S.view === "answer") return current();
+    if (S.view === "compose") return S.compose;
+    if (S.view === "confirm") return S.confirmItem;
+    return S.viewTargets || null;
+  };
+  function isGone(item) { return item.local && item.targets.length > 0 && !item.targets.some(targetRect); }
+  function pushCard() {
+    if (!S.ready) return;
+    const base = {type: "_ui_render", frame: "card", kind: "card", dark: S.dark, maxBody: S.maxBody, reduce: reduced()};
+    if (!S.view) { rawSend({...base, view: null}); return; }
+    if (S.view === "compose") {
+      rawSend({...base, view: "compose", title: S.compose.title, followup: !!S.compose.itemId, focus: !!S.compose.focus});
+      S.compose.focus = false;
+      return;
+    }
+    if (S.view === "confirm") { rawSend({...base, view: "confirm", id: confirmation.actionId, label: confirmation.label}); return; }
+    if (S.view === "lens") {
+      rawSend({...base, view: "lens", id: state.resolutionId, dwell: state.dwellMs,
+        options: state.lensCandidates.map(c => humanName(c.label || c.summary || "", 44))});
+      return;
+    }
+    if (S.view === "note") { rawSend({...base, view: "note", id: S.note.id, text: S.note.text, title: "Hermes"}); return; }
+    const item = current();
+    if (!item) { closeStack("dismiss"); return; }
+    const list = visible(), i = list.indexOf(item);
+    const peek = p => p && {subject: p.subject, state: stateWord(p)};
+    const hasAnswer = item.turns.some(t => t.a.trim());
+    rawSend({...base, view: "answer", dir: S.dir, hint: hintFor(item), alert: inbox?.speech_error || "",
+      reading: inbox?.speaking_item_id === item.id, autoRead: !!inbox?.auto_speak, canRead: hasAnswer,
+      paused: !!inbox?.paused && !item.turns.some(t => t.error) && (inbox?.waiting || 0) > 0,
+      prev: peek(list[i - 1]), next: peek(list[i + 1]),
+      item: {id: item.id, subject: item.subject, notice: item.notice, lost: !item.local, host: item.host, gone: isGone(item),
+        turns: item.turns.map(({id, q, a, status, error}) => ({id, q, a, status, error}))}});
+    S.dir = null;
+  }
+  function renderNote() {
+    // Confirmation and the "which one" card take over the surface; the stack resumes after.
+    if (confirmation) {
+      const entry = confirmation.handle && activeSnapshot ? snapshotEntry(activeSnapshot.id, activeSnapshot.resolutionId, confirmation.handle) : null;
+      const targets = entry?.node ? [{el: entry.node, key: `confirm-${confirmation.handle}`}] : [];
+      S.confirmItem = {targets};
+      for (const t of targets) ringFor(t.key, t, "answer");
+      openView("confirm", S.confirmItem);
+      return;
+    }
+    if (S.view === "confirm") {
+      dropRingsWithPrefix("confirm-");
+      restoreAfterOverlay();
+      return;
+    }
+    if (S.view) { pushCard(); layout(); }
+  }
+  function dropRingsWithPrefix(prefix) { for (const [k] of lit) if (String(k).startsWith(prefix)) dropRing(k); }
+  function restoreAfterOverlay() {
+    const item = current();
+    S.viewTargets = null;
+    if (S.laterNote) { const words = S.laterNote; S.laterNote = ""; S.note = {id: ++S.ids, text: words}; openView("note", null); return; }
+    if (item && visible().includes(item)) { S.view = null; openStack(item); }
+    else closeStack("cancel");
+  }
+  // Open any non-stack card on the same plate.
+  function openView(view, item) {
+    const was = S.view;
+    S.view = view;
+    S.viewTargets = item;
+    clearTimeout(S.retreatTimer); S.retreatAt = 0;
+    const W = cardWidth();
+    const want = view === "note" ? estimateChars(S.note?.text || "") : view === "lens" ? 200 : 120;
+    if (!S.pos || !was || coversTargets(item, S.pos, want)) {
+      const spot = place(item, want);
+      S.pos = {x: spot.x, y: spot.y};
+      setTone(darkAt(spot.x, spot.y, W, Math.min(want, 300)));
+    }
+    S.maxBody = maxBodyFor(item);
+    if (!was) enterPlates(W);
+    pushCard();
+    layout();
+    if (view === "note") armNoteRetreat();
+  }
+  function enterPlates(W) {
+    const pos = S.pos;
+    front.x.snap(pos.x + 8); front.y.snap(pos.y + 12); front.w.snap(W - 16); front.h.snap(40); S.morphR = 18;
+    front.o.snap(0);
+    next.x.snap(pos.x + 8); next.y.snap(pos.y + 20); next.w.snap(W - 16); next.h.snap(30); next.o.snap(0);
+    next2.x.snap(pos.x + 18); next2.y.snap(pos.y + 20); next2.w.snap(W - 36); next2.h.snap(30); next2.o.snap(0);
+    prev.x.snap(pos.x + 8); prev.y.snap(pos.y); prev.w.snap(W - 16); prev.h.snap(30); prev.o.snap(0);
+    S.cardFade = 0;
+    raise();
+  }
+  function openStack(item, dir) {
+    const was = S.view === "answer";
+    const wasAny = !!S.view;
+    S.view = "answer";
+    S.cur = item.id;
+    S.dir = dir;
+    S.note = null;
+    S.compose = null;
+    if (!S.shown.has(item.id)) {
+      S.shown.add(item.id);
+      if (!item.presented) {
+        S.coach.answered++;
+        sendCoach({answered: S.coach.answered});
+      }
+      item.presented = true;
+    }
+    control("select", item.id);
+    const list0 = visible(), i0 = list0.indexOf(item);
+    const peekAbove = i0 > 0 ? 30 : 0, peekBelow = i0 < list0.length - 1 ? 30 : 0;
+    const want = estimateH(item) + peekAbove + peekBelow;
+    const needMove = !S.pos || coversTargets(item, {x: S.pos.x, y: S.pos.y - peekAbove}, want);
+    const W = cardWidth();
+    if (!was || needMove) {
+      const spot = place(item, want);
+      S.pos = {x: spot.x, y: spot.y + peekAbove};
+      S.placedH = spot.H;
+      setTone(darkAt(spot.x, spot.y, W, Math.min(want, 300)));
+    }
+    S.maxBody = maxBodyFor(item);
+    if (!wasAny) {
+      const p = P.pill;
+      if (!S.hold && pillVisible() && S.pillMode === "capsule" && !capsuleText()) {
+        // The capsule becomes the card: same plate, new shape.
+        enterPlates(W);
+        front.x.snap(p.x.x); front.y.snap(p.y.x); front.w.snap(p.w.x); front.h.snap(p.h.x); S.morphR = PILL_H / 2;
+        front.o.snap(1);
+        hidePill(true);
+      } else enterPlates(W);
+    }
+    lightCurrent(item, "answer");
+    pushCard();
+    S.wasBusy = isBusyItem(item);
+    armRetreat();
+    layout();
+  }
+  function estimateChars(text) { return Math.min(innerHeight - 2 * MARGIN, 96 + Math.ceil(text.length / 48) * 19.3); }
+  function estimateH(item) { return estimateChars(item.turns.map(t => t.a).join("")); }
+  function coversTargets(item, pos, h) {
+    const W = cardWidth();
+    const rect = {left: pos.x, top: pos.y, right: pos.x + W, bottom: pos.y + h};
+    return avoidance(item).hard.some(r => overlap(rect, r) > 0);
+  }
+  function maxBodyFor(item) {
+    // The extra 24 is room for the plate's coarse rounding.
+    const chrome = 78 + (S.sizes.prevH || 0) + (S.sizes.nextH || 0);
+    let limit = innerHeight - MARGIN - (S.pos?.y ?? MARGIN) - chrome;
+    const {hard} = avoidance(item);
+    const W = cardWidth();
+    // Stop growing before reaching what you asked about.
+    for (const r of hard) {
+      if (S.pos && r.left < S.pos.x + W && r.right > S.pos.x && r.top > S.pos.y) limit = Math.min(limit, r.top - S.pos.y - chrome - 8);
+    }
+    const vv = window.visualViewport;
+    if (vv && vv.scale > 1.01) limit = Math.min(limit, vv.height - chrome - 8);
+    return Math.max(70, limit);
+  }
+  function lightCurrent(item, style) {
+    const keep = new Set();
+    for (const t of item?.targets || []) { keep.add(t.key); ringFor(t.key, t, style); }
+    for (const [k] of lit) if (!keep.has(k) && !(S.hold?.targets || []).some(t => t.key === k) && !String(k).startsWith("confirm-")) dropRing(k);
+  }
+  function layout() {
+    if (!S.view) return;
+    const W = cardWidth();
+    const {prevH, cardH, nextH} = S.sizes;
+    const h = Math.max(cardH, 64);
+    const pos = S.pos;
+    const item = viewItem();
+    // Long answer keeps growing: slide up if that's possible without covering the target.
+    const total = h + nextH;
+    let y = pos.y;
+    const over = y + total - (innerHeight - MARGIN);
+    if (over > 0) {
+      const ny = Math.max(MARGIN + prevH, y - over);
+      if (!coversTargets(item, {x: pos.x, y: ny}, total)) { y = ny; S.pos.y = y; }
+    }
+    if (prevH && y - prevH < MARGIN) { y = MARGIN + prevH; S.pos.y = y; }
+    // Pinch zoom magnifies the layout viewport: stay inside the part you can actually see.
+    const vv = window.visualViewport;
+    if (vv && vv.scale > 1.01) {
+      pos.x = Math.max(vv.offsetLeft + 4, Math.min(pos.x, vv.offsetLeft + vv.width - W - 4));
+      y = Math.max(vv.offsetTop + 4 + prevH, Math.min(y, Math.max(vv.offsetTop + 4 + prevH, vv.offsetTop + vv.height - total - 4)));
+      S.pos.y = y;
+    }
+    const list = S.view === "answer" ? visible() : [], i = list.indexOf(current());
+    front.x.to(pos.x); front.y.to(y); front.w.to(W); front.h.to(h); front.o.to(1);
+    const showPrev = i > 0 && prevH, showNext = i >= 0 && i < list.length - 1 && nextH, showNext2 = i >= 0 && i < list.length - 2 && nextH;
+    prev.x.to(pos.x + 7); prev.w.to(W - 14); prev.h.to((prevH || 30) + 14); prev.y.to(y - (prevH || 30)); prev.o.to(showPrev ? 1 : 0);
+    next.x.to(pos.x + 7); next.w.to(W - 14); next.h.to((nextH || 30) + 14); next.y.to(y + h - 14); next.o.to(showNext ? 1 : 0);
+    next2.x.to(pos.x + 16); next2.w.to(W - 32); next2.h.to(24); next2.y.to(y + h + (nextH || 30) - 16); next2.o.to(showNext2 ? 1 : 0);
+    S.frameY = y - (showPrev ? prevH : 0);
+    S.frameH = (showPrev ? prevH : 0) + h + (showNext ? nextH : 0);
+    placeCapsule();
+    wake();
+  }
+  function closeStack(reason) {
+    if (!S.view) return;
+    const item = S.view === "answer" ? current() : null;
+    S.view = null;
+    S.compose = null;
+    S.note = null;
+    S.viewTargets = null;
+    clearTimeout(S.retreatTimer);
+    S.retreatAt = 0;
+    if (item) {
+      // Retreat back toward what it was about; it's going home, not vanishing.
+      const r = item.targets?.[0] && targetRect(item.targets[0]);
+      if (r && !reduced() && reason === "retreat") {
+        front.x.to(front.x.t + (r.left + r.width / 2 - (front.x.t + CARD_W / 2)) * .22);
+        front.y.to(front.y.t + (r.top + r.height / 2 - front.y.t) * .22);
+      }
+    }
+    front.w.to(front.w.t - 24); front.h.to(Math.max(40, front.h.t - 26));
+    for (const b of [front, prev, next, next2]) b.o.to(0);
+    S.frameH = 0;
+    dropAllRings();
+    if (reason !== "cancel") {
+      S.cur = "";
+      for (const i of visible()) if (reason === "dismiss" || i.presented) if (!isBusyItem(i)) i.archived = true;
+      control(reason === "retreat" ? "retreat" : "dismiss");
+    } else setTimeout(refresh, 260);
+    if (reason === "retreat" && !S.coach.retreated) {
+      S.coach.retreated = true;
+      sendCoach({retreated: true});
+      coachLine("Press Q to bring answers back", 3600);
+    } else updateCapsule();
+    // Wait for the fade so words don't vanish before glass does.
+    setTimeout(() => { if (!S.view) { pushCard(); S.pos = null; S.sizes = {prevH: 0, cardH: 0, nextH: 0, contentH: 0, bodyH: 0}; } }, reduced() ? 180 : 240);
+  }
+  function armNoteRetreat() {
+    clearTimeout(S.retreatTimer);
+    const words = (S.note?.text || "").split(/\s+/).length;
+    S.retreatTimer = setTimeout(function again() {
+      if (S.view !== "note") return;
+      if (S.hoverCard || document.hidden) { S.retreatTimer = setTimeout(again, 1500); return; }
+      closeStack("cancel");
+    }, Math.max(state.answerTurnMs, words / READING_WPS * 1000));
+  }
+  // Each unseen answer gets its own turn; long answers get reading time. Hover holds it.
+  function armRetreat() {
+    clearTimeout(S.retreatTimer);
+    S.retreatAt = 0;
+    const item = S.view === "answer" ? current() : null;
+    if (!item) return;
+    if (isBusyItem(item) || S.hoverCard || S.hold || inbox?.speaking_item_id === item.id) return;
+    const words = item.turns.reduce((n, t) => n + t.a.split(/\s+/).length, 0);
+    const ms = Math.max(state.answerTurnMs, words / READING_WPS * 1000);
+    S.retreatAt = performance.now() + ms;
+    S.retreatTimer = setTimeout(retreatStep, ms);
+  }
+  function retreatStep() {
+    if (document.hidden) { S.retreatTimer = setTimeout(retreatStep, 2000); return; }
+    // Anything you haven't seen comes forward first, one stage at a time, so nothing gets buried.
+    const list = visible(), i = list.indexOf(current());
+    const nextUnseen = list.slice(i + 1).find(x => !x.presented && started(x));
+    if (nextUnseen) { go(nextUnseen, "next"); return; }
+    closeStack("retreat");
+  }
+  function go(item, dir) {
+    openStack(item, dir);
+    if (dir && !reduced()) lift.kick(dir === "next" ? -420 : 420);
+  }
+  function step(delta) {
+    const list = visible(), i = list.indexOf(current());
+    const target = list[i + delta];
+    if (!target) { lift.kick(delta * 260); return; } // gentle end-of-stack bump
+    go(target, delta > 0 ? "next" : "prev");
+  }
+  function recallNotes() {
+    if (!S.items.some(i => i.turns.length)) { coachLine("Nothing here yet. Point at something and hold Space", 2800); return; }
+    for (const i of S.items) i.archived = false;
+    control("recall");
+    const list = visible();
+    const last = [...list].reverse().find(started) || list[list.length - 1];
+    if (last) openStack(last);
+  }
+  // Click an answer: back to the thing, lit again.
+  function goBack(item) {
+    if (!item) return;
+    const t = item.targets[0];
+    if (!item.local || !t) { _emit({type: "show_source", item_id: item.id}); return; }
+    const r = targetRect(t);
+    if (!r) { pushCard(); return; } // the page removed it: the card says so, we don't guess
+    const inView = r.top > 40 && r.bottom < innerHeight - 40;
+    if (!inView) {
+      const y = scrollY + r.top + r.height / 2 - innerHeight / 2;
+      const node = t.el || t.els?.[0];
+      if (node) node.scrollIntoView({block: "center", inline: "nearest", behavior: reduced() ? "auto" : "smooth"});
+      else window.scrollTo({top: y, behavior: reduced() ? "auto" : "smooth"});
+    }
+    relight(item);
+    armRetreat();
+  }
+  function relight(item) {
+    for (const t of item.targets || []) {
+      const ring = ringFor(t.key, t, "relit");
+      if (!reduced() && !t.soft) { ring.g.w.kick(180); ring.g.h.kick(180); ring.g.x.kick(-90); ring.g.y.kick(-90); }
+    }
+    clearTimeout(S.relitTimer);
+    S.relitTimer = setTimeout(() => { for (const t of item.targets || []) if (lit.get(t.key)) lit.get(t.key).style = "answer"; }, 1100);
+  }
+
+  // ---------- capsule ----------
+  function pillVisible() { return P.pill.o.t > 0; }
+  function pushPill(mode, text, shimmer) {
+    if (!S.ready) return;
+    const startup = mode === "wave" && !S.micReady;
+    const key = JSON.stringify([mode, text, shimmer, S.dark, startup]);
+    if (key === S.pillLast) return;
+    S.pillLast = key;
+    rawSend({type: "_ui_render", frame: "pill", kind: "pill", mode, text, shimmer: !!shimmer, startup, dark: S.dark, reduce: reduced()});
+  }
+  function hidePill(instant) {
+    P.pill.o.to(0);
+    S.pillMode = "none";
+    if (instant) { P.pill.o.snap(0); pushPill("off", "", false); }
+    else setTimeout(() => { if (S.pillMode === "none") pushPill("off", "", false); }, 200);
+    wake();
+  }
+  function capsuleText() {
+    const waiting = inProgress();
+    const local = S.localPending;
+    const total = waiting.length + local.length;
+    if (!total) return "";
+    if (inbox?.paused) return `Paused. Press Q to sort it out`;
+    const things = waiting.reduce((n, i) => n + Math.max(1, i.count), 0) + local.reduce((n, r) => n + Math.max(1, r.subject?.count || 1), 0);
+    if (things === 1) return `Looking into ${waiting[0]?.subject || local[0].subject?.name || "this"}`;
+    return `Looking into ${things} things`;
+  }
+  function updateCapsule() {
+    if (S.hold || S.coachTimer) return;
+    const text = capsuleText();
+    if (!text) { if (S.pillMode === "capsule") hidePill(); return; }
+    S.pillMode = "capsule";
+    P.pill.o.to(1);
+    pushPill("capsule", text, !inbox?.paused);
+    placeCapsule();
+  }
+  function capsuleSpot(w) {
+    if (S.view && S.pos) {
+      const {hard} = avoidance(viewItem());
+      const clear = (x, y) => y >= MARGIN && y + PILL_H <= innerHeight - MARGIN &&
+        !hard.some(r => overlap({left: x, top: y, right: x + w, bottom: y + PILL_H}, r) > 0);
+      const x = Math.min(S.pos.x + 2, innerWidth - w - MARGIN);
+      const above = (S.frameY ?? S.pos.y) - PILL_H - 8, below = (S.frameY ?? S.pos.y) + S.frameH + 8;
+      if (clear(x, above)) return {x, y: above};
+      if (clear(x, below)) return {x, y: below};
+      return {x: innerWidth - w - MARGIN, y: MARGIN};
+    }
+    if (S.capSpot) return {...S.capSpot, x: S.capSpot.right - w}; // keep the right edge still as the words change
+    // Where notifications live, nudged off anything we can see.
+    const rec = S.localPending.at(-1) || anchors.get(inProgress().at(-1)?.id);
+    const {hard} = avoidance(rec);
+    const occ = occupancy();
+    let best = null;
+    const vw = innerWidth;
+    for (let y = MARGIN; y < 150; y += 13) for (let x = vw - w - MARGIN; x > vw * .45; x -= 26) {
+      const rect = {left: x, top: y, right: x + w, bottom: y + PILL_H};
+      const cost = hard.reduce((c, r) => c + overlap(rect, r) * 100, 0) + occ(x, y, w, PILL_H) * 40 + (vw - w - MARGIN - x) / vw * 10 + y / 150 * 4;
+      if (!best || cost < best.cost) best = {x, y, cost, right: x + w};
+    }
+    S.capSpot = best;
+    setTone(darkAt(best.x, best.y, w, PILL_H));
+    return best;
+  }
+  function placeCapsule() {
+    if (S.pillMode !== "capsule") return;
+    const w = S.pillW || 170;
+    const spot = capsuleSpot(w);
+    P.pill.x.to(spot.x); P.pill.y.to(spot.y); P.pill.w.to(w); P.pill.h.to(PILL_H);
+    wake();
+  }
+  function coachLine(text, ms) {
+    clearTimeout(S.coachTimer);
+    S.pillMode = "coach";
+    const w = Math.ceil((text.length * 6.6 + 34) / 16) * 16, vw = innerWidth;
+    P.pill.x.snap(vw / 2 - w / 2); P.pill.y.snap(innerHeight - 76); P.pill.w.snap(w); P.pill.h.snap(PILL_H);
+    P.pill.o.to(1);
+    setTone(darkAt(vw / 2 - w / 2, innerHeight - 76, w, PILL_H));
+    raise();
+    pushPill("coach", text, false);
+    S.coachTimer = setTimeout(() => {
+      S.coachTimer = 0;
+      if (S.pillMode === "coach") hidePill();
+      updateCapsule();
+    }, ms);
+    wake();
+  }
+
+  // ---------- talking ----------
+  function waveText() {
+    if (S.micWarning) return S.micWarning;
+    if (S.hold?.follow) return "Asking more about this";
+    if (!S.micReady) return S.micSlow ? "Starting…" : "";
+    return S.coach.heard < 3 ? "Listening" : "";
+  }
+  function refreshWave() { if (S.hold) { pushPill("wave", waveText(), false); } }
+  function startListening() {
+    if (isListening || document.visibilityState !== "visible" || !document.hasFocus()) return false;
+    isListening = true;
+    S.micReady = false; S.micSlow = false; S.micWarning = "";
+    clearTimeout(S.micTimer);
+    // Only a slow start earns a word. A quick one just goes straight to Listening.
+    S.micTimer = setTimeout(() => { if (isListening && !S.micReady) { S.micSlow = true; refreshWave(); } }, 250);
+    if (!_emit({ type: "record_start" })) { isListening = false; return false; }
+    return true;
+  }
+  function holdStart() {
+    S.keyArmed = false;
+    clearTimeout(S.retreatTimer); S.retreatAt = 0;
+    if (S.coachTimer) { clearTimeout(S.coachTimer); S.coachTimer = 0; }
+    raise();
+    const item = S.view === "answer" ? current() : null;
+    // Where you point says what it's about. On the card, or barely moved since you
+    // asked, you're still talking about the card.
+    const follow = item && (S.hoverCard || S.pointer.moved < FOLLOW_UP_PX) ? item : null;
+    S.hold = {started: performance.now(), targets: [], tentative: null, dwellFrom: 0, follow, region: null, moved: S.pointer.moved, onCard: !!follow && S.hoverCard};
+    if (!S.view && typeof state.pointerX === "number") setTone(darkAt(Math.max(0, state.pointerX - 150), Math.max(0, state.pointerY - 100), 300, 200));
+    if (!S.view) { dropAllRings(); S.capSpot = null; }
+    const {x, y} = pillAnchor();
+    S.pillMode = "wave";
+    const p = P.pill;
+    if (p.o.t === 0 || p.o.x < .05) { p.x.snap(x + 34); p.y.snap(y); p.w.snap(28); p.h.snap(PILL_H - 8); }
+    p.x.to(x); p.y.to(y); p.h.to(PILL_H);
+    p.o.to(1);
+    if (!startListening()) { S.hold = null; hidePill(); updateCapsule(); armRetreat(); return; }
+    refreshWave();
+    if (state.mode === "simulated") S.gaze = {x: new Spring(state.pointerX ?? innerWidth / 2, GAZE), y: new Spring(state.pointerY ?? innerHeight / 2, GAZE), stillAt: performance.now(), lockX: null, lockY: null};
+    updatePointing(performance.now(), true);
+    wake();
+  }
+  function pillAnchor() {
+    const vw = innerWidth, vh = innerHeight;
+    const w = S.pillW || 96;
+    if (S.hold?.follow && S.view === "answer" && !pointedElsewhere()) {
+      // A follow-up belongs to the card: dock on its lower edge.
+      const dockY = Math.min(vh - PILL_H - 10, front.y.t + front.h.t - PILL_H / 2 + 2);
+      return {x: S.pos.x + (front.w.t - w) / 2, y: dockY};
+    }
+    const soft = state.mode === "simulated" && S.gaze;
+    const anchorX = soft ? S.gaze.x.x : state.pointerX ?? vw / 2, anchorY = soft ? S.gaze.y.x : state.pointerY ?? vh / 2;
+    let x = anchorX + 18, y = anchorY + 22;
+    if (soft) { x = anchorX - w / 2; y = anchorY + REGION_H / 2 - 10; }
+    if (x + w > vw - 10) x = anchorX - w - 16;
+    if (y + PILL_H > vh - 10) y = Math.max(10, anchorY - PILL_H - 16);
+    return {x: Math.max(10, x), y: Math.max(10, y)};
+  }
+  // Talking stops the card taking hover, which itself fires a mouse event with no travel.
+  // So a hold that began on the card stays on it until the pointer really travels.
+  function pointedElsewhere() {
+    const H = S.hold;
+    if (H?.onCard) return S.pointer.moved - H.moved >= FOLLOW_UP_PX;
+    return !S.hoverCard && S.pointer.moved >= FOLLOW_UP_PX;
+  }
+  function updatePointing(now, immediate) {
+    const H = S.hold;
+    if (!H || typeof state.pointerX !== "number") return;
+    if (H.follow && !pointedElsewhere()) return; // still on the card
+    if (state.mode === "simulated") { updateSoft(now); return; }
+    const n = pickElement(state.pointerX, state.pointerY);
+    const already = n && H.targets.find(t => t.el === n);
+    if (!n || already) { dropTentative(H); return; }
+    if (H.tentative?.el !== n) {
+      dropTentative(H);
+      const t = {el: n, hit: hitNode(state.pointerX, state.pointerY), key: `t${++S.ids}`};
+      H.tentative = t;
+      H.dwellFrom = now;
+      ringFor(t.key, t, "tentative");
+    }
+    if (immediate || now - H.dwellFrom >= DWELL_MS) {
+      if (H.targets.length >= MAX_TARGETS) return;
+      H.targets.push(H.tentative);
+      const ring = lit.get(H.tentative.key);
+      if (ring) ring.style = "live";
+      H.tentative = null;
+    }
+  }
+  function dropTentative(H) { if (H.tentative) { dropRing(H.tentative.key); H.tentative = null; } }
+  // Soft region: a real state for any noisy pointing source. Feed it with api.pointSoft(x, y).
+  function updateSoft(now) {
+    const H = S.hold, G = S.gaze;
+    if (!G) return;
+    const feed = S.softPoint && now - S.softPoint.at < 800 ? S.softPoint : null;
+    const sx = feed ? feed.x : state.pointerX, sy = feed ? feed.y : state.pointerY;
+    const t = now / 1000;
+    // Without a feed, simulated mode adds the slow wander of a smoothed gaze estimate.
+    G.x.to(sx + (feed || reduced() ? 0 : Math.sin(t * 1.3) * 16 + Math.sin(t * 3.1) * 6));
+    G.y.to(sy + (feed || reduced() ? 0 : Math.sin(t * 1.7 + 1) * 11 + Math.sin(t * 2.7) * 5));
+    if (!H.tentative) {
+      const c = regionAt(G.x.x, G.y.x);
+      c.key = `t${++S.ids}`;
+      H.tentative = c;
+      ringFor(c.key, c, "live");
+    }
+    // The live region follows gaze; a long enough look leaves one lit behind.
+    const c = H.tentative;
+    const r = c.anchor?.getBoundingClientRect?.();
+    c.cx = G.x.x + scrollX; c.cy = G.y.x + scrollY;
+    if (r) { c.dx = G.x.x - r.left; c.dy = G.y.x - r.top; }
+    const dist = Math.hypot(sx - (G.lockX ?? sx), sy - (G.lockY ?? sy));
+    if (G.lockX == null || dist > 130) { G.lockX = sx; G.lockY = sy; G.stillAt = now; }
+    const nearPin = H.targets.some(tt => {
+      const r2 = targetRect(tt);
+      return r2 && Math.hypot(r2.left + REGION_W / 2 - G.x.x, r2.top + REGION_H / 2 - G.y.x) < 170;
+    });
+    if (now - G.stillAt > 340 && !nearPin && H.targets.length < MAX_TARGETS) {
+      const pinned = {...regionAt(G.x.x, G.y.x), key: `t${++S.ids}`};
+      ringFor(pinned.key, pinned, "live");
+      H.targets.push(pinned);
+    }
+    // The moving pool gives way to a pinned one, so light never stacks up.
+    lit.get(c.key)?.g.o.to(nearPin || (now - G.stillAt > 340) ? 0 : 1);
+  }
+  function holdEnd(cancelled, reason) {
+    const H = S.hold;
+    if (!H) return;
+    S.hold = null;
+    // A quick look still counts: what was under the pointer at release is what you meant.
+    if (H.tentative && !H.targets.length && !(H.follow && !pointedElsewhere()) && !cancelled) {
+      H.targets.push(H.tentative);
+      H.tentative = null;
+    }
+    dropTentative(H);
+    S.gaze = null;
+    const heldFor = performance.now() - H.started;
+    const tooShort = heldFor < MIN_HOLD_MS;
+    if (cancelled || tooShort) {
+      for (const t of H.targets) dropRing(t.key);
+      cancelListening(cancelled ? reason : "");
+      if (S.pillMode === "wave") hidePill();
+      updateCapsule();
+      armRetreat();
+      if (S.view === "answer") lightCurrent(current(), "answer");
+      return;
+    }
+    S.coach.heard++;
+    sendCoach({heard: S.coach.heard});
+    // Pointing somewhere else makes it a new question; otherwise it stays with the card.
+    const follow = H.follow && !H.targets.length ? H.follow : null;
+    const rec = follow ? null : {targets: H.targets, subject: subjectFor(H.targets)};
+    stopListening(rec, follow);
+    S.pointer.moved = 0;
+    if (S.pillMode === "wave") hidePill(!!follow);
+    if (rec) {
+      S.pillW = S.pillW || 170;
+      updateCapsule();
+      P.pill.w.kick(70);
+    } else updateCapsule();
+    armRetreat();
+    // What you pointed at goes into the capsule, so you can see where your question went.
+    // The answer lights it again.
+    setTimeout(() => {
+      if (S.hold) return;
+      const cur = S.view === "answer" ? current() : null;
+      for (const t of H.targets) {
+        if (cur?.targets.includes(t)) continue;
+        const ring = lit.get(t.key);
+        if (ring && S.pillMode === "capsule" && !reduced() && !t.soft) {
+          ring.fly = {x: () => P.pill.x.x + 8, y: () => P.pill.y.x + 11};
+          // Collapse first, then travel: a small spark, never a big box sliding over the page.
+          ring.g.w.k = ring.g.h.k = 900; ring.g.w.c = ring.g.h.c = 60;
+          ring.g.x.k = ring.g.y.k = 170; ring.g.x.c = ring.g.y.c = 24;
+          setTimeout(() => { if (ring.fly) dropRing(t.key); }, 170);
+        } else dropRing(t.key);
+      }
+    }, 230);
+  }
+  function stopListening(rec, follow) {
+    if (!isListening) return;
+    isListening = false;
+    resetMic();
+    // Freeze evidence at release, before transcription and before routing can change it.
+    const locked = state.armed && state.lockedX !== null;
+    const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
+    litIds = rec ? rec.targets.map(t => t.hit ? cursorId(t.hit) : null).filter(Boolean) : [];
+    const intent = { type: "record_stop", mode: state.mode, item_id: follow?.id || "", subject: rec?.subject,
+      ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : {
+        page_url: location.origin + location.pathname,
+        pointer: { x_vp: x, y_vp: y, scroll_x: scrollX, scroll_y: scrollY },
+        fixations: state.ringBuffer.slice(-25),
+        candidates: extractCandidatesNear(x, y, state.candidateRadiusPx || 380) }) };
+    litIds = [];
+    if (rec) bindRequest(intent, rec);
+    _emit(intent);
+    if (rec) { requestOwner.set(intent.id, rec); }
+  }
+  function bindRequest(intent, rec) {
+    if (intent.cursor_context?.snapshot_id) snapshotOwner.set(intent.cursor_context.snapshot_id, rec);
+    S.localPending.push(rec);
+  }
+  function resetMic() {
+    S.micReady = false; S.micWarning = ""; S.micSlow = false;
+    clearTimeout(S.micTimer);
+  }
+  function cancelListening(reason = "") {
+    if (!isListening) return;
+    isListening = false;
+    spaceHeld = false;
+    _emit({ type: "record_cancel" });
+    resetMic();
+    if (reason) coachLine(reason, 4600);
+  }
+
+  // ---------- typed questions: private input, in the frame until sent ----------
+  function openComposer() {
+    if (S.hold) return;
+    const open = S.view === "answer" ? current() : null;
+    const follow = open && (S.hoverCard || S.pointer.moved < FOLLOW_UP_PX) ? open : null;
+    if (!follow) setTargetLocked(true);
+    const node = lockedNode;
+    const target = !follow && node && !ours(node) ? {el: pickElement(state.lockedX, state.lockedY) || node, hit: node, key: `t${++S.ids}`} : null;
+    const targets = target ? [target] : [];
+    const subject = subjectFor(targets);
+    S.compose = {title: follow ? follow.subject : subject.name, itemId: follow?.id || "", targets: follow ? follow.targets : targets, subject, focus: true};
+    if (target) { dropAllRings(); ringFor(target.key, target, "live"); }
+    openView("compose", S.compose);
+  }
+  function closeComposer() {
+    const compose = S.compose;
+    S.compose = null;
+    setTargetLocked(false);
+    for (const t of compose?.targets || []) if (!compose?.itemId) dropRing(t.key);
+    restoreAfterOverlay();
+  }
+  function submitTyped(value) {
+    const compose = S.compose;
+    if (!compose) return;
+    const text = String(value || "").trim();
+    if (!text) { compose.focus = true; pushCard(); return; }
+    if (compose.itemId) {
+      _emit({ type: "followup", item_id: compose.itemId, utterance: text });
+      S.pointer.moved = 0;
+      closeComposer();
+      return;
+    }
+    const rec = {targets: compose.targets, subject: compose.subject};
+    litIds = compose.targets.map(t => t.hit ? cursorId(t.hit) : null).filter(Boolean);
+    const sent = emitResolve(text, null, null, rec);
+    litIds = [];
+    if (!sent) { compose.focus = true; pushCard(); return; }
+    S.compose = null;
+    setTargetLocked(false);
+    S.pointer.moved = 0;
+    S.capSpot = null;
+    closeStack("cancel");
+    if (compose.targets.length && !reduced()) {
+      for (const t of compose.targets) dropRing(t.key);
+    }
+    updateCapsule();
+  }
+  function setTargetLocked(locked) {
+    if (locked && typeof state.pointerX !== "number") return;
+    state.armed = locked;
+    lockedNode = locked ? cursorRefs.get(cursorHistory.at(-1)?.id) || null : null;
+    state.lockedX = locked ? state.pointerX : null;
+    state.lockedY = locked ? state.pointerY : null;
+    if (locked) state.armedAt = Date.now() / 1000;
+  }
+  function dismissNote() {
+    if (isListening && S.hold) holdEnd(true, "Recording cancelled by you.");
+    else if (isListening) cancelListening("Recording cancelled by you.");
+    state.lensActive = false;
+    state.lensCandidates = [];
+    state.choosePending = false;
+    clearActionConfirmation();
+    setTargetLocked(false);
+    if (S.view) closeStack(S.view === "answer" ? "dismiss" : "cancel");
+    else dropAllRings();
+  }
+
+  // ---------- private frames back to this world ----------
+  function positionNote() { wake(); }
+  function fromPanel(frame, m) {
+    if (destroyed || !m || typeof m !== "object") return;
+    if (m.t === "size") {
+      if (frame === "pill") {
+        if (!(m.w > 0)) return;
+        S.pillW = Math.min(460, m.w);
+        if (S.pillMode === "capsule") placeCapsule();
+        if (S.pillMode === "wave" && S.hold) { const {x, y} = pillAnchor(); P.pill.x.to(x); P.pill.y.to(y); P.pill.w.to(S.pillW); }
+        if (S.pillMode === "coach") { P.pill.w.snap(S.pillW); P.pill.x.snap(innerWidth / 2 - S.pillW / 2); }
+        wake();
+        return;
+      }
+      S.sizes = {prevH: +m.prevH || 0, cardH: +m.cardH || 0, nextH: +m.nextH || 0, contentH: +m.contentH || 0, bodyH: +m.bodyH || 0};
+      if (S.view) {
+        const item = viewItem();
+        const mb = maxBodyFor(item);
+        if (Math.abs(mb - S.maxBody) > 2) { S.maxBody = mb; pushCard(); }
+        // Long answer ran out of room where it is: find better room once, before it clips hard.
+        if (S.view === "answer" && S.sizes.contentH > S.sizes.bodyH + 20 && S.maxBody < 300 && !S.reposition.has(S.cur)) {
+          S.reposition.add(S.cur);
+          const spot = place(item, Math.min(innerHeight - 2 * MARGIN, S.sizes.contentH + 90));
+          if (spot.covers === 0) { S.pos = {x: spot.x, y: spot.y}; S.maxBody = maxBodyFor(item); pushCard(); }
+        }
+        layout();
+      }
+      return;
+    }
+    if (m.t === "hover") {
+      if (frame !== "card") return;
+      S.hoverCard = !!m.on;
+      cursorOverHud = S.hoverCard;
+      if (m.on) { clearTimeout(S.retreatTimer); S.retreatAt = 0; } else if (S.view === "answer") armRetreat();
+      return;
+    }
+    if (!surfaceIntact()) return;
+    if (m.t === "key") {
+      onWindowKey({type: m.type, code: String(m.code), key: String(m.key), repeat: !!m.repeat, shiftKey: !!m.shift, metaKey: !!m.meta,
+        ctrlKey: !!m.ctrl, altKey: !!m.alt, fromFrame: true, isTrusted: true, preventDefault() {}, stopImmediatePropagation() {}, stopPropagation() {}, composedPath: () => []});
+      return;
+    }
+    if (m.t !== "ui") return;
+    const item = S.view === "answer" ? current() : null;
+    const a = m.action;
+    if (a === "next") step(1);
+    else if (a === "prev") step(-1);
+    else if (a === "dismiss") dismissNote();
+    else if (a === "go") { goBack(item); releaseFrameFocus(); }
+    else if (a === "read" && item) control(inbox?.speaking_item_id === item.id ? "stop_speaking" : "speak", item.id);
+    else if (a === "autoread") control("auto_speak");
+    else if (a === "retry" && item) control("retry", item.id, m.turn || "");
+    else if (a === "skip" && item) control("skip", item.id, m.turn || "");
+    else if (a === "resume") control("resume");
+    else if (a === "submit") submitTyped(m.value);
+    else if (a === "cancel") closeComposer();
+    else if (a === "confirm") confirmClick(m.value === "yes", {isTrusted: true, button: m.button, detail: m.detail, pointerType: m.pointerType});
+    else if (a === "lens") selectLensCandidate(Number(m.value), m.modality || "click");
+    else if (a === "link" && m.detail >= 1) _emit({type: "open_link", url: m.url});
+  }
+  // A click in a frame keeps keyboard focus there. Give it back unless someone is typing.
+  function releaseFrameFocus() { if (S.view !== "compose") { try { window.focus(); } catch (_) {} } }
+
+  function control(action, itemId = "", requestId = "") {
+    return _emit({type: "inbox", action, item_id: itemId, request_id: requestId});
+  }
+  function sendCoach(fields) { _emit({type: "inbox", action: "coach", coach: fields}); }
+
   function renderInbox(event) {
     if (event.revision <= inboxRevision) return;
     const previous = inbox;
     inboxRevision = event.revision;
     inbox = event;
-    if (event.session_connected === false) cancelListening("Recording cancelled: disconnected from Hermes.");
-    const newest = event.items.at(-1);
-    if (newest && !previous?.items.some(i => i.item_id === newest.item_id)) {
-      const status = newest.conversation.at(-1)?.status;
-      if (!indexOpen && !composeOpen && !["complete","failed","interrupted"].includes(status)) {
-        noteItem = newest.item_id; noteOpen = true; noteSide = 0;
-        hud.classList.add("entering");
+    if (event.coach) {
+      for (const key of ["heard", "answered"]) S.coach[key] = Math.max(S.coach[key], event.coach[key] || 0);
+      S.coach.retreated = S.coach.retreated || !!event.coach.retreated;
+      S.coach.greeted = S.coach.greeted || !!event.coach.greeted;
+    }
+    S.items = event.items.map(itemView);
+    if (event.session_connected === false && previous?.session_connected !== false) {
+      if (S.hold) holdEnd(true, "Recording cancelled: disconnected from Hermes.");
+      else {
+        cancelListening("Recording cancelled: disconnected from Hermes.");
+        coachLine("Hermes is disconnected. Run /gaze in Hermes to reconnect", 6000);
       }
     }
-    if (event.selected_item_id && !noteItem) noteItem = event.selected_item_id;
-    const last = selectedNote()?.conversation.at(-1);
-    if (last && ["complete","failed","interrupted"].includes(last.status) &&
-        previous?.items.find(i => i.item_id === noteItem)?.conversation.at(-1)?.status !== last.status) {
-      clearTimeout(collapseTimer);
-      collapseTimer = setTimeout(() => {
-        if (!cursorOverHud && !composeOpen && !indexOpen) { noteOpen = false; renderNote(); }
-      }, 12000);
+    if (event.session_connected && !S.coach.greeted && !event.items.length) {
+      S.coach.greeted = true;
+      sendCoach({greeted: true});
+      if (!S.hold) coachLine("Point at anything, hold Space and ask", 7000);
     }
-    renderNote();
+    refresh();
+  }
+  // Answers that have started arrive by themselves, one at a time, in question order.
+  function refresh() {
+    if (!S.hold && !S.view) {
+      const first = visible().find(i => !i.presented && started(i));
+      if (first) { openStack(first); updateCapsule(); return; }
+    }
+    updateCapsule();
+    if (S.view === "answer") {
+      const item = current();
+      if (!item || !visible().includes(item)) {
+        // This answer was skipped away. Move on, or leave.
+        const list = visible();
+        const nextUp = list.find(i => started(i) && !i.presented) || (S.items.some(i => i.id === S.cur) ? list[0] : null);
+        if (nextUp) openStack(nextUp); else closeStack("dismiss");
+        return;
+      }
+      const busy = isBusyItem(item);
+      if (S.wasBusy && !busy) armRetreat();
+      else if (busy) { clearTimeout(S.retreatTimer); S.retreatAt = 0; }
+      else if (S.wasReading && inbox?.speaking_item_id !== item.id) armRetreat();
+      S.wasBusy = busy;
+      S.wasReading = inbox?.speaking_item_id === item.id;
+      if (S.wasReading) { clearTimeout(S.retreatTimer); S.retreatAt = 0; }
+      pushCard();
+      layout();
+    }
   }
   function onSessionEvent(event) {
     if (!destroyed && event?.type === "inbox") renderInbox(event);
@@ -1076,13 +1959,11 @@
     for (const saved of snapshots.values()) saved.actionRevoked = true;
     clearActionConfirmation();
     state.lensActive = false;
-    lensLayer.innerHTML = "";
   }
   function onNavigation() {
     activeSnapshot = null;
     snapshots.clear();
     stopTrackingPins();
-    pinsLayer.innerHTML = "";
     clearActionConfirmation();
     cancelListening("Recording cancelled: the source document changed.");
   }
@@ -1097,7 +1978,6 @@
   function updateLiveInspector(x, y) {
     const el = state.armed ? lockedNode : hitNode(x, y);
     state.hoveredCandidate = el ? cursorMetadata(el) : null;
-    if (composeOpen && !noteItem) targetName.textContent = state.hoveredCandidate?.label || "";
   }
 
   function recordPoint(x, y) {
@@ -1105,7 +1985,7 @@
     state.pointerX = x;
     state.pointerY = y;
 
-    // If locked, keep the spotlight and ringBuffer anchored on the locked target!
+    // If locked, keep the ringBuffer anchored on the locked target!
     const activeX = state.armed && state.lockedX !== null ? state.lockedX : x;
     const activeY = state.armed && state.lockedY !== null ? state.lockedY : y;
     if (!state.armed) rememberHit(hitNode(x, y));
@@ -1123,10 +2003,7 @@
       state.ringBuffer.shift();
     }
 
-    if (!state.armed) {
-      updateSpotlightPosition(x, y);
-      updateLiveInspector(x, y);
-    }
+    if (!state.armed) updateLiveInspector(x, y);
 
     // Cursor wiggle detector (>= 3 horizontal direction flips within 450 ms)
     if (state.wiggleTrigger && !state.armed) {
@@ -1154,6 +2031,14 @@
       }
     }
   }
+  function onWindowMouseMove(e) {
+    if (typeof state.pointerX === "number") S.pointer.moved += Math.hypot(e.clientX - state.pointerX, e.clientY - state.pointerY);
+    S.hoverCard = false;
+    cursorOverHud = false;
+    recordPoint(e.clientX, e.clientY);
+    if (S.hold) wake();
+  }
+  window.addEventListener("mousemove", onWindowMouseMove, {passive: true, capture: true});
 
   function armInteraction() { openComposer(); }
 
@@ -1171,13 +2056,8 @@
     intent.id = ++_intentSeq;
     intent.nonce = _intentNonce;
     if (typeof window.__hermesGazeIntent !== "function") {
-      showPlainMessage("Resolver offline. Run /gaze in the Hermes session, then retry.");
+      coachLine("Hermes isn’t connected. Run /gaze in Hermes, then try again", 4600);
       return false;
-    }
-    if (["submit","record_stop"].includes(intent.type)) {
-      pendingAnchor = {node:state.armed ? lockedNode : cursorRefs.get(cursorHistory.at(-1)?.id),
-        snapshotId:intent.cursor_context?.snapshot_id};
-      requestAnchors.set(intent.id, pendingAnchor);
     }
     window.__hermesGazeIntent(JSON.stringify(intent));
     return true;
@@ -1188,29 +2068,24 @@
     state.scopes = msg.scopes || [];
     state.selectedScopeId = msg.selected_scope_id;
   }
-  function emitResolve(utterance, words, captured) {
+  function emitResolve(utterance, words, captured, rec) {
     const text = (utterance || "").trim();
     if (!text) return false;
-    if (composeOpen && noteItem) {
-      return _emit({ type: "followup", item_id: noteItem, utterance: text });
-    }
     state.scopePending = false;
     state.scopes = [];
     const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
     const px = locked ? state.lockedX : state.pointerX;
     const py = locked ? state.lockedY : state.pointerY;
     if (typeof px !== "number" || typeof py !== "number") {
-      showPlainMessage("Aim the pointer at an element first, then speak or type.");
+      coachLine("Point at something first, then ask", 3200);
       return false;
     }
     const evidence = state.mode === "hover" ? captured || captureCursorContext() : null;
-    if (evidence) {
-      const current = evidence.targets.find(target => target.id === evidence.history.at(-1)?.id);
-      if (current?.available) renderPins([{ ...current, node: cursorRefs.get(current.id), snapshotId: evidence.snapshot_id }]);
-    }
+    const owner = rec || {targets: [], subject: {name: "", count: 1}};
     const intent = {
       type: state.mode === "hover" ? "submit" : "resolve",
       utterance: text,
+      subject: owner.subject,
       page_url: location.origin + location.pathname,
       pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
       fixations: state.ringBuffer.slice(-25),
@@ -1220,7 +2095,9 @@
     if (words) {
       intent.words = words;
     }
-    if (!_emit(intent)) return false;
+    bindRequest(intent, owner);
+    if (!_emit(intent)) { S.localPending = S.localPending.filter(r => r !== owner); return false; }
+    requestOwner.set(intent.id, owner);
     _lastSentResolveId = intent.id;
     _pendingUtterance = text;
     return true;
@@ -1236,7 +2113,19 @@
     });
   }
 
-
+  function settleRequest(msg) {
+    const rec = requestOwner.get(msg.id);
+    if (!rec) return;
+    requestOwner.delete(msg.id);
+    S.localPending = S.localPending.filter(r => r !== rec);
+    if (msg.item_id) {
+      anchors.set(msg.item_id, rec);
+      S.items = (inbox?.items || []).map(itemView);
+      if (S.view === "answer" && S.cur === msg.item_id) lightCurrent(current(), "answer");
+    }
+    updateCapsule();
+    if (S.view === "answer") pushCard();
+  }
 
   function onIntentResult(msg) {
     if (typeof msg === "string") {
@@ -1247,31 +2136,40 @@
       }
     }
     if (!msg || typeof msg !== "object") return;
-    if (msg.item_id && requestAnchors.has(msg.id)) {
-      itemAnchors.set(msg.item_id, requestAnchors.get(msg.id));
-      requestAnchors.delete(msg.id);
-      noteItem = msg.item_id;
-      positionNote();
+    if (msg.type === "record_reserved") {
+      settleRequest(msg);
+      refresh();
+      return;
     }
-    if (msg.type === "inbox" || msg.type === "followup") {
-      if (!msg.ok) showPlainMessage(msg.error || "Inbox request failed.");
+    if (requestOwner.has(msg.id) && (msg.item_id || msg.ok === false || msg.delivery)) settleRequest(msg);
+    if (msg.type === "inbox" || msg.type === "followup" || msg.type === "open_link" || msg.type === "show_source") {
+      if (!msg.ok && msg.error) showPlainMessage(msg.error);
       return;
     }
 
     if (msg.type === "record_warning") {
       if (isListening) {
-        micWarning = `${msg.seconds_remaining} seconds left — release Space`;
-        renderNote();
+        S.micWarning = `${msg.seconds_remaining} seconds left. Let go of Space`;
+        refreshWave();
+        wake();
       }
       return;
     }
     if (msg.type === "record_start") {
       if (!msg.ok) {
         isListening = false;
-        resetMicUiIdle(msg.error || "Microphone unavailable.");
+        resetMic();
+        spaceHeld = false;
+        S.keyDown = false;
+        if (S.hold) { S.hold.tentative && dropRing(S.hold.tentative.key); for (const t of S.hold.targets) dropRing(t.key); S.hold = null; }
+        if (S.pillMode === "wave") hidePill(true);
+        coachLine(msg.error || "The microphone isn’t available", 4600);
+        armRetreat();
       } else if (isListening) {
-        micReady = true;
-        renderNote();
+        S.micReady = true;
+        S.micSlow = false;
+        clearTimeout(S.micTimer);
+        refreshWave();
       }
       return;
     }
@@ -1279,37 +2177,40 @@
       if (msg.cancelled && !isListening) return; // Keep the local, specific cancellation reason.
       isListening = false;
       spaceHeld = false;
-      resetMicUiIdle(msg.error || "Recording cancelled.");
+      S.keyDown = false;
+      resetMic();
+      const reason = msg.error || "Recording cancelled.";
+      if (S.hold) {
+        S.hold.tentative && dropRing(S.hold.tentative.key);
+        for (const t of S.hold.targets) dropRing(t.key);
+        S.hold = null;
+        S.gaze = null;
+        if (S.pillMode === "wave") hidePill(true);
+        armRetreat();
+      }
+      coachLine(reason, 5200);
       return;
     }
     if (msg.type === "record_stop") {
-      if (!isListening) resetMicUiIdle(msg.ok ? "" : msg.error || "Recording failed.");
       if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
-        showPlainMessage(msg.explanation || "");
-      } else if (!msg.ok) showPlainMessage(msg.error || "Recording failed.");
+        showPlainMessage(msg.explanation || "", true);
+      } else if (!msg.ok && !msg.item_id) showPlainMessage(msg.error || "That recording didn’t work.");
       return;
     }
     if (msg.type === "confirm_action") {
-      if (msg.resolution_id !== state.resolutionId) return;
+      if (msg.resolution_id !== state.resolutionId && activeSnapshot?.resolutionId !== msg.resolution_id) return;
       if (!msg.ok && msg.error) showPlainMessage(msg.error);
-      else dismissNote();
       return;
     }
 
-
-
     if (msg.type === "submit") {
       if (!msg.ok) {
-        showPlainMessage(msg.error || "Connect Hermes with /gaze, then retry.");
-      } else if (msg.delivery === "session") {
-        composeOpen = false;
-        hudInput.value = "";
-        renderNote();
+        showPlainMessage(msg.error || "Run /gaze in Hermes, then try again.");
       } else if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         if (msg.mode !== "hover" && Array.isArray(msg.ranked)) renderPins(msg.ranked);
-        showPlainMessage(msg.explanation || msg.text || msg.answer || "");
+        showPlainMessage(msg.explanation || msg.text || msg.answer || "", true);
       }
       return;
     }
@@ -1320,7 +2221,7 @@
         if (msg.resolution_id && msg.resolution_id < state.resolutionId) return;
       }
       if (!msg.ok) {
-        showPlainMessage(msg.error || "Resolver error.");
+        showPlainMessage(msg.error || "That didn’t work.");
         return;
       }
       renderScopeOptions(msg);
@@ -1339,7 +2240,7 @@
 
     if (msg.type === "explain") {
       if (msg.scope_id !== state.selectedScopeId || msg.resolution_id !== state.resolutionId) return;
-      showPlainMessage(msg.explanation || msg.error || _pendingExplainFallback || "Explanation unavailable.");
+      showPlainMessage(msg.explanation || msg.error || _pendingExplainFallback || "No explanation is available.", true);
       return;
     }
 
@@ -1347,9 +2248,10 @@
       state.choosePending = false;
       if (msg.ok) {
         state.lensActive = false; // consumed — Python already re-rendered the pin
+        if (S.view === "lens") restoreAfterOverlay();
       } else {
         // keep the lens live so dwell/keys still work after a failed choose
-        showPlainMessage(msg.error || "Selection failed.");
+        showPlainMessage(msg.error || "That selection didn’t work.");
       }
       return;
     }
@@ -1357,151 +2259,113 @@
     // "configure" acks and unknown types are no-ops
   }
 
-
   const TALK_KEY = "Space";
-  const hudMic = hud.querySelector("#hg-mic-btn");
   let isListening = false;
   let spaceHeld = false;
-
-  function resetMicUiIdle(error) {
-    micReady = false;
-    micWarning = "";
-    if (error) localError = error;
-    renderNote();
-  }
-
-  function startListening() {
-    if (isListening || document.visibilityState !== "visible" || !document.hasFocus()) return;
-    isListening = true;
-    noteOpen = true;
-    localError = "";
-    pendingAnchor = {node:state.armed ? lockedNode : cursorRefs.get(cursorHistory.at(-1)?.id)};
-    renderNote();
-    if (!_emit({ type: "record_start" })) {
-      isListening = false;
-      resetMicUiIdle("Microphone offline.");
-    }
-  }
-
-  function stopListening() {
-    if (!isListening) return;
-    isListening = false;
-    resetMicUiIdle();
-    // Freeze evidence at release, before transcription and before routing can change it.
-    const locked = state.armed && state.lockedX !== null;
-    const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
-    _emit({ type: "record_stop", mode: state.mode, item_id: inbox?.selected_item_id || "",
-      ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : {
-        page_url: location.origin + location.pathname,
-        pointer: { x_vp: x, y_vp: y, scroll_x: scrollX, scroll_y: scrollY },
-        fixations: state.ringBuffer.slice(-25),
-        candidates: extractCandidatesNear(x, y, state.candidateRadiusPx || 380) }) });
-  }
-
-  function cancelListening(reason = "Recording cancelled by you.") {
-    if (!isListening) return;
-    isListening = false;
-    spaceHeld = false;
-    _emit({ type: "record_cancel" });
-    resetMicUiIdle(reason);
-  }
-
-  hudMic.addEventListener("click", (e) => {
-    if (!trustedUi(e)) return;
-    e.currentTarget.blur();
-    if (isListening) stopListening();
-    else startListening();
-  });
-
-
-  hudSend.addEventListener("click", (e) => {
-    if (!trustedUi(e)) return;
-    submitQuestion();
-  });
-
-  hudInput.addEventListener("keydown", (e) => {
-    if (!trustedUi(e)) return;
-    e.stopPropagation();
-    if (e.key === "Enter") {
-      e.preventDefault();
-      submitQuestion();
-    } else if (e.key === "Escape") {
-      dismissNote();
-    }
-  });
-
-  function submitQuestion() {
-    if (!emitResolve(hudInput.value)) return;
-    composeOpen = false;
-    hudInput.value = "";
-    setTargetLocked(false);
-    renderNote();
-  }
+  let replay = {left: 0, until: 0};
 
   function isEditableTarget(e) {
     const path = e.composedPath ? e.composedPath() : [e.target];
     for (const node of path) {
       if (!node || !node.tagName) continue;
-      if (node === hudInput) return true;
       const tag = node.tagName.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select" || node.isContentEditable) {
         return true;
       }
+      if (["combobox", "searchbox", "textbox"].includes(node.getAttribute?.("role"))) return true;
     }
     return false;
   }
 
-  function onWindowKeyDown(e) {
+  function onWindowKey(e) {
     if (!trustedUi(e) || document.visibilityState !== "visible") return;
-    if (isEditableTarget(e)) return;
-    if (!e.altKey && !e.metaKey && !e.ctrlKey && e.code === "KeyQ") {
-      e.preventDefault();
-      if (!e.repeat) recallNotes();
+    const down = e.type === "keydown";
+    if (e.code === TALK_KEY && replay.left > 0 && performance.now() < replay.until) {
+      // Our own replayed tap, on its way to the website.
+      replay.left--;
       return;
     }
-    if (e.code === TALK_KEY && !e.altKey && !e.metaKey && !e.ctrlKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!e.repeat && !spaceHeld) {
-        spaceHeld = true;
-        startListening();
-      }
-      return;
-    }
-    if (e.code === (state.hotkey || "Backquote")) {
-      e.preventDefault();
-      if (!e.repeat) openComposer();
-    } else if (state.lensActive && /^Digit[1-9]$/.test(e.code)) {
-      const idx = parseInt(e.code.replace("Digit", ""), 10) - 1;
-      if (idx >= 0 && idx < state.lensCandidates.length) {
-        e.preventDefault();
-        selectLensCandidate(idx, "key");
-      }
-    } else if (e.key === "Escape") {
-      dismissNote();
-    }
-  }
-
-  function onWindowKeyUp(e) {
-    if (trustedUi(e) && e.code === TALK_KEY && spaceHeld) {
-      e.preventDefault();
-      e.stopPropagation();
+    const swallow = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+    // A held key always finishes, wherever the release lands.
+    if (e.code === TALK_KEY && !down && spaceHeld) {
+      swallow();
       spaceHeld = false;
-      stopListening();
+      S.keyDown = false;
+      clearTimeout(S.armTimer);
+      if (S.hold) holdEnd(false);
+      else if (S.keyArmed) tapThrough(e);
+      return;
     }
+    if (!e.fromFrame && isEditableTarget(e)) return;
+    if (e.code === (state.hotkey || "Backquote")) {
+      if (down && !e.repeat) { swallow(); openComposer(); }
+      return;
+    }
+    if (e.altKey || e.metaKey || e.ctrlKey) return;
+    if (e.code === TALK_KEY) {
+      if (!down) return;
+      swallow();
+      if (e.repeat || spaceHeld) return;
+      spaceHeld = true;
+      S.keyDown = true;
+      S.keyArmed = true;
+      S.armShift = !!e.shiftKey;
+      S.tapFromFrame = !!e.fromFrame;
+      clearTimeout(S.armTimer);
+      S.armTimer = setTimeout(() => { if (spaceHeld) holdStart(); }, ARM_MS);
+      return;
+    }
+    if (!down) return;
+    if (e.key === "Escape") {
+      if (S.hold) { swallow(); spaceHeld = false; S.keyDown = false; holdEnd(true, "Recording cancelled by you."); return; }
+      if (S.view === "compose") { swallow(); closeComposer(); return; }
+      if (S.view || lit.size) { swallow(); dismissNote(); }
+      return;
+    }
+    if (e.code === "KeyQ" && !e.shiftKey) {
+      if (S.hold || e.repeat) { if (S.hold) swallow(); return; }
+      swallow();
+      if (S.view !== "answer") recallNotes();
+      return;
+    }
+    if (state.lensActive && /^Digit[1-9]$/.test(e.code)) {
+      const idx = parseInt(e.code.replace("Digit", ""), 10) - 1;
+      if (idx >= 0 && idx < state.lensCandidates.length) { swallow(); selectLensCandidate(idx, "key"); }
+      return;
+    }
+    if (S.view !== "answer") return;
+    if (e.code === "ArrowDown" || e.code === "ArrowRight") { swallow(); if (!e.repeat) step(1); }
+    else if (e.code === "ArrowUp" || e.code === "ArrowLeft") { swallow(); if (!e.repeat) step(-1); }
+    else if (e.code === "Enter") { swallow(); goBack(current()); }
+  }
+  // A quick tap was never ours. It goes back as real input, so video players and focused
+  // buttons do their own thing, and nothing on screen says a recording failed.
+  function tapThrough(e) {
+    S.keyArmed = false;
+    if (S.tapFromFrame) {
+      // Keyboard focus is in our own frame, so a replay would come straight back here.
+      releaseFrameFocus();
+      window.scrollBy({top: innerHeight * .85 * (S.armShift ? -1 : 1), behavior: reduced() ? "auto" : "smooth"});
+      return;
+    }
+    replay = {left: 2, until: performance.now() + 500};
+    rawSend({type: "_ui_replay_key", shift: S.armShift});
   }
 
   function onWindowBlur() {
-    if (document.visibilityState !== "visible")
-      cancelListening("Recording cancelled: the source tab is hidden.");
-    else if (!document.hasFocus())
-      cancelListening("Recording cancelled: the source tab lost focus.");
+    if (document.visibilityState !== "visible") {
+      if (S.hold) holdEnd(true, "Recording cancelled: the source tab is hidden.");
+      else cancelListening("Recording cancelled: the source tab is hidden.");
+      spaceHeld = false; S.keyDown = false; clearTimeout(S.armTimer);
+    } else if (!document.hasFocus()) {
+      if (S.hold) holdEnd(true, "Recording cancelled: the source tab lost focus.");
+      else cancelListening("Recording cancelled: the source tab lost focus.");
+      spaceHeld = false; S.keyDown = false; clearTimeout(S.armTimer);
+    }
   }
 
-  window.addEventListener("keydown", onWindowKeyDown, { capture: true });
-  window.addEventListener("keyup", onWindowKeyUp, { capture: true });
-  shadow.addEventListener("keydown", onWindowKeyDown);
-  shadow.addEventListener("keyup", onWindowKeyUp);
+  window.addEventListener("keydown", onWindowKey, { capture: true });
+  window.addEventListener("keyup", onWindowKey, { capture: true });
   window.addEventListener("blur", onWindowBlur);
   document.addEventListener("visibilitychange", onWindowBlur);
 
@@ -1725,121 +2589,15 @@
 
   function clearOverlays(source) {
     stopTrackingPins();
-    pinsLayer.innerHTML = "";
     state.scopes = [];
     state.selectedScopeId = null;
     activeSnapshot = null;
     snapshots.clear();
     clearActionConfirmation();
-    svgLeaders.innerHTML = "";
-    lensLayer.innerHTML = "";
     state.lensActive = false;
     state.lensCandidates = [];
     setTargetLocked(false);
     dismissNote();
-  }
-
-  function showHudMessage(text) { showPlainMessage(text); }
-
-  let livePins = [];
-  let pinFrame = null;
-  function stopTrackingPins() {
-    if (pinFrame !== null) cancelAnimationFrame(pinFrame);
-    pinFrame = null;
-    livePins = [];
-  }
-  function sourceRect() {
-    let union = null;
-    for (const { candidate, box, rect } of livePins) {
-      if (!rect || box.style.display === "none" || !candidate.node.isConnected ||
-          !snapshots.has(candidate.snapshotId) || candidate.resolutionId &&
-          (activeSnapshot?.id !== candidate.snapshotId || activeSnapshot.resolutionId !== candidate.resolutionId)) continue;
-      if (!union) union = { ...rect };
-      else {
-        union.left = Math.min(union.left, rect.left);
-        union.top = Math.min(union.top, rect.top);
-        union.right = Math.max(union.right, rect.right);
-        union.bottom = Math.max(union.bottom, rect.bottom);
-      }
-    }
-    return union ? { ...union, width: union.right - union.left, height: union.bottom - union.top } : null;
-  }
-  function refreshPins() {
-    pinFrame = null;
-    livePins = livePins.filter(pin => {
-      const { candidate, box } = pin;
-      const { node, snapshotId, resolutionId } = candidate;
-      if (destroyed || !node.isConnected || !snapshots.has(snapshotId) ||
-          resolutionId && (activeSnapshot?.id !== snapshotId || activeSnapshot.resolutionId !== resolutionId)) {
-        box.remove();
-        return false;
-      }
-      const rect = node.getBoundingClientRect();
-      let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
-      let right = Math.min(window.innerWidth, rect.left + rect.width);
-      let bottom = Math.min(window.innerHeight, rect.top + rect.height);
-      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
-        const style = getComputedStyle(parent);
-        const clipX = /auto|scroll|hidden|clip/.test(style.overflowX);
-        const clipY = /auto|scroll|hidden|clip/.test(style.overflowY);
-        if (!clipX && !clipY) continue;
-        const r = parent.getBoundingClientRect();
-        if (clipX) { left = Math.max(left, r.left); right = Math.min(right, r.left + r.width); }
-        if (clipY) { top = Math.max(top, r.top); bottom = Math.min(bottom, r.top + r.height); }
-      }
-      box.style.display = right > left && bottom > top && rendered(node) && !sensitive(node) ? "" : "none";
-      pin.rect = box.style.display === "none" ? null : { left, top, right, bottom };
-      box.style.left = `${left}px`;
-      box.style.top = `${top}px`;
-      box.style.width = `${Math.max(0, right - left)}px`;
-      box.style.height = `${Math.max(0, bottom - top)}px`;
-      return true;
-    });
-    positionNote();
-    if (livePins.length) pinFrame = requestAnimationFrame(refreshPins);
-  }
-
-  function renderPins(candidates, messageHtml) {
-    stopTrackingPins();
-    pinsLayer.innerHTML = "";
-    pinsLayer.style.display = "";
-    lensLayer.innerHTML = "";
-    state.lensActive = false;
-
-    for (let cand of candidates || []) {
-      const entry = !cand.node && activeSnapshot
-        ? snapshotEntry(activeSnapshot.id, activeSnapshot.resolutionId, cand.id) : null;
-      if (entry) cand = { ...cand, snapshotId: activeSnapshot.id, resolutionId: activeSnapshot.resolutionId };
-      const nodes = cand.members || entry?.members || [cand.node || entry?.node || null];
-      for (const node of nodes) {
-        if (!node && (!Array.isArray(cand.rect_vp) || cand.rect_vp.length !== 4 || !cand.rect_vp.every(Number.isFinite))) continue;
-        const box = document.createElement("div");
-        box.className = "pin-box";
-        box.setAttribute("aria-hidden", "true");
-        for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
-          const mark = document.createElement("span");
-          mark.className = `proof-corner ${corner}`;
-          box.appendChild(mark);
-        }
-        pinsLayer.appendChild(box);
-        if (node) livePins.push({ candidate: { ...cand, node }, box, rect: null });
-        else {
-          const [x, y, w, h] = cand.rect_vp;
-          const left = Math.max(0, x), top = Math.max(0, y);
-          const right = Math.min(window.innerWidth, x + w), bottom = Math.min(window.innerHeight, y + h);
-          box.style.display = right > left && bottom > top ? "" : "none";
-          box.style.left = `${left}px`;
-          box.style.top = `${top}px`;
-          box.style.width = `${Math.max(0, right - left)}px`;
-          box.style.height = `${Math.max(0, bottom - top)}px`;
-        }
-      }
-    }
-    refreshPins();
-
-    if (messageHtml) {
-      showHudMessage(messageHtml);
-    }
   }
 
   function renderSemanticLens(candidates, promptMessage, resolutionId) {
@@ -1847,66 +2605,8 @@
     state.lensActive = true;
     state.lensCandidates = candidates || [];
     state.resolutionId = resolutionId || 0;
-
-    state.lensCandidates.forEach((cand, idx) => {
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "lens-card open";
-      card.setAttribute("aria-label", `Choose ${idx + 1}${cand.label ? `: ${cand.label}` : ""}`);
-      const key = document.createElement("span");
-      key.className = "lens-key";
-      key.textContent = String(idx + 1);
-      const title = document.createElement("span");
-      title.className = "lens-title";
-      title.textContent = cand.label || "";
-      const dwellBar = document.createElement("span");
-      dwellBar.className = "dwell-bar";
-      dwellBar.setAttribute("aria-hidden", "true");
-      card.append(key, title, dwellBar);
-      let dwellStart = 0;
-      let rafId = null;
-
-      function currentLens() {
-        return !destroyed && state.lensActive && !state.choosePending &&
-          state.resolutionId === (resolutionId || 0) && state.lensCandidates[idx] === cand &&
-          lensLayer.contains(card) && document.visibilityState === "visible" && document.hasFocus();
-      }
-      function tickDwell() {
-        rafId = null;
-        if (!currentLens()) return;
-        const elapsed = performance.now() - dwellStart;
-        const pct = Math.min(100, (elapsed / state.dwellMs) * 100);
-        if (dwellBar) dwellBar.style.width = `${pct}%`;
-        if (pct >= 100) {
-          selectLensCandidate(idx, "dwell");
-        } else {
-          rafId = requestAnimationFrame(tickDwell);
-        }
-      }
-
-      card.addEventListener("mouseenter", event => {
-        if (!trustedUi(event) || !currentLens()) return;
-        if (rafId !== null) cancelAnimationFrame(rafId);
-        dwellStart = performance.now();
-        rafId = requestAnimationFrame(tickDwell);
-      });
-      card.addEventListener("mouseleave", event => {
-        if (!trustedUi(event)) return;
-        if (rafId !== null) cancelAnimationFrame(rafId);
-        rafId = null;
-        dwellBar.style.width = "0%";
-      });
-      card.addEventListener("click", (e) => {
-        if (!trustedUi(e) || !currentLens()) return;
-        e.stopPropagation();
-        selectLensCandidate(idx, "click");
-      });
-
-      lensLayer.appendChild(card);
-    });
-    renderNote();
+    openView("lens", {targets: []});
   }
-
   function selectLensCandidate(idx, modality) {
     if (!state.lensActive || state.choosePending) return;
     if (idx < 0 || idx >= state.lensCandidates.length) return;
@@ -1915,23 +2615,144 @@
     }
   }
 
+  // ---------- pointer & scroll motion ----------
+  let scrollEnd = 0;
+  function onMotionScroll() {
+    S.scrollingAt = performance.now();
+    wake();
+    clearTimeout(scrollEnd);
+    scrollEnd = setTimeout(() => {
+      // Settled: if the page moved what you asked about under the card, step aside.
+      const item = viewItem();
+      if (S.view && item && !S.hold) {
+        const total = S.sizes.prevH + S.sizes.cardH + S.sizes.nextH;
+        if (coversTargets(item, {x: S.pos.x, y: S.pos.y}, total)) {
+          const spot = place(item, total);
+          S.pos = {x: spot.x, y: spot.y};
+          S.maxBody = maxBodyFor(item);
+          setTone(darkAt(spot.x, spot.y, CARD_W, total));
+          pushCard();
+          layout();
+        }
+      }
+    }, 130);
+  }
+  window.addEventListener("scroll", onMotionScroll, {capture: true, passive: true});
+  function onViewportResize() {
+    uiFrame.style.height = `${Math.max(900, innerHeight)}px`;
+    if (S.view) {
+      const item = viewItem();
+      const spot = place(item, S.sizes.cardH || 200);
+      S.pos = {x: spot.x, y: spot.y};
+      S.maxBody = maxBodyFor(item);
+      pushCard();
+      layout();
+    }
+  }
+  window.addEventListener("resize", onViewportResize);
+  const onVisualViewport = () => {
+    if (!S.view) return;
+    S.maxBody = maxBodyFor(viewItem());
+    pushCard();
+    layout();
+  };
+  window.visualViewport?.addEventListener("resize", onVisualViewport);
+  window.visualViewport?.addEventListener("scroll", onVisualViewport);
+
+  // ---------- frame loop: only while something is alive ----------
+  let raf = 0, last = 0, lastPoint = 0, ticking = false;
+  function wake() { if (!raf && !ticking && !destroyed) { last = performance.now(); raf = requestAnimationFrame(frameTick); } }
+  function apply(b, n, r) {
+    const s = n.style;
+    s.transform = `translate3d(${b.x.x}px,${b.y.x}px,0)`;
+    s.width = `${Math.max(0, b.w.x)}px`;
+    s.height = `${Math.max(0, b.h.x)}px`;
+    s.opacity = b.o.x.toFixed(3);
+    if (r != null) s.borderRadius = `${r}px`;
+  }
+  function frameTick(now) {
+    raf = 0;
+    if (destroyed) return;
+    ticking = true; // anything woken mid-tick is picked up by the reschedule at the end
+    const dt = Math.min(.05, Math.max(.001, (now - last) / 1000));
+    last = now;
+    for (const sp of [...springs]) sp.step(dt);
+    for (const f of [...fades]) f.step(dt);
+    // Pointing while held
+    if (S.hold) {
+      if (now - lastPoint > 30) { lastPoint = now; updatePointing(now); }
+      if (S.pillMode === "wave") {
+        const a = pillAnchor();
+        const lag = S.hold.follow && !pointedElsewhere() ? SPRING : FOLLOW;
+        P.pill.x.k = lag.k; P.pill.x.c = lag.c; P.pill.y.k = lag.k; P.pill.y.c = lag.c;
+        P.pill.x.to(a.x); P.pill.y.to(a.y);
+        P.pill.w.to(S.pillW || 96);
+      }
+    } else {
+      P.pill.x.k = SPRING.k; P.pill.x.c = SPRING.c; P.pill.y.k = SPRING.k; P.pill.y.c = SPRING.c;
+    }
+    // Plates
+    apply(prev, plates[0], 15);
+    apply(next2, plates[1], 12);
+    apply(next, plates[2], 15);
+    const morph = S.morphR != null ? S.morphR : 18;
+    const rad = Math.min(front.h.x / 2, 18 + (morph - 18) * Math.max(0, Math.abs(front.w.x - front.w.t) / 200));
+    apply(front, plates[3], Math.max(rad, 14));
+    plates.forEach(p => { p.style.visibility = parseFloat(p.style.opacity) < .004 ? "hidden" : "visible"; });
+    if (lift.x !== 0 || lift.v !== 0 || lift.t !== 0) {
+      const off = lift.x * .06;
+      for (const p of plates) p.style.translate = `0 ${off}px`;
+      cardWrap.style.translate = `0 ${off}px`;
+    } else {
+      for (const p of plates) p.style.translate = "";
+      cardWrap.style.translate = "";
+    }
+    // Words fade in just after the glass has shape.
+    const wrapOn = !!S.view && front.h.x > 40;
+    S.cardFade = wrapOn ? Math.min(1, (S.cardFade || 0) + dt / (reduced() ? .14 : .1)) : Math.max(0, (S.cardFade || 0) - dt / .09);
+    const w = cardWrap.style;
+    w.transform = `translate3d(${front.x.x}px,${(S.frameY ?? front.y.x) + (front.y.x - front.y.t)}px,0)`;
+    w.width = `${cardWidth()}px`;
+    uiFrame.style.width = w.width;
+    w.height = `${S.frameH || 0}px`;
+    w.opacity = S.cardFade.toFixed(3);
+    w.pointerEvents = S.view && !S.hold ? "auto" : "none";
+    w.visibility = S.cardFade < .004 ? "hidden" : "visible";
+    // Pill
+    const pv = P.pill;
+    apply(pv, pillEl, Math.min(pv.h.x / 2, 20));
+    pillEl.style.visibility = pv.o.x < .004 ? "hidden" : "visible";
+    const pw = pillWrap.style;
+    pw.transform = `translate3d(0,${(pv.h.x - PILL_H) / 2}px,0)`;
+    pw.width = `${Math.max(0, pv.w.x)}px`;
+    pw.height = `${PILL_H}px`;
+    drawRings(0);
+    const alive = springs.size || fades.size || S.hold || lit.size > 0 || (S.cardFade > 0 && S.cardFade < 1);
+    ticking = false;
+    if (alive) raf = requestAnimationFrame(frameTick);
+  }
+
   function destroy() {
     destroyed = true;
-    uiObserver.disconnect();
-    clearTimeout(collapseTimer);
-    window.removeEventListener("resize", onUiResize);
+    dialogWatch.disconnect();
+    document.removeEventListener("toggle", onTopLayer, true);
+    document.removeEventListener("fullscreenchange", onTopLayer, true);
+    clearTimeout(S.retreatTimer); clearTimeout(S.coachTimer); clearTimeout(S.armTimer); clearTimeout(S.micTimer);
+    if (raf) cancelAnimationFrame(raf);
+    window.removeEventListener("resize", onViewportResize);
+    window.visualViewport?.removeEventListener("resize", onVisualViewport);
+    window.visualViewport?.removeEventListener("scroll", onVisualViewport);
+    window.removeEventListener("scroll", onMotionScroll, true);
     stopTrackingPins();
     activeSnapshot = null;
     snapshots.clear();
     clearActionConfirmation();
     window.removeEventListener("pagehide", onNavigation);
     window.removeEventListener("scroll", onCursorScroll, true);
-    window.visualViewport?.removeEventListener("resize", onUiResize);
-    window.visualViewport?.removeEventListener("scroll", onUiResize);
-    cancelListening("Recording cancelled: the browser companion stopped.");
-    window.removeEventListener("mousemove", onWindowMouseMove, { passive: true });
-    window.removeEventListener("keydown", onWindowKeyDown, { capture: true });
-    window.removeEventListener("keyup", onWindowKeyUp, { capture: true });
+    cancelListening();
+    window.removeEventListener("mousemove", onWindowMouseMove, { passive: true, capture: true });
+    window.removeEventListener("keydown", onWindowKey, { capture: true });
+    window.removeEventListener("keyup", onWindowKey, { capture: true });
     window.removeEventListener("blur", onWindowBlur);
     document.removeEventListener("visibilitychange", onWindowBlur);
     if (host && host.parentNode) {
@@ -1939,31 +2760,42 @@
     }
   }
 
-  // Initialize spotlight & live inspector immediately on load
-  syncModeUI();
   updateLiveInspector(state.pointerX, state.pointerY);
 
   const api = {
     state,
     uiFrame,
-    takeUiSnapshot,
-    fitUiFrame,
-    onUiEvent,
-    getReplyText: () => hudReply.textContent,
+    uiFrames,
+    uiReady() {
+      S.ready = true;
+      setTone(false);
+      S.pillLast = "";
+      if (S.view) pushCard();
+    },
+    fromPanel,
+    // Observable surface for tests; carries no private strings beyond this world.
+    debug() {
+      const item = S.view === "answer" ? current() : null;
+      return {view: S.view, cur: item?.subject || null, pos: S.pos,
+        card: {x: front.x.t, y: front.y.t, w: front.w.t, h: front.h.t},
+        frame: {y: S.frameY, h: S.frameH},
+        targets: (item?.targets || []).map(targetRect).filter(Boolean).map(r => ({left: r.left, top: r.top, right: r.right, bottom: r.bottom})),
+        sizes: S.sizes, maxBody: S.maxBody, dark: S.dark, lit: lit.size,
+        hold: S.hold ? {targets: S.hold.targets.length, follow: S.hold.follow?.subject || null} : null,
+        pill: {mode: S.pillMode, x: P.pill.x.t, y: P.pill.y.t, w: P.pill.w.t, h: P.pill.h.t, o: P.pill.o.t},
+        items: S.items.map(i => ({subject: i.subject, archived: i.archived, presented: i.presented, status: i.turns.map(t => t.status)})),
+        retreatInMs: S.retreatAt ? Math.round(S.retreatAt - performance.now()) : null,
+        talk: {spaceHeld, armed: S.keyArmed, listening: isListening, focused: document.hasFocus(), nonce: !!_intentNonce, ready: S.ready}};
+    },
     Configure(opts) {
       Object.assign(state, opts || {});
-      syncModeUI();
       updateLiveInspector(state.pointerX, state.pointerY);
     },
     setIntentNonce(n) {
       _intentNonce = String(n || "");
     },
-    getInputValue() {
-      return hudInput ? hudInput.value : "";
-    },
     destroy,
     startListening,
-    stopListening,
     armInteraction,
     extractCandidatesNear,
     captureCursorContext,
@@ -1982,15 +2814,16 @@
     },
     renderPins,
     renderSemanticLens,
+    // A noisy pointing source (eye tracking next) feeds its estimate here while talking.
+    pointSoft(x, y) { S.softPoint = {x: +x, y: +y, at: performance.now()}; if (S.hold) wake(); },
     clearOverlays,
     onIntentResult,
     revokeActionAuthority,
-    showHudMessage(htmlText) {
-      showHudMessage(htmlText);
+    showHudMessage(text) {
+      showPlainMessage(text);
     },
   };
 
   window.__HERMES_GAZE_OVERLAY__ = api;
   return api;
 })();
-

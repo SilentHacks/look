@@ -119,6 +119,7 @@ def run():
                 page(a, 'document.body.tabIndex=-1;document.body.focus()')
                 command(a, 'Input.dispatchKeyEvent', {'type': 'keyDown', 'key': ' ', 'code': 'Space', 'windowsVirtualKeyCode': 32})
                 until(lambda: session.microphone._stream is not None)
+                time.sleep(.25)
                 ta = time.time()
                 route = a._route_id
                 page(a, "scrollMode='route'")
@@ -165,34 +166,15 @@ def run():
                 until(lambda: session.microphone._stream is not None)
                 until(lambda: any(e.get('type') == 'record_warning' for e in events), 28)
                 def warning_label():
-                    # The private renderer's closed shadow is inspectable only through CDP.
-                    tree = command(a, 'DOM.getDocument', {'depth': -1, 'pierce': True})
-                    def find(value):
-                        if isinstance(value, dict):
-                            attrs = value.get('attributes', [])
-                            if dict(zip(attrs[::2], attrs[1::2])).get('id') == 'hg-lock-label':
-                                return value['backendNodeId']
-                            return next((found for child in value.values() if (found := find(child))), None)
-                        if isinstance(value, list):
-                            return next((found for child in value if (found := find(child))), None)
-                    backend = find(tree)
-                    if not backend:
-                        return None
-                    obj = command(a, 'DOM.resolveNode', {'backendNodeId': backend,
-                        'executionContextId': a._ui_context_id})['object']['objectId']
-                    try:
-                        result = command(a, 'Runtime.callFunctionOn', {'objectId': obj,
-                            'functionDeclaration': 'function(){return this.getBoundingClientRect().width>0 ? this.textContent : ""}',
-                            'returnByValue': True})
-                        return result.get('result', {}).get('value')
-                    finally:
-                        command(a, 'Runtime.releaseObject', {'objectId': obj})
-                assert until(lambda: warning_label() == '5 seconds left — release Space', 3)
+                    # The capsule's words exist only in its protected frame, reachable through CDP.
+                    return a._submit(a._eval_coro('document.getElementById("pill")?.textContent',
+                                                  5., context_id=a._ui_frames['pill'][1]), 7)
+                assert until(lambda: warning_label() == '5 seconds left. Let go of Space', 3)
                 until(lambda: session.microphone._stream is None, 7)
                 cancellation = until(lambda: next((e for e in events if e.get('type') == 'record_cancel'), None))
                 assert cancellation['error'] == 'Recording cancelled: 30-second limit reached.', cancellation
                 assert len([e for e in events if e.get('type') == 'record_warning']) == 1
-                print('PASS: visible \"5 seconds left — release Space\" warning then native 30-second cancellation')
+                print('PASS: visible \"5 seconds left. Let go of Space\" warning then native 30-second cancellation')
         finally:
             mic.cancel()
             if session:

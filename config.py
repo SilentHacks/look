@@ -14,13 +14,15 @@ class GazeConfig:
     sigma_px: float = 120.0
     cdp_url: str = "http://127.0.0.1:9222"
     dwell_ms: int = 450
-    wiggle_trigger: bool = True
+    wiggle_trigger: bool = False
     hotkey: str = "AltRight"  # JS KeyboardEvent.code (e.g. "AltRight", "Backquote", "F8")
     whisper_model: str = "base.en"
     record_trials: bool = False  # Development-only, potentially sensitive browsing evidence.
     early_highlight: bool = True
     highlight_model: str = "jev-1.14.0"
     highlight_include_page_text: bool = False
+    answer_turn_seconds: float = 12.0  # Each unseen answer's turn before the stack moves on or retreats.
+    model_subject_names: bool = True  # Short side call after an answer, only when the queue is idle.
 
     @classmethod
     def from_ctx(cls, ctx: Any) -> "GazeConfig":
@@ -40,4 +42,6 @@ class GazeConfig:
             early_highlight=bool(get("early_highlight", cls.early_highlight)),
             highlight_model=str(get("highlight_model", cls.highlight_model) or cls.highlight_model),
             highlight_include_page_text=bool(get("highlight_include_page_text", cls.highlight_include_page_text)),
+            answer_turn_seconds=float(get("answer_turn_seconds", cls.answer_turn_seconds) or cls.answer_turn_seconds),
+            model_subject_names=bool(get("model_subject_names", cls.model_subject_names)),
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -46,6 +47,32 @@ class Companion:
             if self._stop.wait(.1):
                 break
         return False
+
+    def push_level(self, target: str, level: float) -> None:
+        with self._lock:
+            tab = self._tabs.get(target)
+        if tab is not None:
+            tab.push_level(level)
+
+    def open_url(self, url: str) -> None:
+        """Open a validated http(s) destination beside the current tab; the URL is never fetched here."""
+        request = urllib.request.Request(
+            self.http_url + "/json/new?" + urllib.parse.quote(url, safe=":/?&=%#+,;@~-._!*'()"), method="PUT")
+        with urllib.request.urlopen(request, timeout=3) as response:
+            response.read()
+
+    def show_document(self, target: str | None, document: str | None) -> bool:
+        """Bring a captured source tab forward only if that exact document still exists."""
+        with self._lock:
+            tab = self._tabs.get(target) if target else None
+        if tab is None or not document or tab._context_unique_id != document:
+            return False
+        try:
+            tab._submit(tab._send_cmd("Page.bringToFront", {}, timeout=2.), 3.)
+            return True
+        except Exception:
+            logger.debug("Source tab could not come forward", exc_info=True)
+            return False
 
     def open_blank(self) -> None:
         request = urllib.request.Request(self.http_url + "/json/new?about:blank", method="PUT")

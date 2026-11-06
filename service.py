@@ -25,6 +25,7 @@ from .resolver.bayesian_fusion import CandidateElement, classify_utterance_inten
 from .resolver.cursor_context import EVIDENCE_RULES, build_context, cursor_result
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 from .resolver.temporal_aligner import has_deictic_pronoun
+from .naming import safe_link
 from .voice import MAX_AUDIO_BYTES
 
 logger = logging.getLogger(__name__)
@@ -434,6 +435,22 @@ def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             "needs_explain": False, "session_connected": False}
 
 
+def _show_source(session: Any, item_id: str, here: Any) -> dict:
+    """Trusted click on a card whose thing lives elsewhere: go to that tab, else open its page."""
+    turns = _VOICE_TURNS
+    item = turns._item(item_id) if turns is not None else None
+    if item is None:
+        return {"ok": False, "error": "That answer is no longer available."}
+    snapshot = item.get("snapshot") or {}
+    if session.cdp.show_document(snapshot.get("browser_target"), snapshot.get("browser_document")):
+        return {"ok": True, "item_id": item_id, "shown": "tab"}
+    url = safe_link(item.get("source_url"))
+    if not url:
+        return {"ok": False, "error": "That page can’t be reopened."}
+    session.cdp.open_url(url)
+    return {"ok": True, "item_id": item_id, "shown": "reopened"}
+
+
 def _intent_evidence(intent: dict) -> dict:
     pushed = {key: intent.get(key) for key in
               ("pointer", "fixations", "candidates", "page_url", "cursor_context")}
@@ -453,6 +470,23 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
         return
     itype = str(intent.get("type") or "")
     try:
+        if itype == "open_link":
+            url = safe_link(intent.get("url"))
+            if not url:
+                reply({"ok": False, "error": "That link can’t be opened."})
+            else:
+                session.cdp.open_url(url)
+                reply({"ok": True})
+            return
+        if itype == "show_source":
+            reply(_show_source(session, str(intent.get("item_id") or ""), intent.get("_browser_target")))
+            return
+        if itype == "inbox" and intent.get("action") == "coach":
+            if _VOICE_TURNS is None:
+                reply({"ok": False, "error": "No connected inbox"})
+            else:
+                reply(_VOICE_TURNS.set_coach(intent.get("coach")))
+            return
         if itype == "inbox":
             if _VOICE_TURNS is None:
                 reply({"ok": False, "error": "No connected inbox"})
@@ -485,7 +519,9 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 result = session.microphone.start(
                     owner, lambda: session.cdp.recording_loss(target, document),
                     on_cancel=cancelled,
-                    on_warning=lambda seconds: reply({"type": "record_warning", "seconds_remaining": seconds}))
+                    on_warning=lambda seconds: reply({"type": "record_warning", "seconds_remaining": seconds}),
+                    # Straight to the protected frame over CDP; voice level never touches the page.
+                    on_level=lambda level: session.cdp.push_level(target, level))
                 if _VOICE_TURNS is not None:
                     _VOICE_TURNS.capture_status("recording" if result.get("ok") else "failed")
                 reply(result)
@@ -509,11 +545,15 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 if turns is not None and turns.connected:
                     initial = resolve_now(session, utterance="Captured question", words=None,
                                           mode=mode, pushed=pushed, activate=False)
+                    initial["subject"] = intent.get("subject")
                     reservation = turns.capture(initial, transcribing=True,
                                                 item_id=str(intent.get("item_id") or ""))
                     if not reservation["ok"]:
                         reply(reservation)
                         return
+                    # The overlay ties its local rings to the item now, not after ASR.
+                    reply({"type": "record_reserved", "ok": True, "item_id": reservation["item_id"],
+                           "request_id": reservation["request_id"]})
                 def finish_recording():
                     try:
                         # Release the ordered intent worker so the next talk can open
@@ -523,6 +563,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                                 audio, model_name=_whisper_model_name(), audio_epoch=epoch)
                         snapshot = resolve_now(session, utterance=text, words=words,
                                                mode=mode, pushed=pushed, activate=False)
+                        snapshot["subject"] = intent.get("subject")
                         if reservation:
                             result = turns.transcribed(reservation["request_id"], text, snapshot)
                         else:
@@ -540,6 +581,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
         if itype == "submit":
             snapshot = resolve_now(session, utterance=str(intent.get("utterance") or ""),
                                    words=intent.get("words"), pushed=_intent_evidence(intent), activate=False)
+            snapshot["subject"] = intent.get("subject")
             reply(submit_snapshot(snapshot))
             return
         if itype == "confirm_action":

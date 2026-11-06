@@ -130,7 +130,7 @@ class SnapshotActions:
                        "fingerprint": live["fingerprint"]}
             self._pending = pending
             result = self._browser("requestActionConfirmation", {
-                "action_id": action_id, "resolution_id": resolution_id, "label": label,
+                "action_id": action_id, "resolution_id": resolution_id, "label": label, "handle": handle,
                 "description": "Confirm this action with a click in Chrome."})
             _, error = self._current(resolution_id, [handle])
             if not result.get("ok") or error or self._pending is not pending:

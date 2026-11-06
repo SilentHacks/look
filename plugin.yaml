@@ -46,8 +46,8 @@ config_schema:
     description: "Dwell selection duration in milliseconds for Semantic Lens cards."
   wiggle_trigger:
     type: bool
-    default: true
-    description: "Summon the spotlight/HUD when the user quickly wiggles the cursor (Googlebook Magic Pointer style)."
+    default: false
+    description: "Open the typed question card when the user quickly wiggles the cursor. Off by default: nothing appears unasked."
   hotkey:
     type: str
     default: "AltRight"
@@ -72,3 +72,11 @@ config_schema:
     type: bool
     default: false
     description: "Opt in to sending bounded captured page evidence to TypeSafe. Otherwise only the question, pointer structure and static scope descriptions are sent."
+  answer_turn_seconds:
+    type: float
+    default: 12.0
+    description: "How long each unseen answer stays forward before the next comes up or the stack retreats. Longer answers get more reading time."
+  model_subject_names:
+    type: bool
+    default: true
+    description: "After an answer, when nothing is queued, ask the configured model for a short name for the card. Off keeps the name taken from the page."

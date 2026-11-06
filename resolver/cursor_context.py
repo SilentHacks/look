@@ -169,6 +169,17 @@ def cursor_result(capture, utterance, words=None, now=None):
         pointed.append(point)
         if available and target not in selected:
             selected.append(target)
+    # Everything lit while talking was pointed at, even with no spoken word to time it by.
+    known = {p["id"] for p in pointed}
+    for lit_id in capture.get("lit", [])[:5] if isinstance(capture.get("lit"), list) else []:
+        target = targets.get(lit_id)
+        if lit_id in known or not (target and target.get("available") and not target.get("sensitive")):
+            continue
+        known.add(lit_id)
+        hit = next((h for h in reversed(history) if h.get("id") == lit_id), None)
+        pointed.append({"anchor": "lit while talking", "timestamp": None, "id": lit_id, "available": True,
+                        "age_s": round(max(0, now - float(hit.get("last_seen", hit["start"]))), 3) if hit else None})
+        selected.append(target)
 
     block_labels = {b.get("id"): b.get("label") for b in capture.get("blocks", [])[:128]
                     if isinstance(b, dict)}
