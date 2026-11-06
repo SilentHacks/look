@@ -437,6 +437,10 @@
       overflow-y: auto;
       user-select: text;
     }
+    #gaze-explanation-text {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     .hud-help {
       font-size: 10.5px;
       color: #94a3b8;
@@ -568,6 +572,7 @@
     e.preventDefault();
   });
 
+  let cursorOverHud = false;
   function onWindowMouseMove(e) {
     if (isDragging) {
       const rect = hud.getBoundingClientRect();
@@ -588,6 +593,7 @@
       e.clientY >= hudRect.top &&
       e.clientY <= hudRect.bottom
     );
+    cursorOverHud = insideHud;
     if (!insideHud) {
       recordPoint(e.clientX, e.clientY);
     }
@@ -657,6 +663,7 @@
     state.armed = locked;
     if (locked) {
       state.armedAt = Date.now() / 1000;
+      lockedNode = cursorRefs.get(cursorHistory[cursorHistory.length - 1]?.id) || null;
       state.lockedX = state.pointerX;
       state.lockedY = state.pointerY;
       spotlight.classList.add("armed");
@@ -672,6 +679,7 @@
       lockLabel.textContent = `🟢 FOLLOWING CURSOR (Press ${hotkeyLabel()} or wiggle to lock target)`;
       lockBtn.textContent = `🔒 Lock (${hotkeyLabel()})`;
       lockBtn.classList.remove("active");
+      if (!cursorOverHud && typeof state.pointerX === "number") rememberHit(hitNode(state.pointerX, state.pointerY));
     }
     const activeX = state.armed && state.lockedX !== null ? state.lockedX : state.pointerX;
     const activeY = state.armed && state.lockedY !== null ? state.lockedY : state.pointerY;
@@ -700,6 +708,163 @@
       : `☤ ${state.mode === "hover" ? "Pointer" : "Gaze Cone"} σ=${sigmaLabel}px`;
   }
 
+  // Identities stay in this closure: a selector is metadata, never a historical lookup.
+  const cursorIds = new WeakMap();
+  const cursorRefs = new Map();
+  const cursorHistory = [];
+  let cursorSerial = 0;
+  let lockedNode = null;
+  const speechCaptures = new Map();
+  const sensitiveSelector = 'input[type="password"],[autocomplete^="cc-"],[autocomplete="current-password"],[autocomplete="new-password"],[name*="card" i],[name*="payment" i],[name*="cvv" i],[name*="cvc" i],[name^="cc-" i],[id*="card" i],[id*="payment" i],[id*="cvv" i],[id*="cvc" i],[id^="cc-" i]';
+  function sensitive(el) {
+    const field = el && el.closest("input,textarea,select,[contenteditable]");
+    return !!field && field.matches(sensitiveSelector);
+  }
+  function safeText(el, max = 160) {
+    if (!el) return "";
+    if (sensitive(el)) return "[redacted]";
+    if (el.matches("input,textarea,select")) return "";
+    if (el.matches("label") && el.htmlFor && sensitive(document.getElementById(el.htmlFor))) return "[redacted]";
+    // Never read field values, labels/attributes, or ancestor innerText wholesale.
+    const parts = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (node.nodeType === 1 && (node.matches('input,textarea,select,script,style,#hermes-gaze-root') || sensitive(node)))
+          return NodeFilter.FILTER_REJECT;
+        if (node.nodeType === 1 && node.matches("label") && node.htmlFor &&
+            sensitive(document.getElementById(node.htmlFor))) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let node, visited = 0, length = 0;
+    while ((node = walker.nextNode()) && visited++ < 120 && length < max) {
+      if (node.nodeType !== 3) continue;
+      const text = node.textContent.slice(0, max - length).trim().replace(/\s+/g, " ");
+      if (text) { parts.push(text); length += text.length + 1; }
+    }
+    return parts.join(" ").slice(0, max);
+  }
+  function safeLabel(el, max = 100) {
+    if (sensitive(el) || (el.matches("label") && el.htmlFor && sensitive(document.getElementById(el.htmlFor))))
+      return "[redacted]";
+    return (el.getAttribute("aria-label") || el.getAttribute("title") || safeText(el, max)).slice(0, max);
+  }
+  function cursorId(el) {
+    if (!cursorIds.has(el)) cursorIds.set(el, `@${++cursorSerial}`);
+    return cursorIds.get(el);
+  }
+  function hitNode(x, y) {
+    if (typeof x !== "number" || typeof y !== "number") return null;
+    const el = document.elementFromPoint(x, y);
+    return el && !el.closest("#hermes-gaze-root") ? el : null;
+  }
+  function rememberHit(el, now = Date.now() / 1000) {
+    const id = el ? cursorId(el) : null;
+    if (el) cursorRefs.set(id, el);
+    const last = cursorHistory[cursorHistory.length - 1];
+    if (last && last.id === id) { last.end = now; last.last_seen = now; }
+    else {
+      if (last) last.end = now;
+      cursorHistory.push({ id, start: now, end: now, last_seen: now });
+    }
+    while (cursorHistory.length > 256 || (cursorHistory.length > 1 && cursorHistory[0].end < now - 60))
+      cursorHistory.shift();
+    const keep = new Set(cursorHistory.map(h => h.id));
+    for (const key of cursorRefs.keys()) if (!keep.has(key)) cursorRefs.delete(key);
+  }
+  function cursorMetadata(el) {
+    const r = el.getBoundingClientRect();
+    const hidden = sensitive(el);
+    return { id: cursorId(el), available: el.isConnected && !hidden,
+      ...(hidden ? { sensitive: true, reason: "sensitive target redacted" } : {}),
+      tag: el.tagName.toLowerCase(), role: (el.getAttribute("role") || el.tagName.toLowerCase()).slice(0, 40),
+      label: hidden ? "[redacted]" : safeLabel(el, 100),
+      selector: hidden ? "" : buildSelector(el).slice(0, 350),
+      rect_vp: [r.left, r.top, r.width, r.height],
+      rect_doc: [r.left + scrollX, r.top + scrollY, r.width, r.height], block_ids: [] };
+  }
+  function captureCursorContext() {
+    const capture = { version: 1, captured_at: Date.now() / 1000, page_url: location.origin + location.pathname,
+      page_title: String(document.title || "").slice(0, 160),
+      history: cursorHistory.map(h => ({ ...h })), targets: [], blocks: [], controls: [], handles: {} };
+    function handle(node) {
+      const id = cursorId(node);
+      if (!capture.handles[id] && !sensitive(node)) {
+        const r = node.getBoundingClientRect();
+        capture.handles[id] = { selector: buildSelector(node).slice(0, 350), rect_vp: [r.left, r.top, r.width, r.height] };
+      }
+      return id;
+    }
+    const blocks = new Map();
+    const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean))].slice(-64);
+    for (const id of refs) {
+      const el = cursorRefs.get(id);
+      if (!el || !el.isConnected) { capture.targets.push({ id, available: false, reason: "historical node detached" }); continue; }
+      const target = cursorMetadata(el);
+      capture.targets.push(target);
+      if (!target.available) continue;
+      handle(el);
+      const cell = el.closest("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]");
+      const table = el.closest("table,[role=grid]");
+      if (table) {
+        const bid = handle(table);
+        if (!blocks.has(bid)) {
+          const rowNodes = [...table.querySelectorAll("tr,[role=row]")].filter(row => row.closest("table,[role=grid]") === table);
+          const headerRow = rowNodes.find(row => row.querySelector("th,[role=columnheader]"));
+          const allCells = row => [...row.querySelectorAll("th,td,[role=cell],[role=gridcell],[role=columnheader],[role=rowheader]")]
+            .filter(cell => cell.closest("tr,[role=row]") === row);
+          const cellsOf = row => allCells(row).slice(0, 12);
+          const dataRows = rowNodes.filter(row => row !== headerRow);
+          blocks.set(bid, { id: bid, kind: "table", label: safeText(table.querySelector("caption"), 80),
+            headers: headerRow ? cellsOf(headerRow).map(c => `${handle(c)} ${safeText(c, 60)}`) : [],
+            total_rows: dataRows.length, rows: [], _rows: dataRows, _cells: cellsOf, _allCells: allCells,
+            _header: headerRow, omitted_columns: headerRow ? Math.max(0, allCells(headerRow).length - 12) : 0 });
+        }
+        const block = blocks.get(bid);
+        target.block_ids.push(bid);
+        const row = cell && cell.closest("tr,[role=row]");
+        const ri = block._rows.indexOf(row);
+        if (cell) {
+          const column = row ? block._allCells(row).indexOf(cell) : -1;
+          const header = block._header && block._allCells(block._header)[column];
+          target.cell = { block: bid, row: ri + 1, column: column + 1, value: safeText(cell, 100),
+            header: header ? `${handle(header)} ${safeText(header, 60)}` : "" };
+        }
+        const indices = block._rows.length <= 12 ? block._rows.map((_, i) => i) : [ri];
+        for (const i of indices) if (i >= 0 && block.rows.length < 64 && !block.rows.some(r => r.index === i + 1)) {
+          const node = block._rows[i];
+          block.rows.push({ id: handle(node), index: i + 1, cells: block._cells(node).map(c => safeText(c, 70)) });
+        }
+      }
+      const parents = new Set([el.closest("ul,ol,[role=list],p,h1,h2,h3,h4,h5,h6"), el.closest("article,section,.card")]);
+      if (![...parents].some(Boolean)) parents.add(el.parentElement);
+      for (const parent of parents) {
+        if (!parent || parent === document.body || parent === document.documentElement) continue;
+        const bid = handle(parent);
+        target.block_ids.push(bid);
+        if (!blocks.has(bid)) blocks.set(bid, { id: bid, kind: parent.tagName.toLowerCase(),
+          label: safeLabel(parent.querySelector("h1,h2,h3,h4,h5,h6") || parent, 80),
+          text: safeText(parent, 650), text_limit: 650 });
+      }
+    }
+    capture.blocks = [...blocks.values()].map(({ _rows, _cells, _allCells, _header, ...block }) => block);
+    // One bounded page-control pass per capture, never once per cell/mousemove.
+    const controls = document.querySelectorAll('button,a,input,select,[role=button]');
+    for (let i = 0; i < controls.length && i < 120 && capture.controls.length < 12; i++) {
+      const el = controls[i];
+      if (el.closest("#hermes-gaze-root") || sensitive(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height) { handle(el); capture.controls.push(cursorMetadata(el)); }
+    }
+    capture.omitted_controls = Math.max(0, controls.length - capture.controls.length);
+    return capture;
+  }
+  function onCursorScroll() {
+    if (!state.armed && !cursorOverHud && typeof state.pointerX === "number")
+      rememberHit(hitNode(state.pointerX, state.pointerY));
+  }
+  window.addEventListener("scroll", onCursorScroll, { passive: true, capture: true });
+
   function updateLiveInspector(x, y) {
     if (typeof x !== "number" || typeof y !== "number") {
       state.hoveredCandidate = null;
@@ -707,9 +872,8 @@
       targetSub.textContent = "—";
       return;
     }
-    const near = extractCandidatesNear(x, y, 220);
-    // The DOM hit identifies the inspector target; decisions stay in Python.
-    const best = near.find((c) => c.is_direct_hit) || null;
+    const el = state.armed ? lockedNode : hitNode(x, y);
+    const best = el ? cursorMetadata(el) : null;
     state.hoveredCandidate = best;
     if (best) {
       targetName.textContent = `${best.label} (${formatRoleDisplayName(best.role || best.tag)})`;
@@ -731,6 +895,7 @@
     // If locked, keep the spotlight and ringBuffer anchored on the locked target!
     const activeX = state.armed && state.lockedX !== null ? state.lockedX : x;
     const activeY = state.armed && state.lockedY !== null ? state.lockedY : y;
+    if (!state.armed) rememberHit(hitNode(x, y));
 
     state.ringBuffer.push({
       x_vp: activeX,
@@ -790,6 +955,7 @@
   // --- Resolver Intent Channel (the Python session resolves, explains, transcribes & clicks) ---
   let _intentSeq = 0;
   let _lastSentResolveId = 0;
+  let _lastTranscribeId = 0;
   let _pendingUtterance = "";
   let _pendingExplainFallback = "";
   let _pendingExplainRid = 0;
@@ -840,7 +1006,7 @@
     const next = state.scopes[index + direction];
     if (next) selectScope(next.id);
   }
-  function emitResolve(utterance, words) {
+  function emitResolve(utterance, words, captured) {
     const text = (utterance || "").trim();
     if (!text) return false;
     state.scopePending = false;
@@ -859,7 +1025,8 @@
       page_url: location.href,
       pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
       fixations: state.ringBuffer.slice(-25),
-      candidates: extractCandidatesNear(px, py, state.candidateRadiusPx || 380),
+      ...(state.mode === "hover" ? { cursor_context: captured || captureCursorContext() } :
+        { candidates: extractCandidatesNear(px, py, state.candidateRadiusPx || 380) }),
     };
     if (words) {
       intent.words = words;
@@ -880,14 +1047,14 @@
     });
   }
 
-  function emitTranscribe(audioBase64, mimeType) {
+  function emitTranscribe(audioBase64, mimeType, capture, audioEpoch) {
     const intent = {
       type: "transcribe",
       audio_base64: audioBase64,
       mime_type: mimeType || "audio/webm",
       sample_rate: 16000,
       // wall-clock recording start — Python shifts audio-relative whisper timestamps by this
-      audio_epoch: state.recordStartEpoch || 0,
+      audio_epoch: audioEpoch,
     };
     if (!_emit(intent)) {
       resetMicUiIdle("⚠️ Resolver offline (session not connected).");
@@ -895,9 +1062,12 @@
     }
     const timerId = setTimeout(() => {
       _transcribeTimers.delete(intent.id);
+      speechCaptures.delete(intent.id);
       resetMicUiIdle("❌ Transcription timed out — resolver did not respond.");
     }, 90000); // generous: first-run whisper model download can take tens of seconds
     _transcribeTimers.set(intent.id, timerId);
+    _lastTranscribeId = intent.id;
+    speechCaptures.set(intent.id, { capture, resolveId: _lastSentResolveId });
     return true;
   }
 
@@ -923,10 +1093,13 @@
 
     if (msg.type === "transcribe") {
       const pendingTimer = _transcribeTimers.get(msg.id);
+      const frozen = speechCaptures.get(msg.id);
+      speechCaptures.delete(msg.id);
       if (pendingTimer) {
         clearTimeout(pendingTimer);
         _transcribeTimers.delete(msg.id);
       }
+      if (!frozen || frozen.resolveId !== _lastSentResolveId || msg.id !== _lastTranscribeId || isListening) return;
       if (!isListening) {
         resetMicUiIdle();
       }
@@ -935,7 +1108,7 @@
         hudInput.value = spoken;
         hudInput.dispatchEvent(new Event("input", { bubbles: true }));
         lockLabel.textContent = `🗣️ Heard: "${spoken}"${msg.backend ? ` (${msg.backend})` : ""}`;
-        emitResolve(spoken, msg.words);
+        emitResolve(spoken, msg.words, frozen.capture);
       } else {
         lockLabel.textContent = msg.error
           ? `❌ ${msg.error}`
@@ -982,7 +1155,7 @@
         if (msg.ok && msg.explanation) {
           expEl.innerHTML = `<span style="color:#f8fafc;">${escapeHtml(msg.explanation)}</span>`;
         } else {
-          const fallback = _pendingExplainFallback || msg.error || "Explanation unavailable.";
+          const fallback = msg.error || _pendingExplainFallback || "Explanation unavailable.";
           expEl.innerHTML = `<span style="color:#cbd5e1;">${escapeHtml(fallback)}</span>`;
         }
       }
@@ -1119,7 +1292,7 @@
     isListening = true;
     recordingStartedAt = 0;
     audioChunks = [];
-    setTargetLocked(true, "voice");
+    // Do not lock voice: two spoken referents may point to different real nodes.
 
     hudMic.classList.add("listening");
     hudMic.textContent = "⏹️ Stop";
@@ -1143,6 +1316,7 @@
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       mediaRecorder = recorder;
       audioChunks = [];
+      const audioEpoch = Date.now() / 1000;
 
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
@@ -1151,6 +1325,7 @@
       };
 
       recorder.onstop = () => {
+        const frozenCapture = captureCursorContext();
         const chunks = audioChunks.slice();
         audioChunks = [];
         const recordedBlob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
@@ -1169,7 +1344,7 @@
           const dataUrl = String(reader.result || "");
           const commaIdx = dataUrl.indexOf(",");
           const audioBase64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl;
-          emitTranscribe(audioBase64, recorder.mimeType || "audio/webm");
+          emitTranscribe(audioBase64, recorder.mimeType || "audio/webm", frozenCapture, audioEpoch);
         };
         reader.onerror = () => {
           resetMicUiIdle("❌ Could not encode recorded audio for transcription.");
@@ -1323,14 +1498,7 @@
 
   function getAccessibleLabel(el) {
     if (!el) return "";
-    return (
-      el.getAttribute("data-gaze-label") ||
-      el.getAttribute("aria-label") ||
-      el.getAttribute("title") ||
-      (el.innerText || "").trim().split("\n")[0].slice(0, 70) ||
-      el.id ||
-      el.tagName.toLowerCase()
-    );
+    return safeText(el, 70) || el.tagName.toLowerCase();
   }
 
   function buildSelector(el) {
@@ -1370,10 +1538,8 @@
     const tableRows = (table) => Array.from(table.querySelectorAll("tr,[role='row']"));
     const tableHeaders = (table) => Array.from(table.querySelectorAll("thead th, thead [role='columnheader'], [role='row'] [role='columnheader']"));
     const containerFor = (el) => el.parentElement && el.parentElement.closest("table,[role='grid'],[data-card],article.card,section.panel,section,article");
-    const shortText = (el, max = 120) => (el && (el.innerText || el.textContent) || "").trim().replace(/\s+/g, " ").slice(0, max);
+    const shortText = (el, max = 120) => safeText(el, max);
     const contextLabel = (el) => {
-      const explicit = el.getAttribute("aria-label") || el.getAttribute("data-gaze-label");
-      if (explicit) return explicit.trim();
       const labelledBy = el.getAttribute("aria-labelledby");
       if (labelledBy) {
         const labels = labelledBy.split(/\s+/).map((id) => document.getElementById(id)).filter(Boolean).map((node) => shortText(node));
@@ -1384,7 +1550,7 @@
     };
     const scopeId = (el) => buildSelector(el);
     const addCandidate = (el, {scope, id, selector, rect, summary, parent} = {}) => {
-      if (!el || el.closest("#hermes-gaze-root")) return null;
+      if (!el || sensitive(el) || el.closest("#hermes-gaze-root")) return null;
       const actualSelector = selector || buildSelector(el);
       if (!actualSelector) return null;
       const r = rect || el.getBoundingClientRect();
@@ -1403,8 +1569,8 @@
         rect_vp: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
         rect_doc: [Math.round(r.left + window.scrollX), Math.round(r.top + window.scrollY), Math.round(r.width), Math.round(r.height)],
         is_container: isContainer, is_interactive: isInteractive, is_destructive: isDestructive,
-        is_direct_hit: Boolean(el === directCandidate), summary: summary || el.getAttribute("data-gaze-summary") || "",
-        consequence: el.getAttribute("data-consequence") || "", actions: [],
+        is_direct_hit: Boolean(el === directCandidate), summary: summary || shortText(el),
+        consequence: "", actions: [],
       };
       const existing = byElement.get(id || actualSelector);
       if (existing) {
@@ -1508,10 +1674,10 @@
         for (const control of controls) {
           const controlsTarget = control.getAttribute("aria-controls");
           const explicitlyAssociated = controlsTarget && table && controlsTarget.split(/\s+/).includes(table.id);
-          const consequence = control.getAttribute("data-consequence") || "";
+          const consequence = "";
           const tableName = table && contextLabel(table);
           const consequenceMatchesTable = Boolean(tableName && consequence.toLowerCase().includes(tableName.toLowerCase()));
-          if (control.closest("#hermes-gaze-root") || (table
+          if (sensitive(control) || control.closest("#hermes-gaze-root") || (table
             ? !table.contains(control) && !explicitlyAssociated && !consequenceMatchesTable
             : !actionRoot.contains(control))) continue;
           const actionLabel = getAccessibleLabel(control);
@@ -1540,7 +1706,7 @@
   function extractTableData(selector) {
     const el = selector ? document.querySelector(selector) : null;
     if (!el) return null;
-    const text = (node) => (node.innerText || node.textContent || "").trim().replace(/\s+/g, " ");
+    const text = (node) => safeText(node, 120);
     const headers = Array.from(el.querySelectorAll("thead th, thead [role='columnheader'], tr:first-child th")).map((th) => text(th));
     const rows = Array.from(el.querySelectorAll("tbody tr,[role='rowgroup'] [role='row']")).map((tr) =>
       Array.from(tr.querySelectorAll("td,[role='cell'],[role='gridcell']")).map((td) => text(td))
@@ -1699,6 +1865,7 @@
   }
 
   function destroy() {
+    window.removeEventListener("scroll", onCursorScroll, true);
     if (stopDelayTimer) {
       clearTimeout(stopDelayTimer);
       stopDelayTimer = null;
@@ -1750,6 +1917,8 @@
     stopListening,
     armInteraction,
     extractCandidatesNear,
+    captureCursorContext,
+    recordPoint,
     extractTableData,
     renderScopeContext(info) {
       _pendingUtterance = info.utterance || "";

@@ -84,6 +84,7 @@ class TestServiceIntents(unittest.TestCase):
         self.enterContext(mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"))
         # Port 1 is never a debuggable Chrome: keeps every pull path deterministic.
         self.session = GazeSession(cdp_http_url="http://127.0.0.1:1")
+        self.session.configure(mode="simulated")
         self.addCleanup(self.session.close)
         service.set_runtime(GazeConfig(cdp_url="http://127.0.0.1:1"))
         # service.handle_intent reads its session via service.get_shared_session —

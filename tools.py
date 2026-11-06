@@ -157,6 +157,8 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
     session = get_shared_session()
     hint_x = args.get("target_hint_x")
     hint_y = args.get("target_hint_y")
+    if (hint_x is not None or hint_y is not None) and str(args.get("mode") or session.tracker.mode) == "hover":
+        return json.dumps({"ok": False, "error": "target hints are unsupported in hover mode; move the actual Chrome cursor"})
     if hint_x is not None and hint_y is not None:
         # Record the hint BEFORE the pull so the resolver has at least one fixation.
         session.tracker.record_point(float(hint_x), float(hint_y), timestamp=time.time())

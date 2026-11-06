@@ -2,10 +2,9 @@
 
 Written for coding agents working in this repository. Read this before editing.
 
-Hermes Gaze ("Telepathy") is a Hermes Agent plugin that resolves deictic phrases
-("what does **this** do?", "export **these** results") against Google Chrome's live
-DOM/Accessibility tree by fusing pointer/gaze fixations with speech timestamps via
-Bayesian spatial-semantic resolution.
+Hermes Gaze ("Telepathy") is a Hermes Agent plugin that supplies exact Chrome
+cursor identity and bounded structural evidence in hover mode. The model decides
+semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 
 ## Project map
 
@@ -23,6 +22,7 @@ Bayesian spatial-semantic resolution.
 | `browser/cdp_bridge.py` | `CdpSession` (one persistent websocket per pinned tab on a dedicated worker-loop thread, `Runtime.addBinding("__hermesGazeIntent")`, `eval_js`, `set_intent_handler`) and `GazeSession` (ring buffer + tracker + recalibrator + resolution epoch + `ingest` + `choose` + `configure`). `overlay.js` sits beside it. |
 | `browser/overlay.js` | The in-page terminal: spotlight, pins, HUD, Semantic Lens cards, mic capture, `extractCandidatesNear`. Talks to Python ONLY through the `__hermesGazeIntent` binding and `api.onIntentResult`. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
+| `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`. Same purity rule. |
 | `benchmark/` | `benchmark_page.html` (self-contained demo dashboard) + `run_benchmark.py` (accuracy suite). |
 | `tests/` | stdlib `unittest` only. `tests/__init__.py` registers a `hermes_gaze` package *shell* (no `__init__.py` exec) so tests can `from hermes_gaze.service import ...` exactly like Hermes's plugin loader. |
@@ -80,6 +80,16 @@ Bayesian spatial-semantic resolution.
   `session.resolution_id`; a `choose` intent carrying a mismatched `resolution_id`
   gets `"stale resolution"`. Never accept a choose without the epoch check — a stale
   Lens card would click whatever now sits at that index.
+- **Hover snapshots are separate.** `last_hover_snapshot` invalidates
+  `last_resolution`/choose state and owns the resolution epoch. Explain reads the
+  stored utterance/context, checks epoch and pointed ID before and after the model
+  call. Hook context is returned verbatim, without an extra wrapper.
+- **Cursor wire privacy precedes serialization.** Never read form values or use
+  ancestor `innerText`; the bounded collector excludes sensitive fields and their
+  associated labels. Capture history/evidence at recording stop, before ASR.
+- **No selector rematching for history.** Closure-held DOM identities are retained
+  for bounded history; detached/expired targets are unavailable. `@` handles map
+  to snapshot selectors/rectangles only, not action tools.
 
 ## Commands
 

@@ -21,32 +21,52 @@ Raw gaze/pointer tracking suffers from ~80–180 px of spatial jitter and drift�
 - **One resolver, in Python.** All spatial-semantic scoring and the decision policy (`pin_immediate` / `execute_safe` / `open_semantic_lens` / `confirm_destructive`) live in `resolver/bayesian_fusion.py`. `browser/overlay.js` is a *terminal*: it renders the spotlight, pins, HUD, and Semantic Lens, and ships the raw inputs (pointer, fixations, candidates, mic audio) — it never re-implements resolution.
 - **Persistent CDP session.** `browser/cdp_bridge.py` keeps ONE websocket per pinned Chrome tab on a dedicated worker loop and registers `Runtime.addBinding("__hermesGazeIntent")`. Overlay → Python traffic is JSON intents (`resolve`, `scope`, `record`, `choose`, `explain`, `transcribe`, `configure`); Python → overlay replies are `window.__HERMES_GAZE_OVERLAY__.onIntentResult(...)` evals. There is no HTTP API surface.
 - **Honest failures.** When candidates or fixations are missing, `service.py` returns `{"ok": false, "error": ...}` — never a fabricated stand-in.
-- **Pointing modes:** `hover` (Magic Pointer, σ = 24 px) and `simulated` (cursor + Gaussian noise, default σ = 120 px) for developing and benchmarking the resolver under eye-tracker-grade uncertainty; camera-based tracking is deliberately not implemented in this revision.
+- **Pointing modes:** `hover` uses exact DOM cursor identity and speech-time history, without scoring or action execution. `simulated` retains Bayesian noisy-gaze resolution (default σ = 120 px). Camera tracking is not implemented.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
 
-### Scope context (demo foundation)
+### Cursor context
 
-Point at a campaign cell and resolve a question. The HUD offers **Cell · Row ·
-Column · Table · Panel**; rows and columns are sibling alternatives, not ancestors.
-Buttons and product cards also expose their containing scopes. Labels and summaries
-come from DOM semantics; demo `data-gaze-*` annotations are optional.
+Hover supplies evidence, not a preselected subject or scope. The model decides
+what the utterance refers to using pointed cells, headers, rows, surrounding
+structural text, and separate page controls. Small tables include all five demo
+rows; larger tables retain pointed rows, headers, total rows, and omission counts.
+No `data-gaze-*` annotation is required.
 
-- Click a scope, or use **↑** for the next alternative and **↓** for the previous.
-  This changes the subject and highlight, **never clicks a page control**.
-- The compact `[gaze_ref]` includes the selected subject, nearby scope alternatives,
-  and associated action controls. The hook and HUD explanations use the same context.
-  Action controls are described separately from the subject; this is not a new
-  automatic scope decider or action-execution system.
-- Click **Confirm intended scope & save trial** even when the initial selection
-  was correct. Corrections are not ground-truth confirmations until you confirm.
+Typed questions use the last actual page target with its age. Spoken deictics
+use their real word timestamps and preceding cursor identity; two spoken
+referents stay ordered. Recording-stop snapshots survive slow transcription.
+History is bounded to 60 seconds/256 intervals and 64 target snapshots; detached,
+expired, or missing targets are explicitly unavailable, never selector rematches.
+Locked pointing preserves identity; unlock to compare different targets.
 
-Resolution, correction, and confirmation events append to `replay.jsonl` in
-Hermes's `plugin_data_dir("hermes-gaze")`, or `~/.cache/hermes-gaze/` standalone.
-These local recordings contain page URLs, utterances, word timestamps, pointer/
-fixation samples, DOM candidates, and results, **not microphone audio**. Treat them
-as potentially sensitive browsing data. Each line is JSON; `record` events identify
-confirmed intended scopes for later replay. Step 1 adds no external model service,
-training pipeline, or automatic scope-selection benchmark.
+The hook and voice one-shot explanation receive the same fenced, untrusted
+context (at most 6000 characters). Password/payment fields and field values are
+excluded before capture. Snapshot `@` handles map to selector/rectangle metadata;
+they are evidence identifiers, not new tool arguments. Hover does not authorize
+clicks or enable `gaze_choose`; scope/confirmation UI remains simulated-only.
+Explicit `target_hint_x/y` tool hints are rejected in hover; move the real cursor.
+
+`window.__HERMES_GAZE_OVERLAY__.captureCursorContext()` inspects the bounded wire.
+Collection limits: 12 columns per table; all rows for tables up to 12 rows,
+otherwise up to 64 historical pointed rows (at most 12 rendered per table).
+There are at most 12 page controls from the first 120 and bounded structural
+text, never a page HTML dump. Uncollected evidence is not fetched.
+Simulated scope corrections still append local `replay.jsonl` recordings in the
+plugin data directory (fallback `~/.cache/hermes-gaze`), never microphone audio.
+Treat these recordings as sensitive browsing data. Hover snapshots are session
+memory only.
+
+Run `benchmark/probe_phase1.py --output /tmp/gaze-phase1.json --with-model
+--wikipedia --screenshot /tmp/gaze-phase1.png` with Python from a Hermes
+environment for the real Chrome/model acceptance replay. It uses a private
+Chrome profile, synthetic word timestamps (not microphone capture), and your
+configured model. Omit `--with-model` for the DOM/privacy smoke only.
+Explanations use Hermes's configured timeout; failures are shown as errors,
+never page context passed off as a model answer.
+
+Focused checks: `python3 -m unittest tests.test_cursor_context` and
+`node tests/cursor_context_dom.js`; run the full stdlib suite before integration.
+
 
 ### Phase 0: Hermes session probe
 

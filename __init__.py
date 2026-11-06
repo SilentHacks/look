@@ -46,6 +46,10 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
 
     try:
         res = service.resolve_now(session, utterance=text)
+        if res.get("ok") is False:
+            return None
+        if res.get("mode") == "hover":
+            return {"context": res["context"]}
         ranked = res.get("ranked") or []
         if res.get("ok") is False or not ranked:
             return None

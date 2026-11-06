@@ -446,6 +446,7 @@ class GazeSession:
         self.recalibrator = OnlineRecalibrator()
         self.last_candidates: List[CandidateElement] = []
         self.last_resolution: Optional[ResolutionResult] = None
+        self.last_hover_snapshot: dict[str, Any] | None = None
         self.resolution_id = 0
         self.scope_selection: Dict[str, str] = {}
         self.last_candidate_wire: List[Dict[str, Any]] = []
@@ -578,6 +579,25 @@ class GazeSession:
                                 x_vp=s.x_vp - bias_x, y_vp=s.y_vp - bias_y)
                 self.ring_buffer.add(s)
 
+    def fetch_cursor_context(self) -> dict[str, Any]:
+        """Capture actual DOM identities without invoking the simulated extractor."""
+        if not self.is_chrome_reachable():
+            return {}
+        return self.eval_js(
+            "window.__HERMES_GAZE_OVERLAY__?.captureCursorContext()"
+        ) or {}
+
+    def store_hover_snapshot(self, payload: dict[str, Any]) -> int:
+        with self._lock:
+            self.last_resolution = None
+            self.last_candidates = []
+            self.last_candidate_wire = []
+            self.scope_selection.clear()
+            self.resolution_id += 1
+            payload.update(resolution_id=self.resolution_id, epoch=self.resolution_id)
+            self.last_hover_snapshot = payload
+            return self.resolution_id
+
     def fetch_live_state_and_candidates(self, radius_px: float = 380.0) -> List[CandidateElement]:
         """Pull pointer + fixations + nearby candidates from the pinned tab in ONE eval.
         Returns [] honestly — never stale last_candidates — when Chrome or a real
@@ -618,6 +638,7 @@ class GazeSession:
         """Store res as the active resolution and bump + return the epoch resolution_id."""
         with self._lock:
             self.last_resolution = res
+            self.last_hover_snapshot = None
             self.resolution_id += 1
             return self.resolution_id
 

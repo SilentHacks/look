@@ -12,8 +12,9 @@ from hermes_gaze.browser.cdp_bridge import GazeSession
 
 
 class TestScopeContext(unittest.TestCase):
-    def test_correct_confirm_explain_and_reject_stale_scope(self):
+    def test_correct_confirm_and_reject_stale_scope(self):
         session = GazeSession(cdp_http_url="http://127.0.0.1:1")
+        session.configure(mode="simulated")
         self.addCleanup(session.close)
         scopes = ["cell", "row", "column", "table", "panel"]
         candidates = [{"id": scope, "scope": scope, "role": scope, "tag": "td", "label": scope,
@@ -32,7 +33,6 @@ class TestScopeContext(unittest.TestCase):
             result = service.resolve_now(session, utterance="What is this?", pushed=pushed)
             epoch = result["resolution_id"]
             self.assertEqual([s["scope"] for s in result["scopes"]], scopes)
-            self.assertIn("column column", result["context"])
             self.assertIn("#export", result["context"])
             self.assertLessEqual(len(result["context"]), 900)
 
@@ -51,9 +51,6 @@ class TestScopeContext(unittest.TestCase):
             self.assertIsNotNone(session.last_resolution)
             self.assertTrue(send("record", scope_id="column")["ok"])
             self.assertTrue(send("record", scope_id="column")["ok"])
-            with mock.patch.object(service, "_LLM", None):
-                explanation = send("explain", scope_id="column", utterance="Explain this")
-            self.assertIn("Subject: column", explanation["explanation"])
             again = service.resolve_now(session, utterance="Explain this", pushed=pushed)
             self.assertEqual(again["selected_scope_id"], "column")
             self.assertFalse(send("scope", scope_id="table")["ok"])

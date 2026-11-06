@@ -118,6 +118,7 @@ class TestHonestNoPointer(unittest.TestCase):
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"))
         self.session = GazeSession(cdp_http_url="http://127.0.0.1:1")
+        self.session.configure(mode="simulated")
         self.addCleanup(self.session.close)
 
     def test_fetch_returns_empty_when_unreachable(self) -> None:
@@ -149,6 +150,7 @@ class TestChooseConsumesResolution(unittest.TestCase):
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(mock.patch.object(service, "_record_path", return_value=Path(directory) / "replay.jsonl"))
         self.session = GazeSession(cdp_http_url="http://127.0.0.1:1")
+        self.session.configure(mode="simulated")
         self.addCleanup(self.session.close)
 
     def test_second_choose_fails_after_success(self) -> None:
@@ -214,7 +216,6 @@ class TestLlmRerankReorders(unittest.TestCase):
         """The LLM rerank must reorder resolve_candidates' own list, not a slice copy."""
         now = time.time()
         # Three near-identical candidates around the fixation -> ambiguous -> rerank fires.
-        fix = bayesian_fusion  # keep linters honest about the import usage below
         candidates = [
             bayesian_fusion.CandidateElement.from_wire(
                 {"id": f"c{i}", "tag": "button", "role": "button", "label": f"Option {i}",

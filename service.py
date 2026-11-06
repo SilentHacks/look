@@ -22,6 +22,7 @@ _RECORD_LOCK = threading.Lock()
 from .browser.cdp_bridge import GazeSession, get_shared_session
 from .config import GazeConfig
 from .resolver.bayesian_fusion import CandidateElement, resolve_candidates
+from .resolver.cursor_context import CONTEXT_INSTRUCTIONS, cursor_result
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 from .voice import MAX_AUDIO_BYTES
 
@@ -125,11 +126,10 @@ def resolve_now(
     record_voice: bool = False,
     duration_s: float = 2.8,
 ) -> Dict[str, Any]:
-    """THE resolution path: speech -> fixations + candidates -> Bayesian fusion -> render.
+    """Collect and render exact cursor evidence, or resolve simulated noisy gaze.
 
-    ``pushed`` carries overlay-supplied state ({pointer, fixations, candidates});
-    when absent the live state is pulled from the pinned Chrome tab. Returns the
-    ResolutionResult dict plus chrome_connected/mode (and speech_recognition meta).
+    ``pushed`` supplies cursor context in hover, fixation/candidate state in
+    simulated mode. Otherwise pull from the pinned tab. Hover never scores scope.
     """
     if mode is not None and str(mode) not in ("hover", "simulated"):
         return {"ok": False, "error": f"unsupported tracking mode: {mode!r} (supported: hover, simulated)"}
@@ -146,6 +146,8 @@ def resolve_now(
         try:
             audio_epoch = time.time()  # whisper word times are audio-relative; shift to wall-clock
             audio_pcm = record_microphone(duration_s=duration_s)
+            if mode == "hover":
+                pushed = {"cursor_context": session.fetch_cursor_context()}
             transcribed_text, word_ts = transcribe_audio_buffer(
                 audio_pcm, model_name=_whisper_model_name(), audio_epoch=audio_epoch
             )
@@ -163,6 +165,25 @@ def resolve_now(
     if not raw_utterance:
         return {"ok": False, "error": "empty utterance — no spoken or typed query to resolve"}
     utterance = raw_utterance
+    if mode == "hover":
+        capture = pushed.get("cursor_context") if pushed is not None else session.fetch_cursor_context()
+        payload = cursor_result(capture, utterance, word_timestamps, time.time())
+        payload["utterance"] = utterance
+        payload["chrome_connected"] = session.is_chrome_reachable()
+        session.store_hover_snapshot(payload)
+        session.last_resolution_input = {"cursor_context": capture, "utterance": utterance,
+                                         "words": word_timestamps or []}
+        if payload["chrome_connected"]:
+            rid = payload["resolution_id"]
+            message = (f'Cursor evidence<div id="gaze-explanation-text" data-rid="{rid}">Asking Hermes…</div>'
+                       if payload["ok"] else html.escape(payload["error"]))
+            session.eval_js(
+                f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])}, {json.dumps(message)});"
+                f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});true"
+            )
+        if transcription_meta:
+            payload["speech_recognition"] = transcription_meta
+        return payload
     now = time.time()
 
     if pushed is not None:
@@ -262,27 +283,26 @@ def resolve_now(
     return payload
 
 
-def explain_element(utterance: str, label: str, role: str, summary: str, llm: Any = None) -> str:
-    """Ask Hermes (ctx.llm) for a concise, helpful explanation of a UI element in context."""
+def explain_element(utterance: str, context: str, llm: Any = None) -> str:
+    """Explain server-owned evidence; propagate unavailable/failed model calls."""
     client = llm if llm is not None else _LLM
-    if client is not None:
-        try:
-            res = client.complete_structured(
-                instructions=(
-                    f"The user is looking at a web UI element labeled '{label}' (type: {role}, context: {summary}) "
-                    f"and asks: '{utterance}'. Answer their question directly in 1-2 clear, helpful sentences "
-                    "(under 35 words). Do not call tools; output the direct explanation text only."
-                ),
-                input=[{"type": "text", "text": f"Utterance: {utterance}\nElement: {label} ({role})\nContext: {summary}"}],
-                json_mode=False,
-                timeout=8.0,
-            )
-            text = str(getattr(res, "text", res) or "").strip()
-            if text:
-                return text
-        except Exception as exc:
-            logger.debug("ctx.llm explanation failed: %s", exc)
-    return f"{label} ({role}): {summary}"
+    if client is None:
+        raise RuntimeError("Hermes model unavailable")
+    res = client.complete_structured(
+        instructions=(
+            CONTEXT_INSTRUCTIONS +
+            "Answer the user's question usefully, including table analysis when relevant. "
+            "You cannot execute UI actions. For action requests describe or clarify; never claim execution. "
+            "Do not call tools. Return explanation text only."
+        ),
+        input=[{"type": "text", "text": f"Utterance: {utterance}"},
+               {"type": "text", "text": context}],
+        json_mode=False,
+    )
+    text = str(getattr(res, "text", res) or "").strip()
+    if not text:
+        raise RuntimeError("Model returned an empty explanation")
+    return text
 
 
 def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None]) -> None:
@@ -297,16 +317,14 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
     try:
         if itype == "resolve":
             pushed = {"pointer": intent.get("pointer"), "fixations": intent.get("fixations"),
-                      "candidates": intent.get("candidates"), "page_url": intent.get("page_url")}
+                      "candidates": intent.get("candidates"), "page_url": intent.get("page_url"),
+                      "cursor_context": intent.get("cursor_context")}
             res = resolve_now(session, utterance=str(intent.get("utterance") or ""),
                               words=intent.get("words"), pushed=pushed)
             if res.get("ok") is False:
                 reply({"ok": False, "error": str(res.get("error") or "resolution failed")})
                 return
-            reply({"ok": True, "decision": res.get("decision"), "intent_class": res.get("intent_class"),
-                   "resolution_id": res.get("resolution_id"), "needs_explain": res.get("intent_class") == "read_only",
-                   "scopes": res.get("scopes"), "selected_scope_id": res.get("selected_scope_id"),
-                   "context": res.get("context"), "top": res.get("top") or {}})
+            reply({**res, "ok": True, "needs_explain": res.get("needs_explain", res.get("intent_class") == "read_only")})
             return
 
         if itype == "choose":
@@ -369,6 +387,23 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             return
 
         if itype == "explain":
+            hover = session.last_hover_snapshot
+            if hover is not None:
+                if not hover.get("ok"):
+                    reply({"ok": False, "error": hover.get("error", "cursor evidence unavailable")})
+                    return
+                rid = intent.get("resolution_id")
+                sid = intent.get("scope_id")
+                if rid != session.resolution_id or sid != hover.get("selected_scope_id"):
+                    reply({"ok": False, "error": "stale or missing resolution"})
+                    return
+                explanation = explain_element(hover["utterance"], hover["context"], llm=_LLM)
+                if session.last_hover_snapshot is not hover or session.resolution_id != rid:
+                    reply({"ok": False, "error": "stale resolution"})
+                    return
+                reply({"ok": True, "resolution_id": rid, "scope_id": sid,
+                       "context": hover["context"], "explanation": explanation})
+                return
             if intent.get("resolution_id") is None or int(intent["resolution_id"]) != session.resolution_id or session.last_resolution is None:
                 reply({"ok": False, "error": "stale or missing resolution"})
                 return
@@ -379,9 +414,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 reply({"ok": False, "error": "scope_id is not a scope of the current resolution"})
                 return
             context = _compact_context(chosen, info["scopes"])
-            explanation = explain_element(str(intent.get("utterance") or ""),
-                                          str(chosen.get("label") or ""), str(chosen.get("scope") or chosen.get("role") or ""),
-                                          context, llm=_LLM)
+            explanation = explain_element(str(intent.get("utterance") or ""), context, llm=_LLM)
             try:
                 _append_record(session, {"type": "explain", "wall_time": time.time(),
                                          "resolution_id": session.resolution_id, "scope_id": sid,
@@ -418,4 +451,6 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
 
         reply({"ok": False, "error": "unknown intent type"})
     except Exception as exc:
-        reply({"ok": False, "error": str(exc)})
+        reply({"ok": False, "error": str(exc),
+               **({"resolution_id": intent.get("resolution_id"), "scope_id": intent.get("scope_id")}
+                  if itype == "explain" else {})})
