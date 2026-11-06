@@ -94,9 +94,6 @@ const document = {
 const rendered = [];
 const intents = [];
 const shadow = element('div');
-const hudReply = element('div');
-const lockLabel = element('div');
-const tuckSummary = element('div');
 const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
   window: { listeners: {}, innerWidth: 1200, innerHeight: 800,
     addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
@@ -104,17 +101,19 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   getComputedStyle: node => ({ display: node.style.display || 'block', position: node.style.position || 'static' }),
   location: { href: 'https://demo.invalid/' },
   scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
-  shadow, hudReply, lockLabel, tuckSummary, pinsLayer: element('div'), lensLayer: element('div'),
-  hudInput: element('input'), DEFAULT_PLACEHOLDER: 'Ask about this…',
+  shadow, pinsLayer: element('div'), lensLayer: element('div'),
   renderPins: candidates => rendered.push(candidates), stopTrackingPins() {},
   trustedUi: event => event.isTrusted,
   _emit: intent => intents.push(intent), cancelListening() {} });
 const start = source.indexOf('  const cursorIds =');
-const end = source.indexOf('  function updateLiveInspector', start);
-vm.runInContext(source.slice(start, end) + '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, onSessionEvent, revokeActionAuthority };', context);
-const replyStart = source.indexOf('  function onIntentResult');
-const replyEnd = source.indexOf('  function formatRoleDisplayName', replyStart);
-vm.runInContext(source.slice(replyStart, replyEnd) + '\nthis.onIntentResult = onIntentResult;', context);
+const uiStart = source.indexOf('  function showPlainMessage', start);
+const lifecycle = source.indexOf('  function revokeActionAuthority', uiStart);
+const end = source.indexOf('  function updateLiveInspector', lifecycle);
+context.hud = element('section');
+context.positionNote = () => {};
+context.renderNote = () => {};
+vm.runInContext(source.slice(start, uiStart) + source.slice(lifecycle, end) +
+  '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, revokeActionAuthority };', context);
 const api = context.collect;
 assert.equal(api.safeText(section), 'Visible content');
 assert.equal(api.safeText(payment), '[redacted]');
@@ -250,6 +249,7 @@ test('live pins track layout and clipped scrolling, stop on detach and do no idl
     snapshots: new Map([['s', { pageUrl: 'https://demo.invalid/' }]]),
     activeSnapshot: { id: 's', resolutionId: 1 }, destroyed: false,
     getComputedStyle: n => n.style, rendered: n => n.isConnected, sensitive: () => false,
+    positionNote() {},
     requestAnimationFrame: fn => { frame = fn; return 1; },
     cancelAnimationFrame: () => { frame = null; },
   });
@@ -549,7 +549,7 @@ test('confirmation rejects synthetic clicks, emits once, and expires on capture'
     label: '<img src=x onerror=alert(1)>' }).ok, true);
   const card = shadow.children.at(-1);
   assert.equal(card.children[0].textContent, '<img src=x onerror=alert(1)>');
-  const approve = card.children[2];
+  const approve = card.children.find(c => c.tagName === 'BUTTON');
   const before = intents.length;
   approve.click();
   for (const fn of approve.listeners.click) fn({ isTrusted: false, button: 0, detail: 1 });
@@ -560,37 +560,12 @@ test('confirmation rejects synthetic clicks, emits once, and expires on capture'
   assert.equal(intents.at(-1).type, 'confirm_action');
   assert.equal(intents.at(-1).approved, true);
   api.requestActionConfirmation({ action_id: 'expired', resolution_id: 7 });
-  const stale = shadow.children.at(-1).children[2];
+  const stale = shadow.children.at(-1).children.find(c => c.tagName === 'BUTTON');
   api.captureCursorContext();
   for (const fn of stale.listeners.click) fn(physicalClick);
   assert.equal(intents.length, before + 1);
 });
 
-function inboxEvent(revision, answer, selected = 'first') {
-  return { type: 'inbox', revision, session_connected: true, selected_item_id: selected, paused: false,
-    items: [{ item_id: 'first', capture_order: 1, target_label: 'Deal A', source_url: 'https://demo.invalid/a',
-      unread: true, action_state: 'expired', conversation: [{ utterance: 'price?', text: answer, status: 'complete' }] }] };
-}
-test('inbox renders plain text, rejects stale revisions and follows explicit selection only', () => {
-  api.onSessionEvent(inboxEvent(1, '<script>page()</script>'));
-  assert.ok(hudReply.children.some(c => c.textContent.includes('<script>page()</script>')));
-  api.onSessionEvent(inboxEvent(0, 'obsolete'));
-  assert.ok(!hudReply.children.some(c => c.textContent.includes('obsolete')));
-  api.onSessionEvent(inboxEvent(2, 'new answer', ''));
-  assert.ok(!hudReply.children.some(c => c.textContent.includes('new answer')));
-  hudReply.children[1].click();
-  assert.equal(intents.at(-1).action, 'select');
-  assert.equal(intents.at(-1).item_id, 'first');
-});
-test('recovery addresses a failed request even with a newer queued followup', () => {
-  const event = inboxEvent(3, 'partial');
-  event.items[0].conversation[0].status = 'failed';
-  event.items[0].conversation[0].request_id = 'failed-asr';
-  event.items[0].conversation.push({ request_id: 'follow', utterance: 'why?', text: '', status: 'queued' });
-  api.onSessionEvent(event);
-  hudReply.children.find(b => b.textContent === 'Skip').click();
-  assert.equal(intents.at(-1).request_id, 'failed-asr');
-});
 
 test('bounded snapshot retention expires honestly', () => {
   const old = api.captureCursorContext();
@@ -601,51 +576,22 @@ test('bounded snapshot retention expires honestly', () => {
 });
 
 
-test('confirmation replies display outcomes without overwriting newer evidence', () => {
-  const resolution_id = context.state.resolutionId;
-  for (const [result, outcome] of [
-    [{ ok: true, executed: true }, 'executed'],
-    [{ ok: true, cancelled: true }, 'cancelled'],
-    [{ ok: false, error: 'Target became disabled' }, 'failed'],
-    [{ ok: false, executed: null, outcome: 'unknown', error: 'Click outcome unknown' }, 'unknown outcome'],
-  ]) {
-    context.onIntentResult({ type: 'confirm_action', resolution_id, ...result });
-    assert.equal(lockLabel.textContent, outcome);
-  }
-  context.onIntentResult({ type: 'confirm_action', resolution_id: resolution_id - 1, ok: true, executed: true });
-  assert.equal(lockLabel.textContent, 'unknown outcome');
-});
 
-test('routing retains live evidence and streams; pagehide revokes evidence, not the answer', () => {
+test('routing retains captured identities; pagehide revokes their availability', () => {
   const node = element('button', [text('Read more')]);
   api.rememberHit(node, 16);
   const snapshot = api.captureCursorContext();
   const handle = snapshot.history.at(-1).id;
   assert.equal(api.activateSnapshot(snapshot.snapshot_id, 12).ok, true);
-  api.onSessionEvent(inboxEvent(3, 'before routing'));
   const previousUrl = context.location.href;
   context.location.href = 'https://demo.invalid/next-route#details';
   for (const type of ['hashchange', 'popstate']) context.window.dispatchEvent({ type });
-  api.onSessionEvent(inboxEvent(4, 'after routing'));
-  assert.ok(hudReply.children.some(c => c.textContent.includes('after routing')));
   api.revokeActionAuthority(); // Browser-owned Page.navigatedWithinDocument notification.
   context.location.href = previousUrl;
   assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, false);
   assert.equal(api.highlightSnapshot(snapshot.snapshot_id, 12, [handle]).ok, true);
   context.window.dispatchEvent({ type: 'pagehide' });
   assert.equal(api.inspectSnapshot(snapshot.snapshot_id, 12, handle).ok, false);
-  api.onSessionEvent(inboxEvent(5, 'answer after departure'));
-  assert.ok(hudReply.children.some(c => c.textContent.includes('answer after departure')));
   context.location.href = previousUrl;
 });
 
-test('disconnected voice shows the one-shot answer instead of silently queuing', () => {
-  context.hudInput = { value: '' };
-  context.isListening = false;
-  context.resetMicUiIdle = message => { lockLabel.textContent = message; };
-  context.renderScopeOptions = () => {};
-  context.onIntentResult({ type: 'record_stop', ok: true, delivery: 'one_shot',
-    text: 'What does this mean?', explanation: 'Revenue includes subscription renewals.' });
-  assert.ok(hudReply.textContent.includes('Revenue includes subscription renewals.'));
-  assert.notEqual(lockLabel.textContent, 'queued');
-});

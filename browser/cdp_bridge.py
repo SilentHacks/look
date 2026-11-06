@@ -12,7 +12,6 @@ import asyncio
 import concurrent.futures
 import copy
 import functools
-import html
 import json
 import logging
 import secrets
@@ -759,44 +758,16 @@ class GazeSession:
                 self.resolution_id += 1
                 return self.resolution_id
 
-    def render_resolution_in_browser(self, resolution: Any, hud_html: Optional[str] = None,
-                                     *, evidence: dict) -> int:
+    def render_resolution_in_browser(self, resolution: Any, *, evidence: dict) -> int:
         rid = self.new_resolution(resolution, evidence)
         if not self.is_chrome_reachable():
             return rid
-        esc = html.escape
         if resolution.decision in ("open_semantic_lens", "confirm_destructive"):
             cards = [sc.to_dict() for sc in resolution.ranked[:4]]
-            prompt = (
-                "⚠️ High-Consequence Action — Confirm in Semantic Lens"
-                if resolution.decision == "confirm_destructive"
-                else f"🔍 Ambiguous Target — Select in Semantic Lens (Hover {self._dwell_ms}ms, Key 1-{len(cards)}, or Click)"
-            )
-            js = f"window.__HERMES_GAZE_OVERLAY__.renderSemanticLens({json.dumps(cards)}, {json.dumps(prompt)}, {rid}); true;"
+            js = f"window.__HERMES_GAZE_OVERLAY__.renderSemanticLens({json.dumps(cards)}, null, {rid}); true;"
         else:
             pins = [sc.to_dict() for sc in (resolution.multi_referents or resolution.ranked[:1])]
-            if pins:
-                top_pin = pins[0]
-                role_label = esc(str(top_pin.get("role") or top_pin.get("tag") or "Element")).capitalize()
-                conf_pct = int(top_pin.get("probability", 1.0) * 100)
-                msg = hud_html or (
-                    f"<div style='font-size:13.5px;'><strong style='color:#38bdf8;'>🔍 Inspecting: {esc(str(top_pin.get('label', '')))}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_label})</span></div>"
-                    f"<div style='margin-top:5px;color:#f8fafc;font-size:12.5px;line-height:1.45;'>{esc(str(top_pin.get('consequence_preview') or top_pin.get('summary', '')))}</div>"
-                    f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:12px;font-size:11px;color:#64748b;font-family:ui-monospace,monospace;'>"
-                    f"<span>Target: {esc(str(top_pin.get('selector', '')))}</span><span>Confidence: {conf_pct}%</span>"
-                    f"</div>"
-                )
-            else:
-                msg = hud_html or "No matching target."
-            if resolution.intent_class == "read_only":
-                # The overlay emits an `explain` intent for read_only + pin_immediate and
-                # writes the reply into this element inside the pin HUD; data-rid ties the
-                # reply to THIS resolution epoch.
-                msg += (
-                    f'<div id="gaze-explanation-text" data-rid="{rid}" style="margin-top:6px;color:#cbd5e1;font-size:12px;line-height:1.4;">'
-                    "⏳ Asking Hermes...</div>"
-                )
-            js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}, {json.dumps(msg)}); true;"
+            js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}); true;"
         try:
             self._cdp.eval_js_once(f"(() => {{{js}}})()", target=evidence.get("browser_target"),
                                    document=evidence.get("browser_document"), route=evidence.get("browser_route"))
@@ -828,19 +799,12 @@ class GazeSession:
                         sigma=latest_fix.sigma_x, weight=0.25,
                     )
             if self.is_chrome_reachable():
-                esc = html.escape
-                role_disp = esc(chosen.candidate.role).capitalize()
-                msg = (
-                    f"<div style='font-size:13.5px;'><strong style='color:#34d399;'>✓ Selected: {esc(chosen.candidate.label)}</strong> <span style='color:#94a3b8;font-size:11.5px;'>({role_disp} via {esc(str(modality))})</span></div>"
-                    f"<div style='margin-top:5px;color:#cbd5e1;font-size:12px;line-height:1.4;'>{esc(str(chosen.consequence_preview))}</div>"
-                    f"<div style='margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:#64748b;font-family:monospace;'>Target: {esc(chosen.candidate.selector)}</div>"
-                )
                 click_stmt = (
                     f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
                     if execute else "")
                 try:
                     self._cdp.eval_js_once(
-                        f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
+                        f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])});"
                         f"{click_stmt} return true;}})()", target=self._resolution_target,
                         document=self._resolution_document, route=self._resolution_route)
                 except Exception as exc:

@@ -147,18 +147,30 @@ as plain text. After compaction, resolving again captures the current cursor, no
 the historical target. `/gaze disconnect` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
 
-The Quiet Signal HUD uses a compact graphite/sage surface with separate target,
-question and answer areas. Drag its header to reposition it; Minimize keeps a
-small expandable header. Explain this, Summarize and Compare submit page-neutral
-questions about the captured target. Pointer/Simulated switches pointing modes;
-Clear dismisses highlights and the reply. Keyboard focus is visible, narrow
-viewports scroll the body, and reduced-motion preferences disable transitions.
+Errata leaves vermilion proofing marks and temporary source-attached paper notes.
+Nothing remains idle except a bare unread count. **Q** recalls the answer index;
+**Right Alt** (or your configured lock shortcut) opens protected question entry.
+**Escape** or the cross dismisses a note; the double-arrow moves it aside.
+Recall a target and use its reply arrow for a follow-up. Notes keep question/answer
+history, bounded scrolling, queue counts, Retry/Skip/Resume and mouse-only Confirm/Cancel.
+They dock at the viewport edge when the captured source is offscreen or unavailable.
+Completed notes retreat after 12 seconds when neither hovered nor being edited;
+completion never changes selection or announces a new answer.
 
-The HUD shows listening, transcribing, queued, thinking and completion/error
-states. Without a connected/authorized session, read-only questions can use a
-clearly labeled one-shot call, with no conversation followups or actions. Action
-requests fail rather than silently using that fallback. ASR file downloads are
-quiet without suppressing errors or redirecting process output.
+The speaker reads the selected answer using macOS's local `/usr/bin/say` voice;
+the square stops it. The looped-arrow setting explicitly enables automatic reading
+of completed answers for this plugin session; it is off initially and resets when
+the plugin is unloaded. No text goes to a speech provider or website. Non-macOS
+hosts report local speech unavailable. New answers otherwise remain silent.
+
+Georgia (roman and italic) and Courier New are system font references, not bundled
+or downloaded fonts; generic serif/monospace fallbacks cover other systems. No font
+assets or third-party font licences ship. Paper follows the source page's light/dark
+background. Reduced motion disables the rising note and animated ink.
+
+Without a connected session, read-only one-shot answers still appear, without
+saved conversations or actions. Action requests fail instead of using that fallback.
+ASR file downloads remain quiet without suppressing errors or redirecting output.
 Browser-supplied compressed audio still requires `ffmpeg` on Hermes's PATH
 (or in a standard macOS location), with MIME type preserved through decoding.
 Native microphone PCM/WAV uses the in-process fast path and does not require

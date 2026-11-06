@@ -23,8 +23,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
 | `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer for recall; evidence, actions and non-inbox replies retain captured ownership. |
-| `browser/overlay.js` | DOM collector, exact snapshot identities and live highlight geometry; detached private control tree mirrored through CDP. |
-| `browser/panel.js` | Private renderer in a script-disabled, opaque-origin sandbox iframe. Trusted UI events return only through its CDP context, never page messaging. |
+| `browser/overlay.js` | DOM collector and captured identities, vermilion proof geometry, source-attached Errata notes; private control tree stays detached and is mirrored through CDP. |
+| `browser/panel.js` | Errata renderer in a script-disabled, opaque-origin sandbox iframe; preserves private focus/scroll during streaming. Trusted events return only through its CDP context. |
 | `microphone.py` | Single-owner native capture; closes on release, cancellation, focus/document/route loss, device error, disconnect or the native 30-second deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
@@ -64,6 +64,14 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   highlight geometry enters the website's closed shadow tree. The host uses the
   top layer; tampered visibility/transforms reject UI input. Sites can still remove
   or hide the host (denial of service), not read its private content or mint input.
+- **Errata is transient, private, and silent by default.** Q recalls notes; the configured
+  lock shortcut opens private typing, Space captures, Escape dismisses. Only an unread
+  count remains idle. Website DOM receives geometry only, never folios, labels or answers.
+  System Georgia/Courier references require no bundled fonts or network requests.
+  Inbox `speak` resolves server-owned item/request text, never client-supplied speech.
+  macOS `/usr/bin/say` receives text on stdin; one cancellable worker owns playback.
+  `auto_speak` is an explicit runtime toggle, initially off; disconnect cancels playback.
+  Completion may mark unread but must not select a note or announce its arrival.
 - **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
   `audio_epoch` (the first native input buffer's ADC wall-clock epoch for Chrome,
   `time.time()` before `record_microphone` on the tool path) and shifts each word.

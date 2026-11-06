@@ -4,7 +4,10 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import secrets
+import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -40,6 +43,11 @@ class VoiceTurns:
         self.revision = 0
         self.closed = False
         self.capture_state = "idle"
+        self.auto_speak = False
+        self.speech_error = ""
+        self._speech_process = None
+        self._speech_pending = None
+        self._speech_thread = None
 
     @property
     def connected(self) -> bool:
@@ -94,19 +102,24 @@ class VoiceTurns:
         event = {"type": "inbox", "version": 1, "revision": self.revision,
                  "sequence": self.revision, "items": items, "selected_item_id": self.selected,
                  "paused": self.paused, "session_connected": self.connected,
-                 "capture_state": self.capture_state}
+                 "capture_state": self.capture_state, "auto_speak": self.auto_speak,
+                 "speech_error": self.speech_error}
         try:
             self.session.display_session_event(event)
         except Exception:
             logger.debug("Inbox display unavailable", exc_info=True)
 
     def _event(self, run, status, **fields):
+        previous_status = run["status"]
         run.update(status=status, **fields)
         if status in ("complete", "failed", "interrupted"):
             item = self._item(run["item_id"])
             if item:
                 item["unread"] = True
         run["last_display"] = time.monotonic()
+        if (status == "complete" and previous_status != "complete" and self.auto_speak
+                and self.connected and run["text"].strip()):
+            self._speak(run["text"])
         self.publish()
 
     def _item(self, item_id):
@@ -212,7 +225,7 @@ class VoiceTurns:
             if not isinstance(text, str) or len(text) > self.MAX_TEXT or error or not text.strip():
                 self.paused = True
                 self._event(run, "failed", error=error or "No speech recognized")
-                return {"ok": False, "error": run["error"]}
+                return {"ok": False, "error": run["error"], "request_id": request_id, "item_id": run["item_id"]}
             saved = copy.deepcopy(snapshot) if snapshot is not None else run["snapshot"]
             if run.get("followup"):
                 saved = run["snapshot"]
@@ -228,7 +241,7 @@ class VoiceTurns:
             self._start_highlight(run)
             self.publish()
         self._pump()
-        return {"ok": True, "delivery": "session", "request_id": request_id}
+        return {"ok": True, "delivery": "session", "request_id": request_id, "item_id": run["item_id"]}
 
     def submit(self, text, snapshot, item_id=""):
         if not isinstance(text, str) or not text.strip() or len(text) > self.MAX_TEXT:
@@ -285,8 +298,85 @@ class VoiceTurns:
                     self.paused = True
                     self._event(run, "failed", error=error)
 
+    def _stop_speaking(self):
+        """Cancel without waiting on a pipe or child while holding the inbox lock."""
+        self._speech_pending = None
+        process, self._speech_process = self._speech_process, None
+        if process is not None and process.poll() is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+
+    def _speak(self, text):
+        if sys.platform != "darwin" or not os.access("/usr/bin/say", os.X_OK):
+            self.speech_error = "Local speech requires macOS with /usr/bin/say."
+            return {"ok": False, "error": self.speech_error}
+        self._stop_speaking()
+        self.speech_error = ""
+        self._speech_pending = text
+        if self._speech_thread is None:
+            self._speech_thread = threading.Thread(
+                target=self._speech_loop, name="gaze-speech", daemon=True)
+            self._speech_thread.start()
+        return {"ok": True}
+
+    def _speech_loop(self):
+        # One worker reaps the cancelled child before starting any replacement.
+        while True:
+            with self.lock:
+                text, self._speech_pending = self._speech_pending, None
+                if text is None:
+                    self._speech_thread = None
+                    return
+                try:
+                    process = subprocess.Popen(
+                        ["/usr/bin/say", "-f", "-"], stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        text=True, encoding="utf-8")
+                except OSError:
+                    self.speech_error = "Local speech could not start. Check /usr/bin/say."
+                    self.publish()
+                    continue
+                self._speech_process = process
+            try:
+                process.communicate(text)
+                failed = process.returncode != 0
+            except (OSError, ValueError):
+                process.kill()
+                process.wait()
+                failed = True
+            with self.lock:
+                if self._speech_process is process:
+                    self._speech_process = None
+                    if failed:
+                        self.speech_error = "Local speech failed. Retry speaking."
+                        self.publish()
+
     def control(self, action, item_id="", request_id=""):
         with self.lock:
+            if action == "stop_speaking":
+                self._stop_speaking()
+                self.speech_error = ""
+                self.publish()
+                return {"ok": True}
+            if action in ("speak", "auto_speak"):
+                if not self.connected:
+                    return {"ok": False, "error": "Reconnect with /gaze connect before speaking"}
+                if action == "auto_speak":
+                    self.auto_speak = not self.auto_speak
+                    self.publish()
+                    return {"ok": True, "auto_speak": self.auto_speak}
+                if not self._item(item_id):
+                    return {"ok": False, "error": "Answer unavailable. Select a saved item."}
+                run = next((r for r in reversed(self.runs)
+                            if r["item_id"] == item_id
+                            and (r["request_id"] == request_id if request_id else r["text"].strip())), None)
+                if run is None or not run["text"].strip():
+                    return {"ok": False, "error": "No answer text is available to speak."}
+                result = self._speak(run["text"])
+                self.publish()
+                return result
             if action in ("retry", "resume") and not self.connected:
                 return {"ok": False, "error": "Reconnect with /gaze connect before resuming"}
             item = self._item(item_id)
@@ -475,6 +565,7 @@ class VoiceTurns:
         self._pump()
 
     def _disconnect(self):
+        self._stop_speaking()
         self.paused = True
         self.capture_state = "idle"
         if self.active:
