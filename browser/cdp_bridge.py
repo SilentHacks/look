@@ -1,11 +1,9 @@
 """Chrome DevTools Protocol (CDP) bridge for hermes-gaze.
 
-Attaches to local Chrome running with ``--remote-debugging-port=9222``, injects ``overlay.js``
-into the pinned page, queries DOM/Accessibility candidates, and renders pins & Semantic Lens cards.
-
-ONE persistent websocket per pinned tab, serviced by a dedicated worker thread that owns an
-asyncio loop. The overlay -> Python channel is a CDP ``Runtime.addBinding`` (not HTTP);
-Python -> JS replies go via ``api.onIntentResult(...)`` evals.
+Companion discovery follows foreground Chrome pages. Each page has one persistent
+websocket and worker loop; the overlay and nonce-checked intent binding live in
+the named CDP isolated world. Python retains answer display state across pages.
+Reads may reconnect; mutations use ``eval_js_once`` and never replay.
 """
 
 from __future__ import annotations
@@ -53,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 _OVERLAY_JS_PATH = Path(__file__).with_name("overlay.js")
 _INTENT_BINDING = "__hermesGazeIntent"
+_WORLD = "hermes-gaze"
 _overlay_cache: Tuple[float, str] = (0.0, "")
 
 
@@ -122,9 +121,15 @@ class CdpSession:
         self._pending: Dict[int, asyncio.Future] = {}
         self._msg_id = 0
         self._target_id: Optional[str] = None
+        self._context_id: Optional[int] = None
+        self._context_unique_id: Optional[str] = None
+        self._contexts: Dict[int, str] = {}
+        self._ready = False
+        self.tab: Optional[Dict[str, Any]] = None
+        self.session_event: Optional[Dict[str, Any]] = None
         self._intent_handler: Optional[Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]] = None
         self._handler_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=2, thread_name_prefix="hermes-gaze-intent"
+            max_workers=1, thread_name_prefix="hermes-gaze-intent"
         )
         self._closed = False
         # Pushed after every (re)injection so the overlay survives navigations/reloads
@@ -152,7 +157,7 @@ class CdpSession:
                 # cycles, so the transport must be restartable rather than one-shot.
                 self._closed = False
                 self._handler_pool = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=2, thread_name_prefix="hermes-gaze-intent"
+                    max_workers=1, thread_name_prefix="hermes-gaze-intent"
                 )
             if self._thread is None or not self._thread.is_alive():
                 self._loop_ready.clear()
@@ -174,9 +179,9 @@ class CdpSession:
             raise TimeoutError(f"CDP call timed out after {timeout:.1f}s") from None
 
     def connect(self) -> bool:
-        """Pick + pin a tab, open the websocket, register the intent binding, inject overlay."""
+        """Attach the assigned tab and initialize its isolated overlay."""
         try:
-            return True if self._ws is not None else bool(self._submit(self._connect_async(), timeout=20.0))
+            return self._ready if self._ws is not None else bool(self._submit(self._connect_async(), timeout=20.0))
         except Exception as exc:
             logger.debug("CDP connect failed: %s", exc)
             return False
@@ -186,9 +191,10 @@ class CdpSession:
         Thread-safe. Raises on timeout or page exception; one reconnect attempt on ws failure."""
         return self._submit(self._eval_with_reconnect(expression, timeout), timeout + 15.0)
 
-    def eval_js_once(self, expression: str, timeout: float = 6.0) -> Any:
-        """Evaluate a mutation once on the current connection; never reconnect/replay."""
-        return self._submit(self._eval_coro(expression, timeout), timeout + 1.0)
+    def eval_js_once(self, expression: str, timeout: float = 6.0, *,
+                     context_id: Optional[str] = None) -> Any:
+        """Evaluate a mutation in one document; never reconnect/replay."""
+        return self._submit(self._eval_coro(expression, timeout, context_id=context_id), timeout + 1.0)
 
     def set_intent_handler(self, fn: Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]) -> None:
         """Register fn(intent, reply) invoked on the intent pool for each binding call."""
@@ -197,7 +203,7 @@ class CdpSession:
     @property
     def is_connected(self) -> bool:
         """True only when a websocket is already live — never attempts a connection."""
-        return self._ws is not None
+        return self._ws is not None and self._ready
 
     def push_overlay_config(self) -> None:
         """Push stored overlay config + intent nonce into the live overlay (post-inject)."""
@@ -219,39 +225,6 @@ class CdpSession:
 
     # -- connection machinery (all coroutines run on the worker loop) --
 
-    def _list_tabs(self) -> List[Dict[str, Any]]:
-        try:
-            with urllib.request.urlopen(f"{self.http_url}/json/list", timeout=1.5) as resp:
-                tabs = json.loads(resp.read().decode("utf-8"))
-            return tabs if isinstance(tabs, list) else []
-        except Exception as exc:
-            logger.debug("CDP /json/list failed: %s", exc)
-            return []
-
-    async def _tab_has_overlay(self, tab: Dict[str, Any]) -> bool:
-        import websockets
-
-        try:
-            async with websockets.connect(str(tab["webSocketDebuggerUrl"]), max_size=4 * 1024 * 1024) as probe:
-                await probe.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {
-                    "expression": "!!window.__HERMES_GAZE_OVERLAY__", "returnByValue": True}}))
-                while True:
-                    msg = json.loads(await asyncio.wait_for(probe.recv(), timeout=1.5))
-                    if msg.get("id") == 1:
-                        return bool(((msg.get("result") or {}).get("result") or {}).get("value"))
-        except Exception:
-            return False
-
-    async def _pick_tab(self, tabs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        pages = [t for t in tabs if t.get("type") == "page"
-                 and not str(t.get("url", "")).startswith("devtools://") and t.get("webSocketDebuggerUrl")]
-        for tab in pages:
-            if self._target_id and str(tab.get("id")) == self._target_id:
-                return tab
-        for tab in pages[:4]:
-            if await self._tab_has_overlay(tab):
-                return tab
-        return pages[0] if pages else None
 
     async def _connect_async(self) -> bool:
         try:
@@ -260,7 +233,7 @@ class CdpSession:
             logger.warning("websockets package is not installed; CDP transport unavailable")
             return False
         await self._drop_ws()
-        tab = await self._pick_tab(await self._loop.run_in_executor(None, self._list_tabs))
+        tab = self.tab
         if tab is None:
             return False
         self._target_id = str(tab.get("id") or "") or None
@@ -271,14 +244,15 @@ class CdpSession:
             for method, params in (
                 ("Runtime.enable", {}),
                 ("Page.enable", {}),
-                ("Runtime.addBinding", {"name": _INTENT_BINDING}),
+                ("Runtime.addBinding", {"name": _INTENT_BINDING, "executionContextName": _WORLD}),
             ):
                 await self._send_cmd(method, params, timeout=5.0)
             src = _overlay_source()
             if src:
-                await self._send_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": src}, timeout=5.0)
-                await self._eval_coro(_guarded_inject(src), timeout=8.0)
-            await self._push_overlay_config()
+                await self._send_cmd("Page.addScriptToEvaluateOnNewDocument",
+                                     {"source": src, "worldName": _WORLD}, timeout=5.0)
+            if not await self._on_new_context(force=True):
+                raise ConnectionError("Isolated Chrome overlay did not initialize")
         except Exception:
             await self._drop_ws()
             raise
@@ -294,8 +268,16 @@ class CdpSession:
             "} return true; })()"
         )
         await self._eval_coro(expr, timeout=5.0)
+        if self.session_event is not None:
+            await self._eval_coro(
+                "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent("
+                + json.dumps(self.session_event) + ");true", timeout=5.0)
 
     async def _drop_ws(self) -> None:
+        self._ready = False
+        self._context_id = None
+        self._context_unique_id = None
+        self._contexts.clear()
         self._fail_pending(ConnectionError("CDP connection reset"))
         task, self._pump_task = self._pump_task, None
         if task is not None:
@@ -339,24 +321,40 @@ class CdpSession:
 
     def _handle_event(self, method: str, params: Dict[str, Any]) -> None:
         if method == "Runtime.bindingCalled" and params.get("name") == _INTENT_BINDING:
-            self._dispatch_intent(params.get("payload"))
+            if params.get("executionContextId") == self._context_id:
+                self._dispatch_intent(params.get("payload"))
         elif method == "Runtime.executionContextCreated":
-            aux = (params.get("context") or {}).get("auxData") or {}
-            if aux.get("isDefault") and aux.get("frameId") in (None, self._target_id):
-                asyncio.ensure_future(self._on_new_context())
+            context = params.get("context") or {}
+            if context.get("name") == _WORLD and context.get("uniqueId"):
+                self._contexts[context["id"]] = context["uniqueId"]
+        elif method == "Runtime.executionContextsCleared":
+            self._context_id = None
+            self._context_unique_id = None
+            self._contexts.clear()
+        elif method == "Page.loadEventFired" or (
+                method == "Page.frameNavigated" and params.get("type") == "BackForwardCacheRestore"):
+            asyncio.ensure_future(self._on_new_context())
 
-    async def _on_new_context(self) -> None:
+    async def _on_new_context(self, force: bool = False) -> bool:
         """Re-register the intent binding + re-inject the overlay in a new main-frame context."""
         if self._ws is None:
-            return
+            return False
         try:
-            await self._send_cmd("Runtime.addBinding", {"name": _INTENT_BINDING}, timeout=5.0)
+            tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
+            frame_id = tree["frameTree"]["frame"]["id"]
+            world = await self._send_cmd("Page.createIsolatedWorld",
+                                         {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
+            self._context_id = world["executionContextId"]
+            self._context_unique_id = self._contexts.get(self._context_id)
             src = _overlay_source()
-            if src:
+            if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
                 await self._eval_coro(_guarded_inject(src), timeout=8.0)
             await self._push_overlay_config()
+            self._ready = True
+            return True
         except Exception as exc:
             logger.debug("context re-arm failed: %s", exc)
+            return False
 
     def _dispatch_intent(self, payload: Any) -> None:
         handler = self._intent_handler
@@ -369,17 +367,20 @@ class CdpSession:
             return
         if not isinstance(intent, dict):
             return
+        context_id = self._context_unique_id
+        intent["_browser_document"] = context_id
 
         def reply(reply_payload: Dict[str, Any]) -> None:
+            if self._closed:
+                return
             msg = dict(reply_payload or {})
             for key in ("id", "type", "resolution_id"):
                 if intent.get(key) is not None:
                     msg.setdefault(key, intent[key])
             try:
-                self.eval_js(
-                    "window.__HERMES_GAZE_OVERLAY__ && "
-                    f"window.__HERMES_GAZE_OVERLAY__.onIntentResult({json.dumps(msg)}); true;"
-                )
+                self._submit(self._eval_coro(
+                    "window.__HERMES_GAZE_OVERLAY__?.onIntentResult(" + json.dumps(msg) + ");true",
+                    timeout=5.0, context_id=context_id), timeout=6.0)
             except Exception as exc:
                 logger.debug("onIntentResult reply failed: %s", exc)
 
@@ -411,10 +412,14 @@ class CdpSession:
             raise RuntimeError(f"CDP {method} failed: {err.get('code')} {err.get('message')}")
         return msg.get("result") or {}
 
-    async def _eval_coro(self, expression: str, timeout: float) -> Any:
+    async def _eval_coro(self, expression: str, timeout: float, context_id: Optional[str] = None) -> Any:
+        context_id = context_id or self._context_unique_id
+        if context_id is None:
+            raise ConnectionError("Chrome document is navigating")
         result = await self._send_cmd(
             "Runtime.evaluate",
-            {"expression": expression, "returnByValue": True, "awaitPromise": True},
+            {"expression": expression, "returnByValue": True, "awaitPromise": True,
+             "uniqueContextId": context_id},
             timeout=timeout,
         )
         exc = result.get("exceptionDetails")
@@ -446,9 +451,15 @@ class GazeSession:
     the camera are OS resources shared across Hermes profiles."""
 
     def __init__(self, cdp_http_url: str = "http://127.0.0.1:9222") -> None:
-        self._cdp = CdpSession(http_url=cdp_http_url)
+        from .companion import Companion
+        from ..microphone import Microphone
+
+        self._cdp = Companion(http_url=cdp_http_url)
+        self.microphone = Microphone()
         self._lock = threading.RLock()
         self.ring_buffer = FixationRingBuffer(window_seconds=10.0)
+        self._resolution_target: Optional[str] = None
+        self._resolution_document: Optional[str] = None
         self.tracker = SimulatedPointerTracker(ring_buffer=self.ring_buffer, mode="hover", sigma_px=120.0)
         self.recalibrator = OnlineRecalibrator()
         self.last_candidates: List[CandidateElement] = []
@@ -470,7 +481,7 @@ class GazeSession:
         self._sync_overlay_config()
 
     @property
-    def cdp(self) -> CdpSession:
+    def cdp(self) -> Any:
         return self._cdp
 
     @property
@@ -495,25 +506,16 @@ class GazeSession:
         return self._cdp.eval_js(expression, timeout=timeout)
 
     def eval_js_once(self, expression: str, timeout: float = 6.0) -> Any:
-        return self._cdp.eval_js_once(expression, timeout=timeout)
+        snapshot = self.last_hover_snapshot or {}
+        return self._cdp.eval_js_once(expression, timeout=timeout, target=snapshot.get("browser_target"),
+                                      document=snapshot.get("browser_document"))
+
+    def display_session_event(self, event: dict[str, Any]) -> None:
+        self._cdp.display(event)
 
     def ensure_overlay(self) -> bool:
-        """Connect if needed and inject overlay.js when the api is missing from the page."""
-        if not self.ensure_connected():
-            return False
-        try:
-            # setIntentNonce doubles as an api-version probe: an overlay from an older
-            # build is re-injected rather than trusted.
-            if self.eval_js("!!(window.__HERMES_GAZE_OVERLAY__ && window.__HERMES_GAZE_OVERLAY__.setIntentNonce)"):
-                return True
-            src = _overlay_source()
-            if src:
-                self.eval_js(src)
-                self._cdp.push_overlay_config()
-            return bool(src)
-        except Exception as exc:
-            logger.debug("ensure_overlay failed: %s", exc)
-            return False
+        """Attach supported pages without requiring a foreground page."""
+        return self.ensure_connected()
 
     def overlay_is_live(self) -> bool:
         """Read-only probe: True only if the overlay api already answers in the pinned tab.
@@ -594,9 +596,7 @@ class GazeSession:
         """Capture actual DOM identities without invoking the simulated extractor."""
         if not self.is_chrome_reachable():
             return {}
-        return self.eval_js(
-            "window.__HERMES_GAZE_OVERLAY__?.captureCursorContext()"
-        ) or {}
+        return self._cdp.capture()
 
     def store_hover_snapshot(self, payload: dict[str, Any]) -> int:
         with self.actions._lock:
@@ -629,6 +629,7 @@ class GazeSession:
 
     def clear_hover_snapshot(self) -> None:
         """Revoke action ownership when the connected Hermes session changes."""
+        self.microphone.cancel()
         with self.actions._lock:
             self.actions.invalidate()
             with self._lock:
@@ -674,11 +675,14 @@ class GazeSession:
 
     def new_resolution(self, res: ResolutionResult) -> int:
         """Store res as the active resolution and bump + return the epoch resolution_id."""
+        target, document = self._cdp.current_owner() if self._cdp.is_connected else (None, None)
         with self.actions._lock:
             self.actions.invalidate()
             with self._lock:
                 self.last_resolution = res
                 self.last_hover_snapshot = None
+                self._resolution_target = target
+                self._resolution_document = document
                 self.resolution_id += 1
                 return self.resolution_id
 
@@ -760,11 +764,15 @@ class GazeSession:
                 f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
                 if execute else "")
             try:
-                self.eval_js(
-                    f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)}); {click_stmt} true;"
-                )
+                self._cdp.eval_js_once(
+                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])}, {json.dumps(msg)});"
+                    f"{click_stmt} return true;}})()", target=self._resolution_target,
+                    document=self._resolution_document)
             except Exception as exc:
-                return {"ok": False, "error": f"browser choose failed: {exc}"}
+                self.clear_hover_snapshot()
+                return {"ok": False, "executed": None if execute else False,
+                        "outcome": "unknown" if execute else "failed",
+                        "error": f"browser choose failed; do not retry automatically: {exc}"}
         with self._lock:
             self.last_resolution = None  # consume — a second choose must not re-click stale state
         return {
@@ -775,21 +783,9 @@ class GazeSession:
             "recalibrator_bias_offset": list(self.recalibrator.offset),
         }
 
-    def is_mic_capture_working(self) -> bool:
-        """Whether getUserMedia resolves quickly in the pinned tab (not blocked by macOS TCC)."""
-        if not self.is_chrome_reachable():
-            return False
-        js = (
-            "Promise.race([navigator.mediaDevices.getUserMedia({ audio: true })"
-            ".then(s => { s.getTracks().forEach(t => t.stop()); return true; }).catch(() => false),"
-            "new Promise(r => setTimeout(() => r(false), 1200))])"
-        )
-        try:
-            return bool(self.eval_js(js))
-        except Exception:
-            return False
 
     def close(self) -> None:
+        self.microphone.cancel()
         self.actions.invalidate()
         self._cdp.close()
 
@@ -800,7 +796,7 @@ def get_shared_session() -> GazeSession:
 
 
 def launch_chrome_with_cdp(url: str, port: int = 9222, profile_dir: Optional[Path] = None) -> subprocess.Popen:
-    """Launch macOS/Linux Google Chrome with --remote-debugging-port, media permissions, and dedicated profile."""
+    """Launch macOS/Linux Google Chrome with CDP and a dedicated profile, without media grants."""
     import sys
     try:
         from plugins.plugin_storage import plugin_data_dir
@@ -826,12 +822,9 @@ def launch_chrome_with_cdp(url: str, port: int = 9222, profile_dir: Optional[Pat
         f"--user-data-dir={prof}",
         "--no-first-run",
         "--no-default-browser-check",
-        "--use-fake-ui-for-media-stream",  # auto-grant mic permission for Web Speech & Web Audio
         target_url,
     ]
     if sys.platform == "darwin" and mac_app.exists():
-        # `open -na` makes com.google.Chrome the TCC Responsible Process (its own mic
-        # entitlement) instead of inheriting a parent IDE/CLI process without one.
         cmd = ["/usr/bin/open", "-na", str(mac_app), "--args", *chrome_args]
     else:
         mac_chrome = mac_app / "Contents" / "MacOS" / "Google Chrome"

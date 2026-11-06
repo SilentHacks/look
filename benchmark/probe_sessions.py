@@ -1,8 +1,8 @@
 """Real cursor voice turns in Hermes TUI/desktop backends and private Chrome.
 
-Uses private config/credential copies and private Chrome. The harness replaces
-the fake microphone's captured audio with synthesized WAV before the real
-transcribe binding. Physical capture and desktop renderer automation are not claimed.
+Uses private config/credential copies and private Chrome. The harness submits
+synthesized WAV through the real transcription binding instead of opening the
+native microphone. Physical capture and desktop renderer automation are not claimed.
 """
 from __future__ import annotations
 
@@ -89,7 +89,11 @@ def chrome_command(port, method, params):
 
 
 def chrome_eval(port: int, expression: str):
-    result = chrome_command(port, "Runtime.evaluate", {"expression": expression, "returnByValue": True})
+    frame = chrome_command(port, "Page.getFrameTree", {})["frameTree"]["frame"]["id"]
+    world = chrome_command(port, "Page.createIsolatedWorld",
+                           {"frameId": frame, "worldName": "hermes-gaze"})["executionContextId"]
+    result = chrome_command(port, "Runtime.evaluate", {
+        "expression": expression, "contextId": world, "returnByValue": True, "awaitPromise": True})
     if result.get("exceptionDetails"):
         raise RuntimeError(result["exceptionDetails"])
     return result["result"].get("value")
@@ -102,7 +106,7 @@ def speech_question(root: Path, temp: Path) -> dict:
     import wave
     with wave.open(str(temp / "speech.wav"), "rb") as audio:
         duration = audio.getnframes() / audio.getframerate()
-    return {"source": "Synthesized WAV replaces Chrome fake-device audio before the real transcription binding",
+    return {"source": "Synthesized WAV through the isolated transcription binding; no native microphone",
             "duration_s": duration, "text": "Summarize this table in one sentence."}
 
 
@@ -291,7 +295,6 @@ def run(args) -> dict:
         else:
             env["HERMES_IGNORE_RULES"] = "1"
         chrome = subprocess.Popen([args.chrome, "--headless=new", "--no-first-run", "--no-default-browser-check",
-                                   "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
                                    f"--remote-debugging-port={args.port}", f"--user-data-dir={temp / 'chrome'}",
                                    "--window-size=1440,1100", (root / "benchmark/benchmark_page.html").as_uri()],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -327,8 +330,17 @@ def run(args) -> dict:
                             chrome_eval(args.port, """(() => {
                               const api=window.__HERMES_GAZE_OVERLAY__;
                               const binding=window.__hermesGazeIntent;
+                              let frozen=null, submitted=null, audioEpoch=0;
                               window.__hermesGazeIntent=raw=>{const msg=JSON.parse(raw);
-                                if(msg.type==='transcribe'){msg.audio_base64=window.__speechWav;msg.mime_type='audio/wav'}
+                                if(msg.type==='record_start'){
+                                  audioEpoch=Date.now()/1000;
+                                  api.onIntentResult({id:msg.id,type:'record_start',ok:true,ready_ms:0});return;
+                                }
+                                if(msg.type==='record_stop'){
+                                  frozen=msg.cursor_context;submitted=msg;
+                                  binding(JSON.stringify({...msg,type:'transcribe',audio_base64:window.__speechWav,
+                                    mime_type:'audio/wav',audio_epoch:audioEpoch}));return;
+                                }
                                 binding(JSON.stringify(msg))};
                               window.__snapshotCalls=[];
                               for(const name of ['highlightSnapshot','clickSnapshot','requestActionConfirmation']){
@@ -336,7 +348,15 @@ def run(args) -> dict:
                                   window.__snapshotCalls.push({name,args,result});return result};
                               }
                               window.__intentReplies=[];const onReply=api.onIntentResult;
-                              api.onIntentResult=e=>{window.__intentReplies.push(e);onReply(e)};
+                              api.onIntentResult=e=>{
+                                window.__intentReplies.push(e);
+                                if(e.type==='transcribe'&&e.ok&&submitted){
+                                  api.onIntentResult({id:e.id,type:'record_stop',ok:true,text:e.text});
+                                  binding(JSON.stringify({...submitted,type:'submit',utterance:e.text,
+                                    words:e.words,cursor_context:frozen}));
+                                  submitted=null;
+                                }else onReply(e);
+                              };
                               window.__sessionEvents=[];const onEvent=api.onSessionEvent;
                               api.onSessionEvent=e=>{window.__sessionEvents.push(e);onEvent(e)};
                               window.__websiteClicks=[];

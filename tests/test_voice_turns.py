@@ -15,8 +15,8 @@ class Chrome:
         self.stored = []
         self.resolution_id = 0
 
-    def eval_js(self, script):
-        self.events.append(json.loads(script.split("onSessionEvent(", 1)[1].rsplit(");true", 1)[0]))
+    def display_session_event(self, event):
+        self.events.append(copy.deepcopy(event))
 
     def store_hover_snapshot(self, snapshot):
         self.resolution_id += 1

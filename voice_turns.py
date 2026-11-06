@@ -24,7 +24,6 @@ class VoiceTurns:
     def __init__(self, ctx: Any, session: Any) -> None:
         self.ctx = ctx
         self.session = session
-        # ponytail: one Chrome owner; per-browser routing only if multiple pinned tabs become supported.
         self.lock = threading.RLock()
         self.injection_lock = threading.Lock()
         self.binding: dict[str, str] | None = None
@@ -77,9 +76,7 @@ class VoiceTurns:
                  "resolution_id": run["resolution_id"], "status": status,
                  "session_connected": self.binding is not None and not self.closed, **fields}
         try:
-            self.session.eval_js(
-                "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");true"
-            )
+            self.session.display_session_event(event)
             run["last_display"] = time.monotonic()
         except Exception:
             # Browser loss must not turn accepted host injection into one-shot delivery.
@@ -120,7 +117,8 @@ class VoiceTurns:
             run = self._new_run(text, frozen)
             self.pending.append(run)  # Must exist before inject_message can synchronously fire pre.
             key = self.binding["session_key"]
-        error = "Host refused injection. Run /gaze connect and enable plugins.entries.hermes-gaze.allow_gateway_injection."
+        error = ("Host refused injection. Fresh Hermes sessions need one normal message before Chrome turns; "
+                 "also check plugins.entries.hermes-gaze.allow_gateway_injection.")
         fallback_allowed = True
         try:
             accepted = bool(self.ctx.inject_message(text, session_key=key))

@@ -19,7 +19,7 @@ Raw gaze/pointer tracking suffers from ~80–180 px of spatial jitter and drift�
 ## Architecture
 
 - **Python owns policy.** Noisy simulated gaze uses Bayesian resolution. Hover sends exact cursor evidence to the model, which chooses scope; Python enforces snapshot ownership and action confirmation. The overlay only collects DOM facts and renders results.
-- **Persistent CDP session.** One websocket per pinned tab; ordered nonce-bearing binding intents include `submit`, `resolve`, `choose`, `explain`, `transcribe`, `confirm_action` and `configure`. No HTTP resolution/action endpoints.
+- **Persistent CDP sessions.** One isolated-world websocket per supported tab; reads follow focus, while actions retain their captured tab/document. Ordered nonce-bearing binding intents carry questions and native talk controls. No HTTP resolution/action endpoints.
 - **Honest failures.** Missing/detached/expired evidence and uncertain click outcomes are reported, never replaced with synthetic targets or silently retried mutations.
 - **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. Camera tracking is not implemented.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
@@ -48,10 +48,14 @@ cursor identities, including two spoken referents. Detached or replaced nodes
 never rematch selectors. Password/payment fields and associated labels are
 filtered before serialization; page text stays inside an escaped untrusted fence.
 
-Fresh hover evidence automatically highlights the pointed handles.
-`gaze_highlight(handles=[...], resolution_id=N)` changes that highlight for a different
-scope, including captured rows, columns and peer cards; the wider highlight depends on the model
-invoking the tool. `gaze_click(handle=..., resolution_id=N)`
+Fresh hover evidence automatically highlights the pointed handles. After each
+answer, one bounded model call selects the captured answer scope; no tool turn is
+needed. `gaze_highlight(handles=[...], resolution_id=N)` remains available for
+explicit scope changes. Pins follow the original elements through scrolling and
+same-document routes. Full navigation revokes those identities and clears pins.
+Background-tab scope changes fail safely rather than highlighting the focused
+tab; the original pointer highlight remains on its source document.
+`gaze_click(handle=..., resolution_id=N)`
 activates a current control. Risky labels/classes, destructive utterances and form
 submissions require a trusted primary mouse click on the Chrome confirmation
 card. Synthetic clicks, spoken/tool confirmation, stale epochs and changed targets
@@ -93,11 +97,20 @@ plugins:
       allow_gateway_injection: true
 ```
 
-Restart Hermes after changing plugin configuration. Run `/gaze` or `/gaze connect`
-in the TUI/desktop conversation that should receive speech, then `/gaze demo`.
-Hold Space in Chrome, speak and release. Only your words become a normal user
-message; the matching session hook attaches frozen page context. The answer
-streams into Hermes and Chrome, with a final-response backstop.
+Restart Hermes after changing plugin code or configuration, and start a new
+conversation so frozen system guidance is refreshed. Send one normal message
+first (for example, `Reply only Ready.`); the host cannot accept injected Chrome
+turns until its lazy agent is initialized. Run `/gaze` or `/gaze connect` in that
+conversation to open/attach the dedicated Chrome companion; `/gaze demo` opens
+the dashboard if wanted.
+Hold Space in Chrome, wait for **Listening**, speak and release. Native
+`sounddevice` capture opens only during talk and closes on release; switching
+tabs while recording cancels it. macOS microphone permission belongs to the app
+hosting Hermes (for example Terminal), not Chrome or the website. Only your
+words become a normal user message; the matching session hook attaches frozen
+page context. Answers stream into Hermes and all supported Chrome tabs. The
+latest answer survives navigation in memory; highlights/actions never move to
+an unrelated tab or replacement document.
 Refreshing cursor evidence through a tool does not interrupt that turn's answer stream.
 Followups without a fresh capture use conversation history without reattaching old
 evidence or changing its epoch. A connected non-deictic utterance without a target is delivered
@@ -117,10 +130,11 @@ states. Without a connected/authorized session, read-only questions can use a
 clearly labeled one-shot call, with no conversation followups or actions. Action
 requests fail rather than silently using that fallback. ASR file downloads are
 quiet without suppressing errors or redirecting process output.
-Browser recordings require `ffmpeg` on Hermes's PATH (or in a standard macOS
-install location). Their MIME type is preserved through transcription; decoder
-failures report the actual ffmpeg diagnostic and never reinterpret compressed
-bytes as raw PCM. Native 16-bit PCM/WAV remains an in-process fast path.
+Browser-supplied compressed audio still requires `ffmpeg` on Hermes's PATH
+(or in a standard macOS location), with MIME type preserved through decoding.
+Native microphone PCM/WAV uses the in-process fast path and does not require
+`ffmpeg`. Decoder failures report the real diagnostic, never reinterpret
+compressed bytes as PCM.
 
 Development smoke: use Python from a Hermes environment:
 
@@ -146,6 +160,60 @@ Prompt-only questions remain the first user request in each fresh session.
 240-second terminal-response timeouts remain failed trials, not fallback answers.
 Historical Phase 0/1 measurements remain in `benchmark/*results.json`; the
 hardcoded `/gaze probe` experiment is removed.
+
+### Owner retest: combined companion branch
+
+Run these commands yourself; they change the main checkout only when requested.
+The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
+`/Users/Abid/Projects/hermes-gaze`, so no reinstall or relink is needed.
+
+1. Quit existing Hermes TUI/desktop processes. In Terminal:
+   ```bash
+   cd /Users/Abid/Projects/hermes-gaze
+   git switch feature/companion-core
+   ```
+2. `sounddevice>=0.4.6,<0.6.0` is already declared in `pyproject.toml`.
+   The owner's bootstrapped Hermes runtime was checked read-only and has
+   `sounddevice 0.5.6` and `websockets 15.0.1`; no new dependency install is
+   needed on this machine. On a machine missing plugin dependencies, use
+   the Hermes launcher, not Homebrew Python:
+   ```bash
+   hermes plugins validate /Users/Abid/Projects/hermes-gaze --install-deps
+   ```
+   This installs declared dependencies into Hermes's environment; validation
+   also runs catalog checks, so unrelated catalog failures are not mic errors.
+3. In Terminal, still in that checkout:
+   ```bash
+   hermes
+   ```
+   Use a new conversation, send `Reply only Ready.`, and wait for the answer.
+   Then enter `/gaze connect`. Expect `Chrome companion ready` and
+   `Chrome voice connected to this Hermes session`. It opens a separate
+   CDP Chrome profile on the configured port (default 9222), not the everyday
+   Chrome profile. Use the newly opened window; no manual Chrome flags needed.
+   Existing setup must use `plugins.isolation: in_process` and
+   `plugins.entries.hermes-gaze.allow_gateway_injection: true` as above.
+4. In that Chrome window, navigate normally to a public page or a deal list.
+   Hover a deal title, hold Space, wait for **Listening**, then say:
+   “Summarize this deal, its price and savings, and give its exact link.”
+   Release Space. On first capture macOS may ask for microphone access for
+   Terminal (when Hermes is launched there), or the responsible host app if
+   launched elsewhere; it is not a Chrome website-permission prompt.
+   Allow that host in System Settings → Privacy & Security → Microphone if
+   previously denied, then restart Hermes and repeat step 3. The exact macOS
+   label depends on the launch chain; permission prompting was not triggered
+   during the integration check.
+5. Expect the pointed highlight, answer text and captured HTTP(S) deal URL.
+   The post-answer scope can widen without a tool call. Scroll: the outline
+   must stay on the same element, disappear offscreen and return with it.
+6. Ask once more, then switch supported tabs while Hermes is answering
+   (after releasing Space). The reply should finish in the newly focused
+   tab and remain available when returning. It must not move the deal's
+   highlight onto another page. A background source retains its pointer
+   highlight; automatic scope changes require the source to be foreground.
+   Reload the source: the latest answer should return, but old pins must not.
+   Closing Hermes ends this in-memory answer retention.
+
 
 ## Quickstart
 

@@ -29,6 +29,7 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import wave
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -329,11 +330,15 @@ def record_microphone(
     duration_s: float = 2.5,
     sample_rate: int = 16000,
 ) -> bytes:
-    """Record audio from default macOS microphone using sounddevice."""
-    import numpy as np
-    import sounddevice as sd
+    """Record through the same single-owner native device as the Chrome talk key."""
+    from .browser.cdp_bridge import get_shared_session
 
-    num_samples = int(duration_s * sample_rate)
-    recording = sd.rec(num_samples, samplerate=sample_rate, channels=1, dtype="int16")
-    sd.wait()
-    return recording.tobytes()
+    microphone = get_shared_session().microphone
+    result = microphone.start("tool", lambda: True, sample_rate=sample_rate)
+    if not result["ok"]:
+        raise RuntimeError(result["error"])
+    try:
+        time.sleep(duration_s)
+        return microphone.stop("tool")[0]
+    finally:
+        microphone.cancel("tool")
