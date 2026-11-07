@@ -103,9 +103,10 @@ class VoiceTurnsTests(unittest.TestCase):
                 worker.join(1)
                 self.assertFalse(worker.is_alive())
 
-        with patch('hermes_gaze.voice_turns.sys.platform', 'darwin'), \
-                patch('hermes_gaze.voice_turns.os.access', return_value=True), \
-                patch('hermes_gaze.voice_turns.subprocess.Popen', side_effect=spawn):
+        with patch('hermes_gaze.speech.sys.platform', 'darwin'), \
+                patch('hermes_gaze.speech.os.access', return_value=True), \
+                patch('hermes_gaze.speech.SpeechPlayback.load', side_effect=ImportError('ptts missing')), \
+                patch('hermes_gaze.speech.subprocess.Popen', side_effect=spawn):
             first = self.turns.submit('private question', snapshot('private target'))
             second = self.turns.submit('another question', snapshot('another target'))
             self.pre('first')
@@ -118,11 +119,7 @@ class VoiceTurnsTests(unittest.TestCase):
             self.assertTrue(self.turns.control(
                 'speak', first['item_id'], first['request_id'])['ok'])
             flush()
-            process, args, kwargs = processes[0]
-            self.assertEqual(args, (['/usr/bin/say', '-f', '-'],))
-            self.assertIn('stdin', kwargs)
-            self.assertNotIn('shell', kwargs)
-            process.communicate.assert_called_once_with('Retained partial')
+            self.assertEqual(processes[0][0].communicate.call_args.args[0], 'Retained partial')
             self.post('first', 'First complete answer')
             self.end('first')
             self.assertEqual(len(processes), 1)  # Off by default.
@@ -138,15 +135,16 @@ class VoiceTurnsTests(unittest.TestCase):
             flush()
             self.end('second')
             self.assertEqual(len(processes), 2)  # Terminal hook does not repeat speech.
-            processes[1][0].communicate.assert_called_once_with('Second complete answer')
+            self.assertEqual(processes[1][0].communicate.call_args.args[0], 'Second complete answer')
             self.assertFalse(self.turns.control('auto_speak')['auto_speak'])
             self.assertTrue(self.turns.control('speak', first['item_id'])['ok'])
             flush()
-            processes[2][0].communicate.assert_called_once_with('First complete answer')
-            with patch('hermes_gaze.voice_turns.sys.platform', 'linux'):
-                result = self.turns.control('speak', first['item_id'])
-                self.assertFalse(result['ok'])
-                self.assertIn('macOS', result['error'])
+            self.assertEqual(processes[2][0].communicate.call_args.args[0], 'First complete answer')
+            with patch('hermes_gaze.speech.sys.platform', 'linux'):
+                self.assertTrue(self.turns.control('speak', first['item_id'])['ok'])
+                flush()
+                self.assertEqual(self.chrome.events[-1]['speech_backend'], 'unavailable')
+                self.assertIn('macOS say', self.chrome.events[-1]['speech_error'])
         self.turns.close()
 
     def test_three_frozen_targets_serial_terminal_admission_and_unique_labels(self):

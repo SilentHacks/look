@@ -1,4 +1,22 @@
-# Third-party notices: webcam gaze
+# Third-party notices
+
+## Gradium Phonon read-aloud
+
+- Runtime: [`ptts` 0.6.0 / xn-ptts](https://github.com/gradium-ai/xn-ptts),
+  Laurent Mazare and Gradium; **MIT OR Apache-2.0**. Its wheel includes both
+  `LICENSE-MIT` and `LICENSE-APACHE`; retain these when redistributing the runtime.
+- [Phonon-31M English weights, tokenizer and bundled voice](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d),
+  Gradium, **Apache-2.0**, revision `8c64b55ec301728e2d1695bfea87a08a267d0c2d`.
+  Only the q8 31M checkpoint is used, not the CC-BY-NC 40M siblings.
+- [Phonon catalogue voices](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7),
+  Gradium, **Apache-2.0**, revision `0ee17205f254b5abc43b266c8a0f215565c352f7`.
+  Default: Russell, voice ID `_6Aslh2DxfmnRLmP`.
+
+Setup downloads unmodified assets and their model cards outside this repository.
+The Apache-2.0 licence text below also applies to these assets. No model weights,
+voice embeddings, training data or generated speech are bundled in this repository.
+The emergency Apple `say` fallback uses installed system voices; its generated
+audio is not established as licensed for publication in the submission video.
 
 ## MediaPipe Tasks Vision and Face Landmarker
 

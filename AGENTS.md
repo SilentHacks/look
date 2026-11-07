@@ -14,7 +14,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `__init__.py` | Registration of fourteen tools, context/stream/final/turn-end hooks, connected-session tool restrictions, `/gaze` connection, CLI and skill. |
 | `tools.py`, `browser_tasks.py` | Operation-specific captured-identity tools and exact user-turn action grants; bounded structure, batch fill/select, click, keys, tabs/navigation, scroll/wait and request-commit. |
 | `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
-| `voice_turns.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen item evidence, exact request/session/turn matching and versioned UI state, including which answers have been shown or retreated and the one-time hints. |
+| `voice_turns.py`, `speech.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen evidence and exact turn matching. One speech worker owns cached local Phonon/Russell streaming, output cancellation and pre-audio macOS say fallback; `scripts/setup_speech.py` fetches pinned assets explicitly. |
 | `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
 | `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process, ~65ms) → `parakeet-mlx` (~180ms) → `faster-whisper` (the only backend on Linux). `record_microphone`, `MAX_AUDIO_BYTES`. |
@@ -129,9 +129,16 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   and keep the fallback. Final hooks reuse that decision. A title update never
   selects, reorders, marks unread, announces or speaks.
 - **Inbox `speak` resolves server-owned item/request text, never client-supplied speech.**
-  It speaks `speech_text`, no markup characters. macOS `/usr/bin/say` receives text on
-  stdin; one cancellable worker owns playback. `auto_speak` is an explicit runtime toggle,
-  initially off; disconnect cancels playback.
+  It speaks `speech_text`, no markup characters. One cancellable worker lazy-loads
+  and caches Phonon-31M English q8, default catalogue voice Russell (`tts_voice`).
+  Pinned assets are fetched only by explicit setup (`hermes gaze setup-speech` or
+  `scripts/setup_speech.py`); playback
+  uses local paths and must work offline. Native `sounddevice` output uses bounded
+  writes; Stop/Esc, supersession and disconnect signal cancellation without joining
+  under the inbox lock. Older work cannot clear newer speaking state. If Phonon
+  cannot initialize, choose macOS `/usr/bin/say` (text on stdin) before any audio,
+  report backend/error in-band, and never replay a partly spoken answer.
+  `auto_speak` is an explicit runtime toggle, initially off; disconnect cancels playback.
 - **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
   `audio_epoch` (the first native input buffer's ADC wall-clock epoch for Chrome,
   `time.time()` before `record_microphone` on the tool path) and shifts each word.

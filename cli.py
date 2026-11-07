@@ -126,6 +126,8 @@ def _handle_slash_command(raw_args: str) -> str:
 def _setup_cli(subparser: argparse.ArgumentParser) -> None:
     subs = subparser.add_subparsers(dest="gaze_subcommand")
     subs.add_parser("status", help="Show Chrome CDP connection and tracker status")
+    p_speech = subs.add_parser("setup-speech", help="Download pinned offline Phonon model and voice (no audio devices)")
+    p_speech.add_argument("--voice", default="Russell", help="English catalogue voice name")
     p_demo = subs.add_parser("demo", help="Launch the companion Chrome with the interactive Analytics & Comparison demo page")
     p_demo.add_argument("--mode", choices=("hover", "simulated"), default="hover")
     p_listen = subs.add_parser("listen", help="Record speech from microphone, transcribe with faster-whisper, and resolve in Chrome")
@@ -140,6 +142,10 @@ def _setup_cli(subparser: argparse.ArgumentParser) -> None:
 
 def _run_cli(args: argparse.Namespace) -> int:
     sub = getattr(args, "gaze_subcommand", None) or "status"
+    if sub == "setup-speech":
+        from .speech import setup
+        setup(args.voice)
+        return 0
     if sub == "demo":
         session = get_shared_session()
         session.tracker.mode = args.mode

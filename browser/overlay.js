@@ -1435,7 +1435,9 @@
     const list = visible(), i = list.indexOf(item);
     const peek = p => p && {subject: p.subject, state: stateWord(p)};
     const hasAnswer = item.turns.some(t => t.a.trim());
-    rawSend({...base, view: "answer", dir: S.dir, hint: hintFor(item), alert: inbox?.speech_error || "",
+    rawSend({...base, view: "answer", dir: S.dir,
+      hint: (inbox?.speaking_item_id === item.id && inbox?.speech_status) || hintFor(item),
+      alert: inbox?.speech_error || "",
       reading: inbox?.speaking_item_id === item.id, autoRead: !!inbox?.auto_speak, canRead: hasAnswer,
       paused: !!inbox?.paused && !item.turns.some(t => t.error) && (inbox?.waiting || 0) > 0,
       prev: peek(list[i - 1]), next: peek(list[i + 1]),

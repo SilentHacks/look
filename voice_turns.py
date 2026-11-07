@@ -4,17 +4,16 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import os
 import re
 import secrets
-import subprocess
-import sys
 import threading
 import time
 from collections import deque
 from typing import Any
 
 from .answer_title import INSTRUCTION, TitleStream
+from .config import GazeConfig
+from .speech import SpeechPlayback
 from .naming import FALLBACK_SUBJECT, clean_subject, plain_error, speech_text, subject_hint
 from .resolver.cursor_context import MAX_CONTEXT, build_context
 from .resolver.bayesian_fusion import _ACTION_VERBS, _DESTRUCTIVE_VERBS, classify_utterance_intent
@@ -65,7 +64,10 @@ class VoiceTurns:
         self.capture_state = "idle"
         self.auto_speak = False
         self.speech_error = ""
-        self._speech_process = None
+        self.speech_backend = ""
+        self.speech_status = ""
+        self._speech_cancel = None
+        self._playback = SpeechPlayback()
         self._speech_pending = None
         self._speech_thread = None
         self.speaking = ""
@@ -132,6 +134,7 @@ class VoiceTurns:
                  "paused": self.paused, "session_connected": self.connected,
                  "capture_state": self.capture_state, "auto_speak": self.auto_speak,
                  "speech_error": self.speech_error, "speaking_item_id": self.speaking,
+                 "speech_backend": self.speech_backend, "speech_status": self.speech_status,
                  "coach": dict(self.coach), "waiting": len(self.pending)}
         try:
             self.session.display_session_event(event)
@@ -149,8 +152,8 @@ class VoiceTurns:
         run["last_display"] = time.monotonic()
         if (status == "complete" and previous_status != "complete" and self.auto_speak
                 and self.connected and run["text"].strip()):
-            self.speaking = run["item_id"]
             self._speak(speech_text(run["text"]))
+            self.speaking = run["item_id"]
         self.publish()
 
     def _item(self, item_id):
@@ -348,22 +351,21 @@ class VoiceTurns:
                     self._event(run, "failed", error=error)
 
     def _stop_speaking(self):
-        """Cancel without waiting on a pipe or child while holding the inbox lock."""
+        """Signal only: generation, output abort and reaping stay outside the inbox lock."""
         self._speech_pending = None
-        process, self._speech_process = self._speech_process, None
-        if process is not None and process.poll() is None:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
+        if self._speech_cancel is not None:
+            self._speech_cancel.set()
+            self._speech_cancel = None
+        self.speaking = ""
 
     def _speak(self, text):
-        if sys.platform != "darwin" or not os.access("/usr/bin/say", os.X_OK):
-            self.speech_error = "Reading aloud needs macOS."
-            return {"ok": False, "error": self.speech_error}
         self._stop_speaking()
         self.speech_error = ""
-        self._speech_pending = text
+        self.speech_backend = ""
+        self.speech_status = ""
+        cancel = threading.Event()
+        self._speech_cancel = cancel
+        self._speech_pending = (text, cancel)
         if self._speech_thread is None:
             self._speech_thread = threading.Thread(
                 target=self._speech_loop, name="gaze-speech", daemon=True)
@@ -371,38 +373,36 @@ class VoiceTurns:
         return {"ok": True}
 
     def _speech_loop(self):
-        # One worker reaps the cancelled child before starting any replacement.
+        # One worker finishes/aborts old playback before starting its replacement.
         while True:
             with self.lock:
-                text, self._speech_pending = self._speech_pending, None
-                if text is None:
+                pending, self._speech_pending = self._speech_pending, None
+                if pending is None:
                     self._speech_thread = None
                     return
-                try:
-                    process = subprocess.Popen(
-                        ["/usr/bin/say", "-f", "-"], stdin=subprocess.PIPE,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                        text=True, encoding="utf-8")
-                except OSError:
-                    self.speech_error = "Reading aloud couldn’t start."
-                    self.publish()
-                    continue
-                self._speech_process = process
+            text, cancel = pending
+
+            def report(backend, status, error):
+                with self.lock:
+                    if self._speech_cancel is cancel:
+                        self.speech_backend = backend
+                        self.speech_status = status
+                        self.speech_error = error
+                        self.publish()
+
             try:
-                process.communicate(text)
-                failed = process.returncode != 0
-            except (OSError, ValueError):
-                process.kill()
-                process.wait()
-                failed = True
-            with self.lock:
-                if self._speech_process is process:
-                    self._speech_process = None
-                    if failed:
-                        self.speech_error = "Reading aloud didn’t work. Try it again."
-                    if not self._speech_pending:
+                voice = GazeConfig.from_ctx(self.ctx).tts_voice
+                self._playback.play(text, voice, cancel, report)
+            except Exception as exc:
+                # Never replay a partially spoken answer through another backend.
+                report(self.speech_backend, "", f"Reading aloud failed: {exc}")
+            finally:
+                with self.lock:
+                    if self._speech_cancel is cancel:
+                        self._speech_cancel = None
                         self.speaking = ""
-                    self.publish()
+                        self.speech_status = ""
+                        self.publish()
 
     def set_coach(self, fields):
         """Hints only; bounded, and unknown keys are ignored."""
@@ -425,6 +425,8 @@ class VoiceTurns:
                 self.publish()
                 return {"ok": True}
             if action in ("retreat", "dismiss"):
+                if action == "dismiss":
+                    self._stop_speaking()
                 # Dismissing also answers for what was waiting to be shown; Q brings it back.
                 for entry in self.items:
                     runs = [r for r in self.runs if r["item_id"] == entry["item_id"]]

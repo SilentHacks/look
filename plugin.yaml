@@ -65,6 +65,10 @@ config_schema:
     type: str
     default: "base.en"
     description: "Local faster-whisper model name for deictic speech alignment."
+  tts_voice:
+    type: str
+    default: "Russell"
+    description: "Downloaded English Phonon catalogue voice. Run scripts/setup_speech.py --voice NAME before selecting another voice."
   record_trials:
     type: bool
     default: false

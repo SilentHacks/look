@@ -177,11 +177,13 @@ They dock at the viewport edge when the captured source is offscreen or unavaila
 Completed notes retreat after 12 seconds when neither hovered nor being edited;
 completion never changes selection or announces a new answer.
 
-The speaker reads the selected answer using macOS's local `/usr/bin/say` voice;
-the square stops it. The looped-arrow setting explicitly enables automatic reading
-of completed answers for this plugin session; it is off initially and resets when
-the plugin is unloaded. No text goes to a speech provider or website. Non-macOS
-hosts report local speech unavailable. New answers otherwise remain silent.
+Read aloud uses local **Gradium Phonon-31M English**, catalogue voice **Russell**,
+through native streaming output. Stop, Esc, another read request and disconnect
+cancel generation and buffered playback. Automatic reading of completed answers
+is explicitly enabled per plugin session and starts off. No answer text goes to
+a provider or website. Missing dependencies/assets or a model-load failure select
+macOS `say` before audio starts; the card reports that fallback and its reason.
+There is no mid-answer voice switch. See [offline speech setup](#offline-read-aloud-setup).
 
 Georgia (roman and italic) and Courier New are system font references, not bundled
 or downloaded fonts; generic serif/monospace fallbacks cover other systems. No font
@@ -196,6 +198,52 @@ Browser-supplied compressed audio still requires `ffmpeg` on Hermes's PATH
 Native microphone PCM/WAV uses the in-process fast path and does not require
 `ffmpeg`. Decoder failures report the real diagnostic, never reinterpret
 compressed bytes as PCM.
+
+### Offline read-aloud setup
+
+After bringing this feature into the installed plugin checkout, run these yourself
+(the implementation agent does not modify Hermes's environment):
+
+```bash
+HERMES_DISABLE_LAZY_INSTALLS=1 hermes plugins validate /Users/Abid/Projects/hermes-gaze --install-deps
+HERMES_DISABLE_LAZY_INSTALLS=1 hermes gaze setup-speech
+```
+
+The first command installs declared dependencies, including `ptts==0.6.0`, using
+Hermes's launcher. The second downloads the pinned q8 model (~65 MB) and Russell
+embedding once, without opening an audio device. It requires in-process plugin
+isolation, as does the companion. Alternatively, run `scripts/setup_speech.py`
+with the Hermes environment's Python; this standalone setup does not import Hermes.
+Assets live in `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon`; setup and Hermes
+must use the same OS user/cache root. Restart Hermes after installing.
+
+The plugin setting `tts_voice` defaults to `Russell`. To change it, first run
+`HERMES_DISABLE_LAZY_INSTALLS=1 hermes gaze setup-speech --voice NAME`, then set
+`tts_voice: NAME` in the existing plugin config. Only downloaded English catalogue
+voices are available. No model setting, hosted TTS, cloning or prewarm is needed.
+Model revision: `8c64b55ec301728e2d1695bfea87a08a267d0c2d`;
+voice catalogue revision: `0ee17205f254b5abc43b266c8a0f215565c352f7`.
+The 31M model/tokenizer/voices are Apache-2.0; the runtime is MIT OR Apache-2.0.
+Do not substitute the noncommercial 40M models. Apple fallback audio is not
+established as cleared for publishing in a demo video.
+
+Hands-on audible check (user only):
+
+1. Connect with `/gaze connect`, obtain an answer, choose **Read aloud**. Confirm
+   the card says **Reading with Phonon · Russell** and the voice is Russell.
+2. Start a long answer, stop it, then read another answer. Confirm immediate silence
+   on Stop and no overlap, old words or stale reading state on replacement.
+3. Start again and press Esc. Confirm speech stops and the card dismisses.
+4. During speech enter `/gaze disconnect`. Confirm silence; reconnect and read again.
+5. Enable automatic reading; complete a new answer. Confirm it reads once, not while
+   streaming. Disable it and confirm the next completed answer remains silent.
+
+No-speaker regression: `python3 -m unittest tests.test_speech tests.test_voice_turns`.
+With `ptts` and assets installed, run `python tests/phonon_smoke.py`: real Russell
+generation into a paced fake sink, first-chunk timing and <100 ms cancellation.
+On macOS, prefix it with
+`sandbox-exec -p '(version 1)(allow default)(deny network*)'` to prove offline use.
+
 
 Development smoke: use Python from a Hermes environment:
 
