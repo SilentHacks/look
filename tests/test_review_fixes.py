@@ -156,10 +156,11 @@ class TestChooseConsumesResolution(unittest.TestCase):
     def test_second_choose_fails_after_success(self) -> None:
         res = service.resolve_now(self.session, utterance="click this", pushed=_pushed(time.time()))
         self.assertNotEqual(res.get("ok"), False)
-        first = self.session.choose(resolution_id=self.session.resolution_id, candidate_index=1, execute=False)
+        first = self.session.choose(resolution_id=self.session.resolution_id, candidate_index=1)
         self.assertIs(first.get("ok"), True)
+        self.assertFalse(first["executed"])
         self.assertIsNone(self.session.last_resolution)
-        second = self.session.choose(resolution_id=self.session.resolution_id, candidate_index=1, execute=False)
+        second = self.session.choose(resolution_id=self.session.resolution_id, candidate_index=1)
         self.assertIs(second.get("ok"), False)
 
 

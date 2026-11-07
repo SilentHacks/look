@@ -8,9 +8,21 @@ import secrets
 import threading
 from typing import Any
 
-from .resolver.bayesian_fusion import _DESTRUCTIVE_VERBS, classify_utterance_intent
+_RISKY_LABEL = re.compile(r"delete|remove|purge|drop|destroy|pay|buy|checkout|submit|send|transfer|revoke|danger|destruct|publish|purchase|order|confirm", re.IGNORECASE)
+_REVERSIBLE_LABEL = re.compile(r"^(?:(?:next|previous)(?: step| page)?|back|cancel|close|expand|collapse|show|hide|search|filter|sort|select|choose|view|open|download|export(?: csv| pdf| json| xlsx)?)$", re.IGNORECASE)
 
-_RISKY_LABEL = re.compile(r"delete|remove|purge|drop|destroy|pay|buy|checkout|submit|send|transfer|revoke|danger|destruct", re.IGNORECASE)
+
+def control_requires_confirmation(live: dict[str, Any]) -> bool:
+    """Only recognizable navigation/selection controls bypass the protected card."""
+    if live.get("sensitive") or live.get("form_submit"):
+        return True
+    if _RISKY_LABEL.search(str(live.get("label") or "") + " " + str(live.get("class_name") or "")):
+        return True
+    if live.get("tag") == "a":
+        return not bool(live.get("url"))
+    if live.get("type") in ("checkbox", "radio") or live.get("role") in ("checkbox", "radio", "tab"):
+        return False
+    return not bool(_REVERSIBLE_LABEL.search(str(live.get("label") or "").strip()))
 logger = logging.getLogger(__name__)
 
 
@@ -31,13 +43,19 @@ class SnapshotActions:
             result = self.session.eval_js_once(expression)
         except Exception as exc:
             logger.debug("Snapshot browser operation failed", exc_info=True)
-            if method == "clickSnapshot":
+            if method in ("clickSnapshot", "actionWrite", "actionPress", "actionScroll"):
+                self.session.clear_hover_snapshot()
                 return {"ok": False, "executed": None, "outcome": "unknown",
-                        "error": f"Click outcome unknown: {exc}. Do not retry automatically."}
+                        "error": f"Action outcome unknown: {exc}. Do not retry automatically."}
             return _failure(f"browser {method} failed: {exc}")
+        if (not isinstance(result, dict) or type(result.get("ok")) is not bool) and method in ("clickSnapshot", "actionWrite", "actionPress", "actionScroll"):
+            self.session.clear_hover_snapshot()
+            return {"ok": False, "executed": None, "outcome": "unknown",
+                    "error": "Action reply missing. Do not retry automatically."}
         if not isinstance(result, dict) or result.get("ok") is not True:
-            return _failure(str(result.get("error") or f"browser {method} failed") if isinstance(result, dict)
-                            else f"browser {method} returned no result")
+            if isinstance(result, dict):
+                return result
+            return _failure(f"browser {method} returned no result")
         return result
 
     def _current(self, resolution_id: int, handles: list[str], *, highlighting: bool = False) -> tuple[dict[str, Any] | None, str]:
@@ -90,15 +108,16 @@ class SnapshotActions:
             return result
         if result.get("handle") != handle or not result.get("fingerprint"):
             return _failure("invalid browser target descriptor")
-        if result.get("disabled") or result.get("clickable") is not True:
-            return _failure("target is disabled or noninteractive")
+        if result.get("sensitive") or result.get("disabled") or result.get("clickable") is not True:
+            return _failure("target is sensitive, disabled or noninteractive")
         return result
 
-    def _execute(self, snapshot: dict[str, Any], handle: str, resolution_id: int, fingerprint: str) -> dict[str, Any]:
+    def _execute(self, snapshot: dict[str, Any], handle: str, resolution_id: int, fingerprint: str,
+                 approval_id: str | None = None) -> dict[str, Any]:
         _, error = self._current(resolution_id, [handle])
         if error:
             return _failure(error)
-        result = self._browser("clickSnapshot", snapshot["snapshot_id"], resolution_id, handle, fingerprint)
+        result = self._browser("clickSnapshot", snapshot["snapshot_id"], resolution_id, handle, fingerprint, approval_id)
         if result.get("outcome") == "unknown":
             self.session.clear_hover_snapshot()
             return result
@@ -106,7 +125,10 @@ class SnapshotActions:
             return _failure(str(result.get("error") or "browser did not execute the click"))
         return {"ok": True, "executed": True, "handle": handle, "resolution_id": resolution_id}
 
-    def click(self, handle: str, resolution_id: int) -> dict[str, Any]:
+    def request_commit(self, handle: str, resolution_id: int) -> dict[str, Any]:
+        return self.click(handle, resolution_id, force_confirmation=True)
+
+    def click(self, handle: str, resolution_id: int, *, force_confirmation: bool = False) -> dict[str, Any]:
         with self._lock:
             self.invalidate()
             snapshot, error = self._current(resolution_id, [handle])
@@ -115,13 +137,7 @@ class SnapshotActions:
             live = self._inspect(snapshot, handle, resolution_id)
             if not live.get("ok"):
                 return live
-            utterance = str(snapshot.get("utterance") or "")
-            # ponytail: demo-only lexical policy; real-site rollout needs a reviewed action policy.
-            risky = (classify_utterance_intent(utterance) == "destructive_action"
-                     or bool(set(re.findall(r"[a-z]+", utterance.lower())) & _DESTRUCTIVE_VERBS)
-                     or bool(_RISKY_LABEL.search(str(live.get("label") or "") + " " + str(live.get("class_name") or "")))
-                     or bool(live.get("form_submit")))
-            if not risky:
+            if not force_confirmation and not control_requires_confirmation(live):
                 return self._execute(snapshot, handle, resolution_id, live["fingerprint"])
             action_id = secrets.token_urlsafe(24)
             label = str(live.get("label") or handle)
@@ -158,9 +174,5 @@ class SnapshotActions:
                 return _failure("stale snapshot")
             if not approved:
                 return {"ok": True, "executed": False, "cancelled": True, "resolution_id": resolution_id}
-            live = self._inspect(snapshot, pending["handle"], resolution_id)
-            if not live.get("ok"):
-                return live
-            if live["fingerprint"] != pending["fingerprint"]:
-                return _failure("target changed since confirmation was requested")
-            return self._execute(snapshot, pending["handle"], resolution_id, pending["fingerprint"])
+            return self._execute(snapshot, pending["handle"], resolution_id,
+                                 pending["fingerprint"], pending["action_id"])

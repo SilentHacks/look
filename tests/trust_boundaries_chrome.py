@@ -415,13 +415,18 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
                 key(a, 'Escape', 'Escape')
                 session.configure(mode='hover')
                 compose(a)
-                click(a, '#hg-input')
+                until(lambda: node(a, '#hg-input', 'return document.activeElement===this'))
                 for char in 'What is this export?':
                     command(a, 'Input.dispatchKeyEvent', {'type': 'char', 'text': char})
                 replies.clear()
                 command(a, 'Input.dispatchKeyEvent', {'type': 'keyDown', 'code': 'Enter', 'key': 'Enter', 'windowsVirtualKeyCode': 13})
                 command(a, 'Input.dispatchKeyEvent', {'type': 'keyUp', 'code': 'Enter', 'key': 'Enter', 'windowsVirtualKeyCode': 13})
-                until(lambda: any(r['type'] == 'submit' and r.get('delivery') == 'one_shot' for r in replies))
+                try:
+                    until(lambda: any(r['type'] == 'submit' and r.get('delivery') == 'one_shot' for r in replies))
+                except AssertionError as exc:
+                    raise AssertionError({'submit_replies': [r for r in replies if r['type'] == 'submit'],
+                        'view': view(a), 'input': node(a, '#hg-input',
+                        'return [document.activeElement===this,this.value.length]')}) from exc
                 until(lambda: view(a)['view'] == 'note')
                 key(a, 'Escape', 'Escape')
                 until(lambda: view(a)['view'] is None)
@@ -497,7 +502,8 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             node(b, '.lens-card', 'this.focus();return true')
             command(b, 'Input.dispatchKeyEvent', {'type':'keyDown','key':'1','code':'Digit1','windowsVirtualKeyCode':49})
             command(b, 'Input.dispatchKeyEvent', {'type':'keyUp','key':'1','code':'Digit1','windowsVirtualKeyCode':49})
-            until(lambda: page(b, 'return crossClicks') == 1)
+            until(lambda: session.last_resolution is None)
+            assert page(b, 'return crossClicks') == 0  # Lens selection cannot bypass guarded input.
             command(b, 'Emulation.setDeviceMetricsOverride', {'width':390,'height':420,'deviceScaleFactor':1,'mobile':False})
             b.eval_js('window.__HERMES_GAZE_OVERLAY__.showHudMessage("Long private reply ".repeat(500));true')
             def inside():

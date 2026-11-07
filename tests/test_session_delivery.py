@@ -176,7 +176,7 @@ class TestSessionDelivery(unittest.TestCase):
         with mock.patch.object(service, "resolve_now",
                                side_effect=lambda session, **kwargs: resolve(session, pushed=pushed, **kwargs)):
             turns.pre(session_id="session", turn_id="simulated", user_message="Purge this cache")
-        choice = self.session.choose(resolution_id=self.session.resolution_id, execute=False)
+        choice = self.session.choose(resolution_id=self.session.resolution_id)
         self.assertTrue(choice["ok"], choice)
         self.assertEqual(choice["selected"]["id"], "purge")
 

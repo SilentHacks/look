@@ -1,7 +1,7 @@
 """Hermes Gaze ("Telepathy") — Multimodal Deictic Reference Resolution for Chrome & Hermes Agent.
 
 Registers:
-- 6 tools, including current-snapshot highlight and guarded click.
+- 14 tools, including bounded browser structure and guarded general actions.
 - Session-bound voice context, streaming answer hooks, and turn lifecycle hooks.
 - In-session slash command ``/gaze`` and CLI subcommand ``hermes gaze``
 - Bundled skill ``gaze-telepathy``
@@ -62,7 +62,7 @@ def register(ctx: Any) -> None:
     """Entry point invoked by Hermes PluginManager."""
     cfg = GazeConfig.from_ctx(ctx)
     rules = EVIDENCE_RULES + TOOL_RULES
-    ctx.register_system_prompt_section("hermes_gaze", rules, position="after_memory", max_chars=800)
+    ctx.register_system_prompt_section("hermes_gaze", rules, position="after_memory", max_chars=2200)
 
     session = get_shared_session()
     session.cdp_http_url = cfg.cdp_url
@@ -77,7 +77,7 @@ def register(ctx: Any) -> None:
     service.set_runtime(cfg, llm=getattr(ctx, "llm", None))
 
     # The CDP intent handler and the demo HTTP server run on bare threads serving
-    # machine-scoped resources (Chrome :9222, the :9111 demo page) — they read no
+    # machine-scoped resources (owned Chrome and the :9111 demo page) — they read no
     # per-profile Hermes state at runtime, so no profile binding is needed.
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
@@ -147,6 +147,47 @@ def register(ctx: Any) -> None:
         bound = turns.bind("", **kwargs)
         result = _handle_slash_command(raw_args)
         return result + "\n" + bound
+
+    # Restrict the connected companion session, not unrelated Hermes sessions.
+    # Raw code/debugger tools can mint trusted CDP clicks; hooks cannot sandbox them.
+    direct_tools = {name: schema for name, schema, _, _ in ALL_TOOLS
+                    if name not in ("gaze_calibrate", "gaze_benchmark", "gaze_choose")}
+    safe_names = set(direct_tools) | {"web_search", "web_extract", "memory"}
+
+    def bound(session_id):
+        return bool(turns.binding and turns.binding["session_id"] == session_id)
+
+    def pre_tool_call(tool_name="", session_id="", turn_id="", **kwargs):
+        if not bound(session_id):
+            return None
+        if tool_name not in safe_names:
+            return {"action": "block", "message": "Companion session uses guarded gaze tools only. Disconnect /gaze before using code or browser tools."}
+        return None
+
+    def tool_execution(next_call, tool_name="", session_id="", turn_id="", **kwargs):
+        if not bound(session_id):
+            return next_call()
+        if tool_name not in safe_names:
+            return '{"ok":false,"executed":false,"error":"Use guarded companion tools only"}'
+        session.tasks.authorize_call(session_id, turn_id)
+        try:
+            return next_call()
+        finally:
+            session.tasks.clear_call()
+
+    def llm_request(request, session_id="", **kwargs):
+        if not bound(session_id):
+            return None
+        tools = [tool for tool in request.get("tools", [])
+                 if tool.get("function", tool).get("name") in safe_names]
+        names = {tool.get("function", tool).get("name") for tool in tools}
+        tools.extend({"type": "function", "function": schema} for name, schema in direct_tools.items()
+                     if name not in names)
+        return {"request": {**request, "tools": tools}}
+
+    ctx.register_hook("pre_tool_call", pre_tool_call)
+    ctx.register_middleware("llm_request", llm_request)
+    ctx.register_middleware("tool_execution", tool_execution)
 
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("on_stream_delta", turns.delta)

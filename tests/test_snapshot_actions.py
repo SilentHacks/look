@@ -28,8 +28,10 @@ class BrowserActions:
         self.before_click = None
         self.fail_click = False
         self.lose_click_reply = False
+        self.content_revision = 0
+        self.approvals = {}
 
-    def eval_js_once(self, expression, timeout=6, *, target=None, document=None):
+    def eval_js_once(self, expression, timeout=6, *, target=None, document=None, route=None):
         call = expression.split("window.__HERMES_GAZE_OVERLAY__.", 1)[1]
         method, args = call.split("(", 1)
         args = json.loads("[" + args.rsplit(")", 1)[0] + "]")
@@ -44,6 +46,7 @@ class BrowserActions:
             return {"ok": True}
         if method == "requestActionConfirmation":
             self.pending = args[0]
+            self.approvals[args[0]["action_id"]] = self.content_revision
             return {"ok": True}
         sid, rid, handles = args[:3]
         if (sid, rid) != self.active:
@@ -66,6 +69,10 @@ class BrowserActions:
         if method == "clickSnapshot":
             if self.before_click:
                 self.before_click()
+            if len(args) > 4 and args[4] is not None:
+                revision = self.approvals.pop(args[4], None)
+                if revision is None or revision != self.content_revision:
+                    return {"ok": False, "executed": False, "error": "approval content changed"}
             if self.fail_click or node["disabled"] or not node["clickable"] or node["fingerprint"] != args[3]:
                 return {"ok": False, "executed": False, "error": "target changed or click rejected"}
             self.executed.append(handle)
@@ -102,22 +109,34 @@ class TestSnapshotActions(unittest.TestCase):
         self.assertFalse(self.actions.highlight(["@missing"], self.rid)["ok"])
         self.assertFalse(self.actions.click("@export", self.rid - 1)["ok"])
 
-    def test_risk_is_original_utterance_or_live_label_class_or_form(self):
-        for field, value in [("utterance", "Could you delete this?"), ("label", "Delete data"),
-                             ("class_name", "btn-danger"), ("form_submit", True)]:
-            with self.subTest(field=field):
-                node = self.browser.nodes["@export"]
-                original = copy.deepcopy(node)
-                payload = copy.deepcopy(self.payload)
-                if field == "utterance":
-                    payload[field] = value
-                else:
-                    node[field] = value
-                rid = self.session.store_hover_snapshot(payload)
-                result = self.actions.click("@export", rid)
-                self.assertTrue(result["confirmation_required"])
+    def test_live_policy_ignores_utterance_and_protects_ambiguous_controls(self):
+        for field, value in [("label", "Delete data"), ("label", "Do it"), ("label", "Close account"),
+                             ("label", "Cancel membership"), ("class_name", "btn-danger"), ("form_submit", True)]:
+            with self.subTest(field=field, value=value):
+                original = copy.deepcopy(self.browser.nodes["@export"])
+                self.browser.nodes["@export"][field] = value
+                rid = self.session.store_hover_snapshot(copy.deepcopy(self.payload))
+                self.assertTrue(self.actions.click("@export", rid)["confirmation_required"])
                 self.assertEqual(self.browser.executed, [])
-                node.update(original)
+                self.browser.nodes["@export"].update(original)
+        self.browser.nodes["@export"]["label"] = "Next"
+        rid = self.session.store_hover_snapshot({**self.payload, "utterance": "do not submit or delete"})
+        self.assertTrue(self.actions.click("@export", rid)["executed"])
+
+    def test_request_commit_forces_safe_control_and_content_revision_is_atomic(self):
+        result = self.actions.request_commit("@export", self.rid)
+        self.assertTrue(result["confirmation_required"])
+        self.assertNotIn("action_id", result)
+        pending = dict(self.browser.pending)
+        self.browser.before_click = lambda: setattr(self.browser, "content_revision", 2)
+        self.assertFalse(self.actions.confirm(pending["action_id"], self.rid, True)["ok"])
+        self.assertEqual(self.browser.executed, [])
+        self.assertFalse(self.actions.confirm(pending["action_id"], self.rid, True)["ok"])
+
+    def test_sensitive_live_descriptor_is_rejected_not_confirmed(self):
+        self.browser.nodes["@purge"]["sensitive"] = True
+        self.assertFalse(self.actions.request_commit("@purge", self.rid)["ok"])
+        self.assertIsNone(self.browser.pending)
 
     def test_confirm_is_single_use_and_forgery_does_not_approve(self):
         pending = self.request_purge()

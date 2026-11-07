@@ -190,6 +190,7 @@ def resolve_now(
         if isinstance(capture, dict) and capture.get("browser_target"):
             payload["browser_target"] = capture["browser_target"]
             payload["browser_document"] = capture.get("browser_document")
+            payload["browser_route"] = capture.get("browser_route")
         payload["utterance"] = utterance
         payload["chrome_connected"] = session.is_chrome_reachable()
         if not activate:
@@ -480,6 +481,9 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
         return
     itype = str(intent.get("type") or "")
     try:
+        if itype == "stop_action_task":
+            reply(session.tasks.stop())
+            return
         if itype == "open_link":
             url = safe_link(intent.get("url"))
             if not url:
@@ -618,7 +622,6 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 resolution_id=intent.get("resolution_id"),
                 candidate_index=int(intent.get("candidate_index") or 1),
                 modality=str(intent.get("modality") or "semantic_lens"),
-                execute=bool(intent.get("execute", True)),
             )
             reply(payload)
             return

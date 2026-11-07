@@ -80,6 +80,92 @@ class Companion:
         with urllib.request.urlopen(request, timeout=3) as response:
             response.read()
 
+    def _owned_tab(self, owner: dict) -> CdpSession:
+        with self._lock:
+            tab = self._tabs.get(owner.get("browser_target"))
+        if (tab is None or tab._context_unique_id != owner.get("browser_document")
+                or tab._route_id != owner.get("browser_route")):
+            raise ConnectionError("Task document or route changed")
+        self.eval_js_once("true", target=tab._target_id, document=owner["browser_document"],
+                          route=owner["browser_route"])
+        return tab
+
+    def action_navigate(self, url: str, *, new_tab: bool, **owner) -> dict:
+        """One navigation command; wait only for reads, never replay it."""
+        from ..browser_tasks import navigation_url
+        url = navigation_url(url)
+        tab = self._owned_tab(owner)
+        old_document = tab._context_unique_id
+        if new_tab:
+            request = urllib.request.Request(
+                self.http_url + "/json/new?" + urllib.parse.quote(url, safe=""), method="PUT")
+            with urllib.request.urlopen(request, timeout=5) as response:
+                target = json.load(response)["id"]
+            tab._submit(tab._send_cmd("Target.activateTarget", {"targetId": target}, timeout=2.), 3.)
+        else:
+            result = tab._submit(tab._send_cmd("Page.navigate", {"url": url}, timeout=5.), 6.)
+            if result.get("errorText"):
+                raise ValueError("Navigation failed: " + result["errorText"])
+            target = tab._target_id
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            with self._lock:
+                destination = self._tabs.get(target)
+            if destination and destination.is_connected and destination._ui_frames:
+                document, route = destination._context_unique_id, destination._route_id
+                # Same-document navigation may retain the exact document.
+                if (new_tab or document != old_document or destination._route_id != owner["browser_route"]
+                        or not result.get("loaderId")):
+                    if (document == destination._context_unique_id and route == destination._route_id
+                            and destination.eval_js_once("document.readyState !== 'loading' && document.hasFocus()",
+                                                         timeout=1., context_id=document)):
+                        return dict(browser_target=target, browser_document=document, browser_route=route)
+            if self._stop.wait(.05):
+                break
+        raise ConnectionError("Navigation outcome unknown; do not repeat it automatically")
+
+    def action_after_link(self, url: str, *, same_document: bool, **owner) -> dict:
+        """Follow only the clicked tab and observed sanitized destination; never retarget by focus."""
+        with self._lock:
+            tab = self._tabs.get(owner["browser_target"])
+        if tab is None:
+            raise ConnectionError("The clicked tab was closed")
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            document, route = tab._context_unique_id, tab._route_id
+            capture = None
+            if document and tab.is_connected and (same_document or document != owner["browser_document"] or route != owner["browser_route"]):
+                try:
+                    capture = tab.eval_js_once(
+                        "document.visibilityState === 'visible' && document.hasFocus() ? "
+                        "window.__HERMES_GAZE_OVERLAY__?.captureActionContext() : {foreground:false}",
+                        timeout=1., context_id=document)
+                except (ConnectionError, RuntimeError, TimeoutError):
+                    pass  # Retriable read while the owned document rearms, never another click.
+            if isinstance(capture, dict):
+                if capture.get("foreground") is False:
+                    raise ConnectionError("Clicked tab lost foreground")
+                if (capture.get("page_url") == url and capture.get("snapshot_id")
+                        and document == tab._context_unique_id and route == tab._route_id):
+                    capture.update(browser_target=owner["browser_target"], browser_document=document, browser_route=route)
+                    return capture
+            if self._stop.wait(.05):
+                break
+        raise ConnectionError("Click destination is unavailable; do not repeat the click")
+
+
+    def action_key(self, key: str, **owner) -> None:
+        codes = {"ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40,
+                 "Home": 36, "End": 35, "Escape": 27, "Tab": 9}
+        if key not in codes:
+            raise ValueError("Unsupported nonactivation key")
+        tab = self._owned_tab(owner)
+        for kind in ("keyDown", "keyUp"):
+            if tab._context_unique_id != owner["browser_document"] or tab._route_id != owner["browser_route"]:
+                raise ConnectionError("Key target document changed")
+            tab._submit(tab._send_cmd("Input.dispatchKeyEvent", {
+                "type": kind, "key": key, "code": key, "windowsVirtualKeyCode": codes[key]}, timeout=2.), 3.)
+
     def _watch(self) -> None:
         while not self._stop.is_set():
             try:
@@ -217,8 +303,13 @@ class Companion:
                 return "Recording cancelled: the source tab lost focus."
         return None
 
-    def _display_pending(self, tab: CdpSession) -> None:
-        event = self._inbox_event or tab.session_event
+    def _display_pending(self, tab: CdpSession, event: dict | None = None) -> None:
+        pending = tab.session_event
+        if event is None:
+            event = (pending if pending and pending.get("type") == "action_task"
+                     and pending.get("browser_document") == tab._context_unique_id
+                     and pending is not getattr(tab, "_delivered_task_event", None)
+                     else self._inbox_event or pending)
         if not event or not tab.is_connected:
             return
         inbox = event.get("type") == "inbox"
@@ -238,6 +329,8 @@ class Companion:
             if delivered:
                 tab._displayed_event = event
                 tab._displayed_document = document
+                if event.get("type") == "action_task":
+                    tab._delivered_task_event = event
         except Exception:
             logger.debug("Answer display unavailable", exc_info=True)
 
@@ -246,6 +339,7 @@ class Companion:
         with self._lock:
             if event.get("type") == "inbox":
                 self._inbox_event = dict(event)
+                event = self._inbox_event
                 try:
                     tabs = [self._target()]
                 except ConnectionError:
@@ -255,8 +349,9 @@ class Companion:
                 tabs = [tab] if tab is not None else []
                 if tab is not None:
                     tab.session_event = dict(event)
+                    event = tab.session_event
         for tab in tabs:
-            self._display_pending(tab)
+            self._display_pending(tab, event)
 
     def push_overlay_config(self) -> None:
         with self._lock:

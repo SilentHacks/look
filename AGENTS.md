@@ -11,8 +11,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | Path | What lives here |
 |---|---|
 | `plugin.yaml` | Plugin manifest: tools/hooks/skill declarations, config schema. Keep 1:1 with `register()`. |
-| `__init__.py` | Thin registration of six tools, context/stream/final/turn-end hooks, `/gaze` session connection, CLI and skill. |
-| `tools.py` | Schemas/thin handlers for `gaze_resolve`, simulated-only `gaze_choose`, snapshot `gaze_highlight`, guarded `gaze_click`, calibration and benchmark. |
+| `__init__.py` | Registration of fourteen tools, context/stream/final/turn-end hooks, connected-session tool restrictions, `/gaze` connection, CLI and skill. |
+| `tools.py`, `browser_tasks.py` | Operation-specific captured-identity tools and exact user-turn action grants; bounded structure, batch fill/select, click, keys, tabs/navigation, scroll/wait and request-commit. |
 | `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
 | `voice_turns.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen item evidence, exact request/session/turn matching and versioned UI state, including which answers have been shown or retreated and the one-time hints. |
 | `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
@@ -167,9 +167,9 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   It also returns that capture's normalized samples for local scoring; never score
   a tab against the machine-wide ring's samples from other documents.
 - **Resolution epoch guards `choose`.** Every resolution bumps
-  `session.resolution_id`; a `choose` intent carrying a mismatched `resolution_id`
-  gets `"stale resolution"`. Never accept a choose without the epoch check — a stale
-  choice would click whatever now sits at that index.
+  `session.resolution_id`; a mismatched `choose` gets `"stale resolution"`.
+  Simulated Lens selection only selects/recalibrates/highlights; it never clicks.
+  All browser input uses the fresh captured-identity task broker, in every mode.
 - **Hover snapshots are immutable server-owned evidence.** Activation bumps the
   epoch, invalidates simulated choose/pending confirmations, stamps `Resolution`
   into the bounded context, and activates the browser's captured identity map.
@@ -185,10 +185,15 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   selector; successful `none` does not. Saved identity, epoch, foreground document
   and supersession checks guard application. No protocol tokens are generated for
   titles: the ordinary Markdown heading remains readable in terminal/history.
-  `gaze_highlight` remains for explicit/manual scope changes. Inbox research is
-  read-only, including recalled items and follow-ups; clicks require fresh manual
-  pointing. A new capture revokes pending approval immediately.
-  Live identity/fingerprint and single-use approval checks still apply.
+  `gaze_highlight` remains for explicit/manual scope changes. Saved inbox evidence
+  stays immutable and read-only; it is not action authority. A fresh, exact
+  user session/turn may start a separate browser task through `gaze_read`, including
+  a voice question, typed question or explicit follow-up. The task retains its source
+  foreground tab/document/route; only its own navigation/open-tab operation transfers
+  that owner and returns the destination's fresh structure. Stale epochs return fresh
+  structure without replaying the rejected operation. Stop/Esc, disconnect, terminal
+  failure and unknown outcomes revoke the task; page/answer text cannot start one.
+  A new capture revokes pending approval immediately.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
   associated labels. Freeze mode-appropriate evidence at recording stop, before
@@ -206,12 +211,30 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Highlight geometry follows those same nodes while selected, clipped to the
   viewport and scrolling ancestors; no animation-frame layout work runs without
   a live selection.
-- **Confirmation is not a model tool.** Python classifies live risk and form
-  submits. Only the nonce-checked binding from a trusted primary mouse click can
-  consume its fingerprint-bound, single-use approval. Model/page text is plain
-  text in the new HUD paths; it cannot supply confirmation markup.
-- **Never replay mutations.** `eval_js_once` is mandatory for click commands.
-  Lost replies mean unknown outcome, not \"not executed\"; revoke that snapshot.
+- **Confirmation is not a model tool.** Python classifies live controls, never the
+  whole utterance: known navigation/selection may proceed, form Submit, Send, Buy,
+  Delete, publish and ambiguous controls require review. `gaze_request_commit`
+  only requests the card. Its safe field/content summary and destination live in
+  the protected glass frame. Approval binds the exact identity, epoch, owner,
+  destination and current nonsensitive content, and invalidates on observed edits;
+  the final DOM evaluation rechecks and consumes it before clicking. Only the
+  nonce-checked binding from a trusted primary mouse click may approve once.
+  Neither page/answer text, synthetic events, model tools, speech nor keys approve.
+- **The companion browser is not an arbitrary-code browser.** Default CDP is
+  `127.0.0.1:9333`, separate from Hermes's independently launched browser.
+  Never export it as `BROWSER_CDP_URL`, `BU_CDP_URL`, `BU_CDP_WS`, or Hermes
+  `browser.cdp_url`, and never grant `browser_exec`/`browser_cdp` its endpoint.
+  Connected sessions expose direct guarded tools and safe research/memory tools;
+  raw code, terminal, generic browser and delegation tools are removed and vetoed.
+  A raw debugger can synthesize trusted clicks: the private frame is a website
+  boundary, not protection from debugger authority.
+- **Typing/navigation are allowed, not universal application containment.**
+  Never read or write password, payment, token, OTP or similar secret fields.
+  Personal details come only from Hermes memory/context; ask when unknown.
+  A rare site may act on typing alone; GET navigation can also have side effects.
+  Unknown custom widgets, cross-origin frames and canvas must fail honestly.
+- **Never replay mutations.** `eval_js_once` is mandatory for all DOM mutations.
+  Lost replies mean unknown outcome, not \"not executed\"; revoke that task/snapshot.
 - **Voice ownership includes item, request, session, exact wire text and turn.**
   `VoiceTurns` owns an in-memory inbox and at most eight waiting requests. Reserve
   capture order at recording stop, before ASR; inject only the FIFO head, and only
@@ -305,8 +328,8 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
 - `hermes gaze` CLI subcommand is unavailable under `plugins.isolation: host` —
   Hermes skips `register_cli_command` in host isolation. The `/gaze` slash command
   is unaffected.
-- `get_shared_session()`'s `GazeSession` is deliberately machine-scoped: Chrome
-  :9222 and the microphone are OS resources shared across Hermes profiles. Do not
+- `get_shared_session()`'s `GazeSession` is deliberately machine-scoped: the owned
+  companion Chrome and microphone are OS resources shared across Hermes profiles. Do not
   try to make it per-profile.
 - Webcam mode uses Apache-2.0 MediaPipe iris landmarks and a local personal regressor
   in a separate owned macOS Chrome process. No real-camera accuracy is established.

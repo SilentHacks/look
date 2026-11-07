@@ -12,7 +12,7 @@ class GazeConfig:
 
     mode: str = "hover"
     sigma_px: float = 120.0
-    cdp_url: str = "http://127.0.0.1:9222"
+    cdp_url: str = "http://127.0.0.1:9333"
     dwell_ms: int = 450
     wiggle_trigger: bool = False
     hotkey: str = "AltRight"  # JS KeyboardEvent.code (e.g. "AltRight", "Backquote", "F8")

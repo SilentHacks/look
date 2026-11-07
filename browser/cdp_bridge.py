@@ -112,7 +112,7 @@ class CdpSession:
     """Persistent websocket to ONE pinned Chrome tab, serviced by a dedicated
     worker thread that owns an asyncio loop."""
 
-    def __init__(self, http_url: str = "http://127.0.0.1:9222") -> None:
+    def __init__(self, http_url: str = "http://127.0.0.1:9333") -> None:
         self.http_url = http_url.rstrip("/")
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -596,12 +596,13 @@ class CdpSession:
 
 class GazeSession:
     """Machine-scoped shared state: buffer + tracker + recalibrator + last
-    resolution + the CdpSession. Deliberately process-global — Chrome :9222 and
+    resolution + the CdpSession. Deliberately process-global — owned Chrome and
     the camera are OS resources shared across Hermes profiles."""
 
-    def __init__(self, cdp_http_url: str = "http://127.0.0.1:9222") -> None:
+    def __init__(self, cdp_http_url: str = "http://127.0.0.1:9333") -> None:
         from .companion import Companion
         from ..microphone import Microphone
+        from ..browser_tasks import BrowserTasks
 
         self._cdp = Companion(http_url=cdp_http_url)
         self.microphone = Microphone()
@@ -616,6 +617,7 @@ class GazeSession:
         self.last_hover_snapshot: dict[str, Any] | None = None
         self.resolution_id = 0
         self.actions = SnapshotActions(self)
+        self.tasks = BrowserTasks(self)
         self.scope_selection: Dict[str, str] = {}
         self.last_candidate_wire: List[Dict[str, Any]] = []
         self.last_resolution_input: Dict[str, Any] = {}
@@ -659,7 +661,7 @@ class GazeSession:
     def eval_js_once(self, expression: str, timeout: float = 6.0) -> Any:
         snapshot = self.last_hover_snapshot or {}
         return self._cdp.eval_js_once(expression, timeout=timeout, target=snapshot.get("browser_target"),
-                                      document=snapshot.get("browser_document"))
+                                      document=snapshot.get("browser_document"), route=snapshot.get("browser_route"))
 
     def display_session_event(self, event: dict[str, Any]) -> None:
         self._cdp.display(event)
@@ -882,8 +884,8 @@ class GazeSession:
         return rid
 
     def choose(self, resolution_id: Optional[int] = None, candidate_index: int = 1,
-               modality: str = "semantic_lens", execute: bool = True) -> Dict[str, Any]:
-        """Validate the epoch + index, recalibrate from the latest fixation, click, and re-pin."""
+               modality: str = "semantic_lens") -> Dict[str, Any]:
+        """Select a simulated candidate and recalibrate; browser input belongs to guarded tasks."""
         with self.actions._lock:
             with self._lock:
                 if (self.tracker.mode != "simulated" or
@@ -908,26 +910,23 @@ class GazeSession:
                         sigma=latest_fix.sigma_x, weight=0.25,
                     )
             if self.is_chrome_reachable():
-                click_stmt = (
-                    f"const el = document.querySelector({json.dumps(chosen.candidate.selector)}); if (el && el.click) el.click();"
-                    if execute else "")
                 try:
                     self._cdp.eval_js_once(
                         f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])});"
-                        f"{click_stmt} return true;}})()", target=self._resolution_target,
+                        f"return true;}})()", target=self._resolution_target,
                         document=self._resolution_document, route=self._resolution_route)
                 except Exception as exc:
                     self.clear_hover_snapshot()
-                    return {"ok": False, "executed": None if execute else False,
-                            "outcome": "unknown" if execute else "failed",
-                            "error": f"browser choose failed; do not retry automatically: {exc}"}
+                    return {"ok": False, "executed": False, "outcome": "failed",
+                            "error": f"browser selection failed: {exc}"}
             with self._lock:
-                self.last_resolution = None  # consume — a second choose must not re-click stale state
+                self.last_resolution = None  # One selection per resolution.
             return {
                 "ok": True,
                 "selected_index": idx + 1,
                 "selected": chosen.to_dict(),
-                "executed": execute,
+                "executed": False,
+                "message": "Selection only. Use fresh gaze_read and guarded action tools for browser input.",
                 "recalibrator_bias_offset": list(self.recalibrator.offset),
             }
 
@@ -935,7 +934,7 @@ class GazeSession:
     def close(self) -> None:
         self.microphone.cancel()
         self.stop_webcam()
-        self.actions.invalidate()
+        self.tasks.stop()
         self._cdp.close()
 
 
@@ -944,7 +943,7 @@ def get_shared_session() -> GazeSession:
     return GazeSession()
 
 
-def launch_chrome_with_cdp(url: str, port: int = 9222, profile_dir: Optional[Path] = None) -> subprocess.Popen:
+def launch_chrome_with_cdp(url: str, port: int = 9333, profile_dir: Optional[Path] = None) -> subprocess.Popen:
     """Launch macOS/Linux Google Chrome with CDP and a dedicated profile, without media grants."""
     import sys
     try:

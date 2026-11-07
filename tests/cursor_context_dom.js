@@ -72,7 +72,10 @@ const label = element('label', [text('secret-associated-label')], { for: 'passwo
 const section = element('section', [text('Visible content'), password, payment, label]);
 let hit = password;
 const document = {
-  body: {}, documentElement: {},
+  body: element('body'), documentElement: element('html'),
+  listeners: {},
+  addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
+  removeEventListener(type, handler) { this.listeners[type] = (this.listeners[type] || []).filter(fn => fn !== handler); },
   elementFromPoint: () => hit,
   getElementById: id => id === 'password' ? password : null,
   querySelectorAll: () => [],
@@ -93,9 +96,17 @@ const document = {
 };
 const rendered = [];
 const intents = [];
+const observers = [];
+class MutationObserver {
+  constructor(callback) { this.callback = callback; this.records = []; observers.push(this); }
+  observe() {}
+  disconnect() { this.records = []; }
+  takeRecords() { const records = this.records; this.records = []; return records; }
+}
 const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
   window: { listeners: {}, innerWidth: 1200, innerHeight: 800,
     addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
+    removeEventListener(type, handler) { this.listeners[type] = (this.listeners[type] || []).filter(fn => fn !== handler); },
     dispatchEvent(event) { for (const handler of this.listeners[event.type] || []) handler(event); } },
   getComputedStyle: node => ({ display: node.style.display || 'block', position: node.style.position || 'static' }),
   location: { href: 'https://demo.invalid/' },
@@ -103,6 +114,9 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
   renderPins: candidates => rendered.push(candidates), stopTrackingPins() {},
   trustedUi: event => event.isTrusted,
   _emit: intent => intents.push(intent), cancelListening() {} });
+context.MutationObserver = MutationObserver;
+context.Event = class Event { constructor(type, options) { this.type = type; Object.assign(this, options); } };
+context.host = element('div');
 const start = source.indexOf('  const cursorIds =');
 const uiStart = source.indexOf('  function showPlainMessage', start);
 const lifecycle = source.indexOf('  function revokeActionAuthority', uiStart);
@@ -110,7 +124,7 @@ const end = source.indexOf('  function updateLiveInspector', lifecycle);
 context.positionNote = () => {};
 context.renderNote = () => {};
 vm.runInContext(source.slice(start, uiStart) + source.slice(lifecycle, end) +
-  '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, confirmClick, revokeActionAuthority };', context);
+  '\nthis.collect = { hitNode, safeText, safeLabel, rememberHit, captureCursorContext, captureActionContext, actionStructure, actionWrite, actionPress, actionKeyTarget, actionScroll, activateSnapshot, inspectSnapshot, highlightSnapshot, clickSnapshot, requestActionConfirmation, clearActionConfirmation, confirmClick, revokeActionAuthority };', context);
 const api = context.collect;
 assert.equal(api.safeText(section), 'Visible content');
 assert.equal(api.safeText(payment), '[redacted]');
@@ -520,7 +534,7 @@ test('confirmation rejects synthetic clicks, emits once, and expires on capture'
   const snapshot = api.captureCursorContext();
   api.activateSnapshot(snapshot.snapshot_id, 7);
   assert.equal(api.requestActionConfirmation({ action_id: 'opaque-action', resolution_id: 7,
-    label: '<img src=x onerror=alert(1)>' }).ok, true);
+    handle: snapshot.history.at(-1).id, label: '<img src=x onerror=alert(1)>' }).ok, true);
   const before = intents.length;
   assert.equal(api.confirmClick(true, { isTrusted: false, button: 0, detail: 1 }), false);
   assert.equal(api.confirmClick(true, { isTrusted: true, button: 0, detail: 0 }), false, 'keyboard activation has detail 0');
@@ -533,7 +547,7 @@ test('confirmation rejects synthetic clicks, emits once, and expires on capture'
   assert.equal(intents.length, before + 1);
   assert.equal(intents.at(-1).type, 'confirm_action');
   assert.equal(intents.at(-1).approved, true);
-  api.requestActionConfirmation({ action_id: 'expired', resolution_id: 7 });
+  api.requestActionConfirmation({ action_id: 'expired', resolution_id: 7, handle: snapshot.history.at(-1).id });
   api.captureCursorContext();
   assert.equal(api.confirmClick(true, physicalClick), false, 'a new capture revokes');
   assert.equal(intents.length, before + 1);
@@ -634,4 +648,85 @@ test('ordinary asterisks and underscores stay readable', () => {
   assert.equal(words(MD.view('*terms apply')), '*terms apply');
   assert.ok(tags(MD.view('**never closed')).includes('strong'), 'no raw ** even in a finished answer');
   assert.ok(!words(MD.view('**never closed')).includes('*'));
+});
+
+test('task capture is separate, bounded, and never returns current field values', () => {
+  const saved = document.querySelectorAll;
+  const savedBody = document.body;
+  document.body = element('body');
+  const fields = Array.from({length: 70}, (_, i) => {
+    const field = element('input', [], {type: 'text', 'aria-label': `Field ${i}`});
+    field.type = 'text'; field.value = 'PRIVATE_CURRENT_VALUE'; return field;
+  });
+  document.querySelectorAll = () => fields;
+  try {
+    const capture = api.captureActionContext();
+    assert.equal(Object.keys(capture.handles).length, 64);
+    assert.equal(capture.history.length, 0);
+    assert.ok(!JSON.stringify(capture).includes('PRIVATE_CURRENT_VALUE'));
+    api.activateSnapshot(capture.snapshot_id, 40);
+    const structure = api.actionStructure(capture.snapshot_id, 40);
+    assert.equal(structure.fields.length, 64);
+    assert.ok(!JSON.stringify(structure).includes('PRIVATE_CURRENT_VALUE'));
+    assert.equal(api.actionPress(capture.snapshot_id, 40, structure.fields[0].handle, 'Enter').ok, false);
+  } finally { document.querySelectorAll = saved; document.body = savedBody; }
+});
+
+test('approval rechecks content atomically and rejects edit-and-restore history', () => {
+  const saved = document.querySelectorAll;
+  const node = element('button', [text('Send')]);
+  const field = element('input', [], {type: 'text', 'aria-label': 'Recipient'});
+  field.type = 'text'; field.value = 'one@example.test';
+  const savedBody = document.body;
+  const form = element('form', [node, field]);
+  node.form = form; field.form = form;
+  document.body = element('body', [form]);
+  document.querySelectorAll = selector => selector.includes('button') ? [node, field] : [field];
+  const physical = {isTrusted: true, button: 0, detail: 1, pointerType: 'mouse'};
+  try {
+    const capture = api.captureActionContext();
+    api.activateSnapshot(capture.snapshot_id, 41);
+    const handle = Object.keys(capture.handles)[0];
+    const fp = api.inspectSnapshot(capture.snapshot_id, 41, handle).fingerprint;
+    const request = id => api.requestActionConfirmation({action_id: id, resolution_id: 41, handle, label: 'Send'});
+    assert.equal(request('restore').ok, true);
+    field.value = 'changed@example.test';
+    for (const handler of document.listeners.input || []) handler({target: field});
+    field.value = 'one@example.test';
+    assert.equal(api.confirmClick(true, physical), true);
+    assert.equal(api.clickSnapshot(capture.snapshot_id, 41, handle, fp, 'restore').executed, false);
+    assert.equal(node.clickCount || 0, 0);
+    assert.equal(request('contenteditable-change').ok, true);
+    observers.at(-1).records.push({target: field}); // queued edit-and-restore DOM mutations
+    api.confirmClick(true, physical);
+    assert.equal(api.clickSnapshot(capture.snapshot_id, 41, handle, fp, 'contenteditable-change').executed, false);
+    assert.equal(request('single-use').ok, true);
+    assert.equal(api.clickSnapshot(capture.snapshot_id, 41, handle, fp, 'single-use').executed, false, 'no trusted consent');
+    assert.equal(request('accepted').ok, true);
+    api.confirmClick(true, physical);
+    assert.equal(api.clickSnapshot(capture.snapshot_id, 41, handle, fp, 'accepted').executed, true);
+    assert.equal(api.clickSnapshot(capture.snapshot_id, 41, handle, fp, 'accepted').executed, false);
+  } finally { document.querySelectorAll = saved; api.revokeActionAuthority(); document.body = savedBody; }
+});
+
+test('batch writes revalidate later fields after earlier input handlers', () => {
+  const saved = document.querySelectorAll;
+  const first = element('div', [], {contenteditable: 'true', 'aria-label': 'First'});
+  const second = element('div', [], {contenteditable: 'true', 'aria-label': 'Second'});
+  for (const node of [first, second]) {
+    node.isContentEditable = true;
+    node.textContent = '';
+    node.dispatchEvent = event => { if (node === first && event.type === 'input') second.isConnected = false; };
+  }
+  document.querySelectorAll = () => [first, second];
+  try {
+    const capture = api.captureActionContext();
+    api.activateSnapshot(capture.snapshot_id, 42);
+    const handles = Object.keys(capture.handles);
+    const result = api.actionWrite(capture.snapshot_id, 42, handles.map(handle => ({handle, text: 'New draft'})));
+    assert.equal(result.ok, false);
+    assert.equal(result.executed, true);
+    assert.equal(first.textContent, 'New draft');
+    assert.equal(second.textContent, '');
+  } finally { document.querySelectorAll = saved; }
 });

@@ -238,6 +238,8 @@
   let activeSnapshot = null;
   let destroyed = false;
   let confirmation = null;
+  let actionApproval = null;
+  let actionTask = null;
   let inbox = null;
   let inboxRevision = -1;
   const fingerprints = new WeakMap();
@@ -247,17 +249,21 @@
     const type = String(el.type || el.getAttribute("type") || "").toLowerCase();
     const role = el.getAttribute("role") || "";
     return { tag, type, role, label: safeLabel(el), class_name: String(el.className || "").slice(0, 300),
-      form_submit: !!el.closest("form") && (tag === "button" && (!type || type === "submit") ||
+      url: tag === "a" ? safeActionUrl(el.getAttribute("href")) : "",
+      new_tab: tag === "a" && el.getAttribute("target") === "_blank",
+      same_document: tag === "a" && String(el.getAttribute("href") || "").includes("#") &&
+        String(el.href || "").split("#")[0] === location.href.split("#")[0],
+      form_submit: !!(el.form || el.closest("form")) && (tag === "button" && (!type || type === "submit") ||
         tag === "input" && (type === "submit" || type === "image")),
       disabled: !!el.disabled || el.matches(":disabled") || el.getAttribute("aria-disabled") === "true" || !!el.closest("[inert]"),
       clickable: tag === "button" || tag === "a" && !!el.getAttribute("href") ||
         tag === "input" && ["button", "submit", "reset", "checkbox", "radio", "image"].includes(type) ||
-        role === "button" || role === "link" };
+        ["button", "link", "tab", "checkbox", "radio"].includes(role) };
   }
   function fingerprint(el) {
     const descriptor = JSON.stringify([cursorId(el), actionFacts(el), el.getAttribute("href"),
-      el.getAttribute("formaction"), el.closest("form") ? cursorId(el.closest("form")) : null,
-      el.closest("form")?.getAttribute("action"), el.closest("form")?.getAttribute("method"),
+      el.getAttribute("formaction"), (el.form || el.closest("form")) ? cursorId(el.form || el.closest("form")) : null,
+      (el.form || el.closest("form"))?.getAttribute("action"), (el.form || el.closest("form"))?.getAttribute("method"),
       el.getAttribute("id"), el.getAttribute("name"), el.getAttribute("onclick"), el.getAttribute("target")]);
     const previous = fingerprints.get(el);
     if (previous?.descriptor === descriptor) return previous.token;
@@ -267,13 +273,16 @@
   }
   const sensitiveSelector = 'input[type="password"],[autocomplete^="cc-"],[autocomplete="current-password"],[autocomplete="new-password"],[name*="card" i],[name*="payment" i],[name*="cvv" i],[name*="cvc" i],[name^="cc-" i],[id*="card" i],[id*="payment" i],[id*="cvv" i],[id*="cvc" i],[id^="cc-" i]';
   function sensitive(el) {
-    let field = el && el.closest("input,textarea,select,[contenteditable]");
+    let field = el && (el.closest("input,textarea,select,[contenteditable]") || el.closest("label")?.control);
     for (let host = el?.getRootNode?.().host; !field && host; host = host.getRootNode?.().host)
       field = host.closest("input,textarea,select,[contenteditable]");
     if (!field) return false;
     const tokens = (field.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
+    const descriptor = ["name", "id", "aria-label", "placeholder", "autocomplete"].map(k => field.getAttribute(k) || "").join(" ") +
+      " " + [...(field.labels || [])].map(label => label.textContent || "").join(" ");
     return field.matches(sensitiveSelector) ||
-      tokens.some(token => token.startsWith("cc-") || token === "current-password" || token === "new-password");
+      /password|passcode|passphrase|payment|credit.?card|debit.?card|card.?number|card.?holder|expir(?:y|ation)|valid.?thru|cvv|cvc|secret|token|api.?key|access.?key|private.?key|credential|bearer|otp|one.?time|verification.?code|security.?code|security.?answer|(?:^|[^a-z])pin(?:$|[^a-z])|ssn|social.?security|routing|iban|bank.?account|account.?number/i.test(descriptor) ||
+      tokens.some(token => token.startsWith("cc-") || ["current-password", "new-password", "one-time-code"].includes(token));
   }
   function rendered(el) {
     return el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
@@ -667,6 +676,124 @@
     }
     return capture;
   }
+  function safeActionUrl(value) {
+    try {
+      if (typeof value !== "string" || !value || value.length > 8192 || /[\s\\\x00-\x1f\x7f]/.test(value)) return "";
+      const url = new URL(value, location.href);
+      if (!["http:", "https:"].includes(url.protocol) || [...url.searchParams].length > 128) return "";
+      url.username = ""; url.password = "";
+      for (const [key, value] of [...url.searchParams])
+        if (secretQuery(key, value)) url.searchParams.delete(key);
+      url.hash = "";
+      return url.href.length <= 600 ? url.href : "";
+    } catch (_) { return ""; }
+  }
+  function captureActionContext() {
+    clearActionConfirmation();
+    const snapshotId = `${snapshotInstance}:${++snapshotSerial}`, identities = new Map();
+    const capture = {version: 1, snapshot_id: snapshotId, captured_at: Date.now() / 1000,
+      page_url: safeActionUrl(location.href), page_title: String(document.title || "").slice(0, 160),
+      history: [], targets: [], blocks: [], controls: [], handles: {}, lit: []};
+    for (const node of document.querySelectorAll('button,a,input,textarea,select,[contenteditable],[role=button],[role=link],[role=tab],[role=checkbox],[role=radio]')) {
+      if (identities.size >= 64) break;
+      if (node.closest("#hermes-gaze-root") || sensitive(node) || !rendered(node) ||
+          node.matches('[contenteditable="false"]') || node.type === "hidden") continue;
+      const id = cursorId(node), facts = actionFacts(node), r = node.getBoundingClientRect();
+      identities.set(id, {node, fingerprint: fingerprint(node), kind: facts.role || facts.tag});
+      capture.handles[id] = {...facts, kind: facts.role || facts.tag, rect_vp: [r.left, r.top, r.width, r.height]};
+      capture.controls.push({id, available: true, ...facts});
+    }
+    identities.actionUrl = location.href;
+    identities.actionRevoked = false;
+    snapshots.set(snapshotId, identities);
+    while (snapshots.size > 32) snapshots.delete(snapshots.keys().next().value);
+    return capture;
+  }
+  function actionStructure(snapshotId, resolutionId) {
+    const fields = [], controls = [];
+    for (const [handle, entry] of snapshots.get(snapshotId) || []) {
+      const d = inspectSnapshot(snapshotId, resolutionId, handle), node = entry.node;
+      if (!d.ok || d.disabled || !rendered(node)) continue;
+      const label = safeLabel(node) || [...(node.labels || [])].map(n => safeText(n, 100)).join(" ").slice(0, 100);
+      if (writableField(node, d)) fields.push({handle, label, type: node.isContentEditable ? "contenteditable" : d.type || d.tag,
+        ...(d.tag === "select" ? {options: [...node.options].slice(0, 64).map(o => String(o.label || o.textContent || "").trim().slice(0, 100))} : {})});
+      else if (d.clickable) controls.push({handle, label, type: d.type, form_submit: d.form_submit, ...(d.url ? {url: d.url} : {})});
+    }
+    if (!activeSnapshot || activeSnapshot.id !== snapshotId || activeSnapshot.resolutionId !== resolutionId)
+      return {ok: false, error: "Inactive snapshot"};
+    return {ok: true, fields, controls, page_text: safeText(document.body, 1800)};
+  }
+  function writableField(node, d) {
+    return node && !sensitive(node) && !node.readOnly && !d.disabled && rendered(node) &&
+      (node.isContentEditable || ["textarea", "select"].includes(d.tag) ||
+        d.tag === "input" && ["text", "email", "tel", "date", "datetime-local", "month", "week", "time", "number", "search", "url"].includes(d.type));
+  }
+  function actionWrite(snapshotId, resolutionId, entries) {
+    if (!Array.isArray(entries) || !entries.length || entries.length > 64 ||
+        new Set(entries.map(e => e?.handle)).size !== entries.length)
+      return {ok: false, executed: false, error: "Choose 1–64 distinct fields"};
+    let validationError = "";
+    function validate(e) {
+      if (!e || typeof e.text !== "string" || e.text.length > 20000) return null;
+      const d = inspectSnapshot(snapshotId, resolutionId, e.handle), node = snapshotEntry(snapshotId, resolutionId, e.handle)?.node;
+      if (!d.ok || !writableField(node, d)) return null;
+      if (d.tag === "input" && ["date", "datetime-local", "month", "week", "time", "number"].includes(d.type)) {
+        const probe = document.createElement("input");
+        probe.type = d.type; probe.value = e.text;
+        if (probe.value !== e.text) {
+          validationError = `Invalid ${d.type} value; use its native format (date: YYYY-MM-DD).`;
+          return null;
+        }
+      }
+      const option = d.tag === "select" ? [...node.options].find(o => !o.disabled && (o.textContent.trim() === e.text || o.value === e.text)) : null;
+      if (d.tag === "select" && !option) return null;
+      return {node, d, option};
+    }
+    if (entries.some(e => !validate(e))) return {ok: false, executed: false, error: validationError || "Unavailable field or option"};
+    const written = [];
+    for (const e of entries) {
+      const current = validate(e);
+      if (!current) return {ok: false, executed: written.length > 0, written, error: validationError || "Field changed during batch"};
+      const {node, d, option} = current;
+      if (option) node.selectedIndex = [...node.options].indexOf(option);
+      else if (node.isContentEditable) node.textContent = e.text;
+      else Object.getOwnPropertyDescriptor(d.tag === "textarea" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value").set.call(node, e.text);
+      node.dispatchEvent(new Event("input", {bubbles: true}));
+      node.dispatchEvent(new Event("change", {bubbles: true}));
+      written.push(e.handle);
+    }
+    return {ok: true, executed: true, written};
+  }
+  function actionKeyTarget(snapshotId, resolutionId, handle) {
+    const d = inspectSnapshot(snapshotId, resolutionId, handle), node = snapshotEntry(snapshotId, resolutionId, handle)?.node;
+    if (!d.ok || d.disabled || !node || !rendered(node)) return {ok: false, error: "Unavailable key target"};
+    if (d.clickable) return {ok: true, handle};
+    const submit = node.form && [...node.form.elements].find(n => n.type === "submit" && !n.disabled);
+    for (const [h, entry] of snapshots.get(snapshotId) || [])
+      if (entry.node === submit) return {ok: true, handle: h};
+    return {ok: false, error: "No captured activation target; use fill for text"};
+  }
+  function actionPress(snapshotId, resolutionId, handle, key) {
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "Tab", "Escape", "Backspace", "Delete"].includes(key))
+      return {ok: false, executed: false, error: "Unsupported key; activation requires guarded click"};
+    const d = inspectSnapshot(snapshotId, resolutionId, handle), node = snapshotEntry(snapshotId, resolutionId, handle)?.node;
+    if (!d.ok || !node || !rendered(node) || d.disabled || sensitive(node) ||
+        !(writableField(node, d) || ["checkbox", "radio"].includes(d.type)))
+      return {ok: false, executed: false, error: "Unavailable editable key target"};
+    node.focus();
+    return {ok: true, focused: document.activeElement === node, key};
+  }
+  function actionScroll(snapshotId, resolutionId, pixels, handle = null) {
+    const saved = snapshots.get(snapshotId);
+    if (!activeSnapshot || activeSnapshot.id !== snapshotId || activeSnapshot.resolutionId !== resolutionId ||
+        saved?.actionRevoked || saved?.actionUrl !== location.href || !Number.isFinite(pixels) || Math.abs(pixels) > 2000)
+      return {ok: false, executed: false, error: "Invalid scroll or snapshot"};
+    const node = handle === null ? window : snapshotEntry(snapshotId, resolutionId, handle)?.node;
+    if (!node || handle !== null && (!inspectSnapshot(snapshotId, resolutionId, handle).ok || !rendered(node)))
+      return {ok: false, executed: false, error: "Unavailable scroll target"};
+    node.scrollBy(0, pixels);
+    return {ok: true, executed: true};
+  }
   let latestResolution = 0;
   function activateSnapshot(snapshotId, resolutionId) {
     if (destroyed || !Number.isSafeInteger(resolutionId) || resolutionId <= 0 ||
@@ -697,7 +824,7 @@
         type: "", form_submit: false, class_name: "", disabled: false, clickable: false,
         fingerprint: `${snapshotId}:${handle}` };
     }
-    if (!entry || !entry.node || !entry.node.isConnected || sensitive(entry.node))
+    if (!entry || !entry.node || !entry.node.isConnected || sensitive(entry.node) || !readOnly && !rendered(entry.node))
       return { ok: false, error: "Snapshot target unavailable" };
     const current = fingerprint(entry.node);
     if (current !== entry.fingerprint) return { ok: false, error: "Target changed since capture" };
@@ -728,7 +855,17 @@
     if (hudMessage) showPlainMessage(hudMessage);
     return { ok: true };
   }
-  function clickSnapshot(snapshotId, resolutionId, handle, expectedFingerprint) {
+  function clickSnapshot(snapshotId, resolutionId, handle, expectedFingerprint, approvalId = null) {
+    const approval = actionApproval;
+    if (approvalId) {
+      actionApproval = null; // Single use, before any page callback.
+      const changed = approval ? approval.observer.takeRecords().some(approval.relevant) : false;
+      approval?.cleanup();
+      if (!approval || !approval.approved || approval.id !== approvalId || approval.invalid || changed ||
+          approval.snapshotId !== snapshotId || approval.resolutionId !== resolutionId || approval.handle !== handle ||
+          approval.url !== location.href || approval.content !== approvalContent(approval.scope).content)
+        return {ok: false, executed: false, error: "Approval content or destination changed"};
+    }
     const descriptor = inspectSnapshot(snapshotId, resolutionId, handle);
     if (!descriptor.ok) return { ...descriptor, executed: false };
     if (!expectedFingerprint || expectedFingerprint !== descriptor.fingerprint ||
@@ -738,9 +875,28 @@
     entry.node.click();
     return { ok: true, executed: true };
   }
+  function approvalContent(scope) {
+    const fields = [], summary = [];
+    let size = 0;
+    for (const node of document.querySelectorAll("input,textarea,select,[contenteditable]")) {
+      if (!scope.contains(node) && node.form !== scope || node.closest("#hermes-gaze-root") || sensitive(node) ||
+          node.type === "hidden" || node.matches('[contenteditable="false"]')) continue;
+      const value = node.isContentEditable ? node.textContent : String(node.value || "");
+      const label = safeLabel(node) || node.labels?.[0]?.textContent?.trim().slice(0, 100) || "Field";
+      size += value.length;
+      if (fields.length >= 64 || value.length > 20000 || size > 128000)
+        return {error: "Draft too large to bind safely; review and commit it yourself."};
+      fields.push([cursorId(node), label, value, !!node.checked, node.selectedIndex ?? null]);
+      if (rendered(node)) summary.push(`${label}: ${value.length > 600 ? value.slice(0, 600) + "… (review full text on page)" : value}${["checkbox", "radio"].includes(node.type) ? node.checked ? " (selected)" : " (not selected)" : ""}`);
+    }
+    const context = safeText(scope, 6000);
+    if (context) summary.push(`Page context: ${context}`);
+    return {content: JSON.stringify([fields, context]), summary: summary.join("\n")};
+  }
   function clearActionConfirmation() {
     const had = !!confirmation;
     confirmation = null;
+    if (actionApproval && !actionApproval.approved) { actionApproval.cleanup(); actionApproval = null; }
     if (had) renderNote();
     return true;
   }
@@ -749,9 +905,43 @@
     if (destroyed || !activeSnapshot || info?.resolution_id !== activeSnapshot.resolutionId ||
         typeof info.action_id !== "string" || !info.action_id)
       return { ok: false, error: "Stale confirmation" };
-    // Plain text only: the label comes from the page.
-    confirmation = { label: String(info.label || ""), actionId: info.action_id, resolutionId: info.resolution_id,
-      handle: info.handle || "" };
+    if (actionApproval) { actionApproval.cleanup(); actionApproval = null; }
+    const entry = snapshotEntry(activeSnapshot.id, info.resolution_id, info.handle);
+    const live = inspectSnapshot(activeSnapshot.id, info.resolution_id, info.handle);
+    if (!entry?.node || !live.ok || !live.clickable || live.disabled)
+      return {ok: false, error: "Unavailable confirmation target"};
+    const node = entry.node, scope = node.form || node.closest("form,[role=dialog]") || document.body;
+    const content = approvalContent(scope);
+    if (content.error) return {ok: false, error: content.error};
+    const destination = safeActionUrl(node.getAttribute("formaction") || node.form?.action || node.closest("form")?.getAttribute("action") || node.getAttribute("href") || location.href);
+    const approval = {id: info.action_id, snapshotId: activeSnapshot.id, resolutionId: info.resolution_id,
+      handle: info.handle, url: location.href, scope, content: content.content, invalid: false, approved: false};
+    const changed = () => { approval.invalid = true; };
+    approval.relevant = r => !host.contains(r.target) &&
+      (scope.contains(r.target) || r.target === node || r.target.form === scope);
+    const edited = event => { if (approval.relevant(event)) changed(); };
+    const observer = new MutationObserver(records => {
+      if (records.some(approval.relevant)) changed();
+    });
+    observer.observe(document.documentElement, {subtree: true, attributes: true, childList: true, characterData: true});
+    document.addEventListener("input", edited, true);
+    document.addEventListener("change", edited, true);
+    window.addEventListener("popstate", changed);
+    window.addEventListener("hashchange", changed);
+    // Input events and DOM records track edits; isolated-world setters cannot
+    // observe main-world writes. The atomic content comparison is authoritative.
+    approval.observer = observer;
+    approval.cleanup = () => {
+      observer.disconnect();
+      document.removeEventListener("input", edited, true);
+      document.removeEventListener("change", edited, true);
+      window.removeEventListener("popstate", changed);
+      window.removeEventListener("hashchange", changed);
+      // No website properties or history methods are patched.
+    };
+    actionApproval = approval;
+    confirmation = {label: String(info.label || ""), actionId: info.action_id, resolutionId: info.resolution_id,
+      handle: info.handle || "", summary: content.summary, destination: destination || "Current page (destination not declared)"};
     renderNote();
     return { ok: true };
   }
@@ -761,6 +951,7 @@
     if (!pending || !trustedUi(event) || event.button !== 0 || event.detail < 1 ||
         event.pointerType && event.pointerType !== "mouse" || !activeSnapshot ||
         activeSnapshot.resolutionId !== pending.resolutionId) return false;
+    if (actionApproval?.id === pending.actionId) actionApproval.approved = approved === true;
     clearActionConfirmation();
     _emit({ type: "confirm_action", action_id: pending.actionId, resolution_id: pending.resolutionId, approved });
     return true;
@@ -1180,7 +1371,9 @@
       S.compose.focus = false;
       return;
     }
-    if (S.view === "confirm") { rawSend({...base, view: "confirm", id: confirmation.actionId, label: confirmation.label}); return; }
+    if (S.view === "confirm") { rawSend({...base, view: "confirm", id: confirmation.actionId, label: confirmation.label,
+      summary: confirmation.summary, destination: confirmation.destination, doing: !!actionTask}); return; }
+    if (S.view === "doing") { rawSend({...base, view: "doing", label: actionTask?.label || "Working on this page"}); return; }
     if (S.view === "lens") {
       rawSend({...base, view: "lens", id: state.resolutionId, dwell: state.dwellMs,
         options: state.lensCandidates.map(c => humanName(c.label || c.summary || "", 44))});
@@ -1890,6 +2083,7 @@
     if (m.t !== "ui") return;
     const item = S.view === "answer" ? current() : null;
     const a = m.action;
+    if (a === "stop_action_task") { stopActionTask(); return; }
     if (a === "next") step(1);
     else if (a === "prev") step(-1);
     else if (a === "dismiss") dismissNote();
@@ -1965,12 +2159,32 @@
       layout();
     }
   }
+  function stopActionTask() {
+    if (!actionTask) return;
+    actionTask = null;
+    revokeActionAuthority();
+    if (actionApproval) { actionApproval.cleanup(); actionApproval = null; }
+    if (S.view === "doing") restoreAfterOverlay();
+    _emit({type: "stop_action_task"});
+  }
   function onSessionEvent(event) {
-    if (!destroyed && event?.type === "inbox") renderInbox(event);
+    if (destroyed) return;
+    if (event?.type === "inbox") renderInbox(event);
+    if (event?.type === "action_task") {
+      actionTask = event.status === "doing" ? {label: String(event.label || "Working on this page")} : null;
+      if (event.status === "stopped") {
+        clearActionConfirmation();
+        if (actionApproval) { actionApproval.cleanup(); actionApproval = null; }
+      }
+      if (confirmation) pushCard();
+      else if (actionTask) openView("doing", {targets: []});
+      else if (S.view === "doing") restoreAfterOverlay();
+    }
   }
   function revokeActionAuthority() {
     for (const saved of snapshots.values()) saved.actionRevoked = true;
     clearActionConfirmation();
+    if (actionApproval) { actionApproval.cleanup(); actionApproval = null; }
     state.lensActive = false;
   }
   function onNavigation() {
@@ -2164,7 +2378,6 @@
       resolution_id: state.resolutionId || 0,
       candidate_index: idx + 1,
       modality: modality || "click",
-      execute: true,
     });
   }
 
@@ -2382,6 +2595,7 @@
     }
     if (!down) return;
     if (e.key === "Escape") {
+      if (actionTask) { swallow(); stopActionTask(); return; }
       if (S.hold) { swallow(); spaceHeld = false; S.keyDown = false; holdEnd(true, "Recording cancelled by you."); return; }
       if (S.view === "compose") { swallow(); closeComposer(); return; }
       if (S.view || lit.size) { swallow(); dismissNote(); }
@@ -2872,6 +3086,12 @@
     armInteraction,
     extractCandidatesNear,
     captureCursorContext,
+    captureActionContext,
+    actionStructure,
+    actionWrite,
+    actionKeyTarget,
+    actionPress,
+    actionScroll,
     activateSnapshot,
     inspectSnapshot,
     highlightSnapshot,

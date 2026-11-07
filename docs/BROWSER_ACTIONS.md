@@ -1,4 +1,175 @@
-# Browser actions: head-to-head design experiment
+# Browser actions
+
+**Acceptance is not complete.** The last fully measured production path passed
+23/25 workflows, but new-tab email was 3/5. The final explicit tab-choice schema
+has local Chrome coverage; its free-model rerun is blocked by OpenRouter's daily
+HTTP 429 quota. Do not call the ≥4/5-per-fixture release gate passed.
+
+## Production policy and tools
+
+The production path is B: a fixed captured-identity broker, not arbitrary browser
+code and not site adapters. Historical A/B evidence below explains the choice.
+
+Connect a new Hermes conversation with `/gaze connect`. Voice, the private typed
+question card and typed Hermes questions can run multi-step tasks. Saved inbox
+evidence remains immutable; an exact user session/turn gets a separate fresh
+action capture on its foreground source document. A recalled answer or page text
+does not grant action authority. A task can transfer ownership only through its
+own navigation/new-tab operation.
+
+| Tool | Arguments and result |
+|---|---|
+| `gaze_read` | No arguments; bounded structure, up to 64 captured fields/controls, options and sanitized HTTP(S) links, no field values. Returns `resolution_id`. |
+| `gaze_fill` | `resolution_id`, batch `entries:[{handle,text}]`; replaces text/native-select/contenteditable values. |
+| `gaze_click` | `resolution_id`, `handle`, required boolean `new_tab`; false for buttons/same-tab links, true opens a safe captured link in a new tab and returns its structure. Consequential/ambiguous controls request review. |
+| `gaze_press` | `resolution_id`, `handle`, listed `key`; Enter/Space route to the guarded captured activation target. No arbitrary shortcuts. |
+| `gaze_open_tab` | `resolution_id`, HTTP(S) `url`; genuinely new foreground tab, becomes action target, returns its fresh structure. |
+| `gaze_navigate` | Same arguments; navigates the task tab and returns fresh structure. |
+| `gaze_scroll` | `resolution_id`, bounded `pixels`, optional captured container `handle`. |
+| `gaze_wait` | Bounded `seconds`; waits and returns fresh structure. |
+| `gaze_request_commit` | `resolution_id`, actual commit-control `handle`; opens review, never approves or commits. |
+
+Every mutation uses the latest integer epoch and real captured identities, never
+model selectors or coordinates. A stale epoch returns fresh structure without
+executing; the model can recover with its new epoch. Navigation, scroll and
+recapture do not invent a pointer hit. Detached/changed controls fail honestly.
+Lost mutation replies mean unknown outcome, revoke the task and are never replayed.
+The existing glass surface shows Doing and Stop; Esc stops further task steps.
+Already completed typing/navigation cannot be undone by Stop.
+Simulated Lens selection is read-only too: the old selector-based `choose` click
+and its `execute` argument are removed. There is no parallel legacy action path.
+
+
+Clear action requests receive an initial bounded task structure in their trusted
+turn context, including textareas, link destinations and the current action
+epoch. Research keeps its saved scope. The model can still call `gaze_read` for a
+fresh structure. Native date/number formats are validated before any batch write,
+so an invalid date cannot silently clear an existing value.
+
+### Approval and its boundary
+
+Hermes may type, select, scroll, navigate and open tabs on ordinary sites.
+Password, payment, OTP, token and similar secret fields are excluded before
+serialization and rejected again before writes. Personal details come from
+Hermes's normal USER.md/memory/context, not a plugin profile file; unknown details
+must be asked for.
+
+Submit, Send, Buy, Delete, publish, form submissions and ambiguous controls require
+the user's trusted primary mouse click in the protected confirmation card.
+`gaze_request_commit` is appropriate even for “prepare, but do not send”: it opens
+review only. The card shows nonsensitive field content and destination in plain
+words. Approval binds the identity, epoch, owner, destination and content.
+Observed input/DOM edits invalidate it, including edit-and-restore; the final
+single DOM evaluation rechecks the content and consumes approval before the click.
+Approval survives neither a new capture nor a route/document change. No token or
+approval operation is exposed to the model. Page/answer text, synthetic events,
+speech, keyboard input and raw model tool calls cannot approve it.
+The bound draft includes relevant form/dialog fields and bounded non-field text
+(such as recipient chips); unrelated page activity does not invalidate a scoped
+form. The summary can shorten long text, but approval binds its complete bounded
+value. Larger drafts fail honestly and require manual review/commit.
+
+**A rare site may act on typing alone.** GET navigation may also have side effects.
+This is not a guarantee about arbitrary application JavaScript or hidden server
+state. Cross-origin frames, closed shadow, canvas controls and arbitrary custom
+keyboard semantics remain unsupported, not permission for a raw-code fallback.
+Unobservable main-world property edit-and-restore without events is not a
+universal edit-history guarantee; current committed content is still rechecked.
+
+### Keep arbitrary browser code separate
+
+The companion defaults to `http://127.0.0.1:9333`, not `:9222`. It keeps its own
+persistent Chrome profile. Hermes's ordinary browser tool launches a separate
+browser by default. **Never set `BROWSER_CDP_URL`, `BU_CDP_URL`, `BU_CDP_WS`, or
+Hermes `browser.cdp_url` to the companion, or give `browser_exec`/`browser_cdp`
+its endpoint.** Connected sessions remove unsafe code/browser/terminal/delegate
+tools from model requests and veto their calls; direct guarded tools remain.
+Disconnect `/gaze` to restore normal Hermes tool use.
+The companion's own debugging port is reserved and cannot be a model navigation
+destination, including through loopback aliases. Exact tool-call identity is
+bound by execution middleware; Hermes policy hooks run on separate workers.
+
+The sandboxed card is a boundary against websites, not a raw debugger. Explicit
+CDP/OS authority can synthesize `isTrusted` input and defeat human approval, as the
+comparison demonstrated. This plugin cannot sandbox an arbitrary local process.
+
+### Hands-on checklist (user only)
+
+1. Start a new Hermes conversation, send one ordinary message, then `/gaze connect`.
+   Use the new companion Chrome, not your everyday Chrome. Wait for Listening
+   before speaking.
+2. In that Chrome, sign into Gmail yourself once. Enter passwords/2FA yourself;
+   Hermes must not read or type them. The companion profile retains your login.
+   Never connect Hermes's generic browser tools to this window.
+3. Try a harmless form: point and say “fill this out, prepare it for review”.
+   Check remembered details and that Hermes asks for anything missing. Inspect
+   the card; Cancel the first attempt.
+4. Ask “open a new tab and write an email to [your test recipient] about [topic],
+   but do not send”. Check that it is a genuinely new tab and that recipient,
+   subject and body match the card. Cancel, or consciously click Confirm.
+5. Change a draft after its card appears: confirmation must fail, not send changed
+   content. Ask again for a fresh review. Try Esc/Stop during a multi-step task;
+   no later steps or pending approval should remain.
+6. Switch tabs mid-task: it must not type into the newly focused page. Return and
+   ask again after document/route changes. Unsupported controls should fail
+   honestly. Typing itself can trigger rare-site effects; start with harmless data.
+
+All automated verification uses owned local fixtures, fake personal details and
+fake devices. Gmail and real account behavior require this user check; agents
+must not perform it.
+
+## Production measurements
+
+Real Hermes registration, pre/post/end hooks, execution middleware and tool
+dispatch; temporary HERMES_HOME and normal fake USER.md memory. Serial OpenRouter
+`nvidia/nemotron-3-ultra-550b-a55b:free`, reasoning enabled, no paid fallback:
+
+| Local fixture | Successes | Median seconds |
+|---|---:|---:|
+| Nine-field form | 5/5 | 12.446 |
+| Alternate form | 5/5 | 10.365 |
+| Two-step wizard | 5/5 | 15.360 |
+| New tab + email | 3/5 | 12.121 |
+| Unseen layout | 5/5 | 9.351 |
+
+These measurements precede the required `gaze_click.new_tab` argument and removal
+of legacy simulated click execution. Both email misses produced correct,
+guarded drafts in the wrong tab. An explicit boolean tab choice now makes that
+decision part of the click schema; it is not an email adapter.
+
+All 25 measured workflows kept secret fields unchanged, exposed no secret values,
+committed nothing before approval, rejected synthetic consent and committed once
+through the trusted driver. Injected page instructions did not bypass review.
+Real Hermes private-typed and fake-audio voice inbox turns also completed one
+form each. With phone omitted from normal memory, Hermes asked for it and left
+the field blank. These are local fake-data checks, not Gmail validation.
+
+The final-schema attempt made no tool calls: all 25 turns were rejected by the
+free provider's daily quota. Those are blocked measurements, not 0/5 behavioral
+results. The runner now stops on a provider rejection before tool execution
+instead of consuming every remaining fixture attempt.
+
+Resume the full five-per-fixture trial after the free quota resets, using the
+Hermes Python with `HERMES_DISABLE_LAZY_INSTALLS=1`:
+`python benchmark/browser_actions_production.py --runs 5 --out /absolute/new/output`.
+Do not resume from pre-schema results or the quota-rejected dataset.
+
+
+Local gates: **180 Python tests, 27 DOM tests, all seven browser JS syntax
+checks, and 25 deterministic action checks passed**. The trust-boundary (14
+checks), recording-hold (7), fake-webcam and all eight UI-review probes passed.
+The latter used `GAZE_REVIEW_LOCAL_ONLY=1`; external news/media visits were omitted.
+The default `browser_exec` smoke launched an independent blank target with no CDP
+override, not a companion tab. The installed Chrome executable stood in for an
+unavailable packaged Chromium; its profile and runtime were temporary.
+
+Machine-readable counts, failures, safety evidence and the quota blocker:
+[`browser_actions_production_results.json`](../benchmark/browser_actions_production_results.json).
+Paid model API spend: **$0**.
+
+## Historical feasibility experiment
+
+The remaining sections preserve the pre-production experiment; readiness notes there are historical.
 
 ## Recommendation
 

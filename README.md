@@ -21,7 +21,7 @@ Raw gaze/pointer tracking suffers from ~80â€“180 px of spatial jitter and driftâ
 - **Python owns policy.** Simulated and webcam gaze share Bayesian resolution. Hover sends exact cursor evidence to the model, which chooses scope; Python enforces snapshot ownership and action confirmation. The overlay only collects DOM facts and renders results.
 - **Persistent CDP sessions.** One isolated-world websocket per supported tab; reads follow focus, while actions retain their captured tab/document. Ordered nonce-bearing binding intents carry questions and native talk controls. No HTTP resolution/action endpoints.
 - **Honest failures.** Missing/detached/expired evidence and uncertain click outcomes are reported, never replaced with synthetic targets or silently retried mutations.
-- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. `webcam` uses local, personally calibrated iris/head landmarks from a separate owned camera window; it is read-only.
+- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. `webcam` uses local, personally calibrated iris/head landmarks from a separate owned camera window; gaze is read-only evidence, while explicit user action tasks use the guarded DOM tools.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
 
 ### Cursor context and actions
@@ -60,18 +60,38 @@ tabs, replacement documents and superseded requests cannot receive scope changes
 Saved-item comparisons can offer both targets/rows only when both identities are
 already in the current capture on the same document. Otherwise highlighting stays
 on the selected item's document; comparison evidence can still include both items.
-`gaze_click(handle=..., resolution_id=N)`
-activates a current control. Risky labels/classes, destructive utterances and form
-submissions require a trusted primary mouse click on the Chrome confirmation
-card. Synthetic clicks, spoken/tool confirmation, stale epochs and changed targets
-cannot approve it. Safe-looking controls execute immediately.
-Chrome displays confirmation execution, cancellation and failure outcomes.
 
-The action policy is demo-oriented and lexical, not a general website safety
-guarantee; disguised controls can evade classification. Privileged CDP/OS clients
-are outside the page-script/tool-argument confirmation boundary. Mutation requests
-are not automatically replayed after transport loss; an unknown outcome revokes
-the active snapshot.
+**Browser-action acceptance is not complete:** the last full real-Hermes trial
+scored 3/5 for new-tab email. The final explicit tab-choice schema awaits a free
+quota reset; [results and resumption](docs/BROWSER_ACTIONS.md#production-measurements).
+
+`gaze_read` starts a separate, turn-owned action capture: bounded structure and
+captured field/control identities, never field values. `gaze_fill` batches text,
+native selects and contenteditable fields; `gaze_click`, `gaze_press`,
+`gaze_open_tab`, `gaze_navigate`, `gaze_scroll` and `gaze_wait` cover the fixed
+general vocabulary. No per-site adapters or arbitrary model code. New tabs return
+their own structure and become the task target; stale epochs return fresh
+structure without replaying the rejected operation.
+
+`gaze_request_commit` shows the existing glass confirmation card, including safe
+field content and destination. Submit, Send, Buy, Delete, publish and ambiguous
+controls require a trusted primary click. Approval is content-bound and single
+use; synthetic events, page/answer text, raw model calls, speech and keys cannot
+approve. Esc or the visible Stop cancels further task steps. Unknown mutation
+outcomes revoke the task and must not be retried automatically.
+
+Hermes uses its own memory/context for personal details and asks for missing ones.
+Password, payment and similar secret fields are never read or written. **A rare
+site may act on typing alone; navigation/GETs can also have effects.** This is not
+a universal guarantee about site JavaScript. See [browser action policy and
+hands-on checklist](docs/BROWSER_ACTIONS.md).
+
+The companion's default endpoint is `127.0.0.1:9333`, not Hermes's browser tool.
+Never point `browser_exec`, `browser_cdp`, `BROWSER_CDP_URL`, `BU_CDP_URL`,
+`BU_CDP_WS` or Hermes `browser.cdp_url` at it. A connected companion session
+removes and vetoes arbitrary code/browser/terminal/delegation tools. Disconnect
+with `/gaze disconnect` to use the ordinary Hermes tool surface again. A raw
+debugger can synthesize trusted clicks; that authority defeats the private card.
 
 Collection is bounded: 60 seconds/256 cursor intervals, 64 target identities, 32
 retained captures, 1024 rows/table, 64 collected columns and 8192 captured members/
@@ -230,7 +250,7 @@ The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
    Use a new conversation, send `Reply only Ready.`, and wait for the answer.
    Then enter `/gaze connect`. Expect `Chrome companion ready` and
    `Chrome voice connected to this Hermes session`. It opens a separate
-   CDP Chrome profile on the configured port (default 9222), not the everyday
+   CDP Chrome profile on the configured port (default 9333), not the everyday
    Chrome profile. Use the newly opened window; no manual Chrome flags needed.
    Existing setup must use `plugins.isolation: in_process` and
    `plugins.entries.hermes-gaze.allow_gateway_injection: true` as above.
@@ -260,7 +280,7 @@ The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
 
 ```bash
 # inside Hermes (slash command)
-/gaze demo                 # launch Chrome (:9222) on the benchmark dashboard + inject the HUD
+/gaze demo                 # launch the companion Chrome on the benchmark dashboard + inject the HUD
 /gaze mode simulated       # noisy-gaze mode ('/gaze mode hover' for the exact Magic Pointer)
 /gaze mode webcam          # start the separate camera window (explicit user command only)
 /gaze calibrate            # local nine-point calibration; then move the pointer once per page

@@ -26,7 +26,7 @@ def _handle_slash_command(raw_args: str) -> str:
 
     if sub == "start":
         if not session.is_chrome_reachable():
-            port = urlparse(session.cdp_http_url).port or 9222
+            port = urlparse(session.cdp_http_url).port or 9333
             launch_chrome_with_cdp("about:blank", port=port)
             for _ in range(40):
                 if session.is_chrome_reachable():
@@ -48,7 +48,7 @@ def _handle_slash_command(raw_args: str) -> str:
         server.start()
         url = f"http://{server.host}:{server.port}/"
         if not session.is_chrome_reachable():
-            port = urlparse(session.cdp_http_url).port or 9222
+            port = urlparse(session.cdp_http_url).port or 9333
             launch_chrome_with_cdp(url, port=port)
             for _ in range(20):
                 if session.is_chrome_reachable():
@@ -67,11 +67,11 @@ def _handle_slash_command(raw_args: str) -> str:
         # retry briefly instead of reporting success on a silent miss.
         for _ in range(12):
             if session.ensure_overlay():
-                return f"Launched Chrome with CDP (:9222) and injected Hermes Gaze HUD on {url}"
+                return f"Launched the companion Chrome and injected Hermes Gaze on {url}"
             time.sleep(0.5)
         return (
             f"Chrome launched on {url} but the overlay failed to inject — "
-            "CDP :9222 unreachable or no page tab. Check `hermes gaze status` and Chrome."
+            "Companion CDP unreachable or no page tab. Check `hermes gaze status` and Chrome."
         )
 
     if sub == "mode" and len(argv) >= 2:
@@ -108,7 +108,7 @@ def _handle_slash_command(raw_args: str) -> str:
 
     return (
         "Hermes Gaze ('Telepathy') Status:\n"
-        f"  Chrome CDP (:9222) Connected : {session.is_chrome_reachable()}\n"
+        f"  Chrome companion Connected   : {session.is_chrome_reachable()}\n"
         f"  Active Pointing Mode         : {session.tracker.mode} (sigma={session.tracker.sigma_px}px)\n"
         f"  Online Drift Bias Offset     : {session.recalibrator.offset}\n\n"
         f"  Webcam Tracker               : {json.dumps(session.webcam_status())}\n"
@@ -126,7 +126,7 @@ def _handle_slash_command(raw_args: str) -> str:
 def _setup_cli(subparser: argparse.ArgumentParser) -> None:
     subs = subparser.add_subparsers(dest="gaze_subcommand")
     subs.add_parser("status", help="Show Chrome CDP connection and tracker status")
-    p_demo = subs.add_parser("demo", help="Launch Chrome (:9222) with the interactive Analytics & Comparison demo page")
+    p_demo = subs.add_parser("demo", help="Launch the companion Chrome with the interactive Analytics & Comparison demo page")
     p_demo.add_argument("--mode", choices=("hover", "simulated"), default="hover")
     p_listen = subs.add_parser("listen", help="Record speech from microphone, transcribe with faster-whisper, and resolve in Chrome")
     p_listen.add_argument("--duration", type=float, default=2.8, help="Recording duration in seconds")

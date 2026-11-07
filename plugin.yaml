@@ -20,6 +20,14 @@ provides_tools:
   - gaze_choose
   - gaze_highlight
   - gaze_click
+  - gaze_read
+  - gaze_fill
+  - gaze_press
+  - gaze_open_tab
+  - gaze_navigate
+  - gaze_scroll
+  - gaze_wait
+  - gaze_request_commit
   - gaze_calibrate
   - gaze_benchmark
 provides_hooks:
@@ -27,6 +35,7 @@ provides_hooks:
   - on_stream_delta
   - post_llm_call
   - on_session_end
+  - pre_tool_call
 config_schema:
   mode:
     type: str
@@ -34,8 +43,8 @@ config_schema:
     description: "Pointing source: 'hover' (exact cursor), 'simulated' (cursor + noise), or 'webcam' (personal calibrated gaze). Camera starts only through /gaze mode webcam."
   cdp_url:
     type: str
-    default: "http://127.0.0.1:9222"
-    description: "Local Chrome DevTools Protocol HTTP/WebSocket endpoint."
+    default: "http://127.0.0.1:9333"
+    description: "Companion-only local Chrome endpoint. Never expose it to Hermes browser_exec/browser_cdp or set BROWSER_CDP_URL to it."
   sigma_px:
     type: float
     default: 120.0

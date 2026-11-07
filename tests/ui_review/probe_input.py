@@ -45,6 +45,8 @@ try:
     assert first['paused'] is False and second['paused'] is True
     # Real YouTube, if reachable. Never claim playback success from a mere loaded DOM.
     try:
+        if os.environ.get('GAZE_REVIEW_LOCAL_ONLY') == '1':
+            raise RuntimeError('External media check omitted: local-fixture-only run')
         r.goto('https://www.youtube.com/watch?v=aqz-KE-bpKQ', settle=3)
         out['youtube_before'] = r.page('({url:location.href,title:document.title,videos:[...document.querySelectorAll("video")].map(v=>({paused:v.paused,time:v.currentTime,ready:v.readyState,error:v.error?.code})),message:document.body.innerText.slice(0,1200)})')
         r.page('document.activeElement?.blur();document.body.tabIndex=-1;document.body.focus()')

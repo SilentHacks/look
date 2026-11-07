@@ -149,7 +149,7 @@ class WebcamContracts(unittest.TestCase):
                 self.assertEqual(session.resolution_id, epoch)
             active = service.resolve_now(session, mode="simulated", utterance="Export this", pushed=captured)
             with self.subTest("choose also requires the live simulated mode"):
-                self.assertFalse(session.choose(resolution_id=active["resolution_id"], execute=False)["ok"])
+                self.assertFalse(session.choose(resolution_id=active["resolution_id"])["ok"])
                 self.assertEqual(session.tracker.mode, "webcam")
                 self.assertTrue(all(s.source != "webcam" for s in session.ring_buffer.snapshot()))
 

@@ -159,7 +159,6 @@ class TestServiceIntents(unittest.TestCase):
                 resolution_id=self.session.resolution_id + 99,
                 candidate_index=1,
                 modality="semantic_lens",
-                execute=True,
             ),
             replies.append,
         )
@@ -175,7 +174,6 @@ class TestServiceIntents(unittest.TestCase):
                 resolution_id=self.session.resolution_id,
                 candidate_index=1,
                 modality="semantic_lens",
-                execute=True,
             ),
             replies.append,
         )
@@ -191,7 +189,6 @@ class TestServiceIntents(unittest.TestCase):
                 resolution_id=1,
                 candidate_index=1,
                 modality="semantic_lens",
-                execute=True,
             ),
             replies.append,
         )

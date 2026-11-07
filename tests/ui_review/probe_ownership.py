@@ -17,8 +17,10 @@ try:
  r.front(a);r.press('Escape','Escape');time.sleep(.3);r.aim('#first')
  # A route change must not stop native recording; full document replacement must.
  r.space_down();until(lambda:r.session.microphone._stream is not None)
+ until(lambda:r.dbg()['talk']['listening'])  # Wait for Listening before testing a mid-recording route.
  r.page("history.replaceState({},'', '#route-change')");time.sleep(.3)
  out['recording_after_route']=r.session.microphone._stream is not None
+ out['route_capture_ui']=r.text()
  old=a._context_unique_id
  r.goto(Path(__file__).with_name('hostile.html').as_uri()+'?new-document',a,settle=.3)
  until(lambda:r.session.microphone._stream is None)
@@ -31,12 +33,15 @@ try:
  r.aim('#password');c=r.session.cdp.capture();p=service.cursor_result(c,'What is this?')
  out['sensitive_wire']={'available':c['targets'][0].get('available'),'sensitive':c['targets'][0].get('sensitive'),'value_or_label_leak':any(x in json.dumps(c)+p['context'] for x in ['PASSWORD_VALUE_CANARY','SENSITIVE_LABEL_CANARY'])}
  r.aim('#hidden');c=r.session.cdp.capture();out['hidden_target']=[{'id':t['id'],'available':t.get('available'),'label':t.get('label'),'reason':t.get('reason')} for t in c['targets'] if t.get('selector')=='#hidden']
- # An ordinary real public article listing, no media/recording/model calls.
- r.goto('https://news.ycombinator.com/',a,settle=.5)
- out['real_news']={'title':r.page('document.title'),'overlay_ready':r.dbg()['talk']['ready'],'headlines':r.page('document.querySelectorAll(".titleline").length')}
- if out['real_news']['headlines']:
-  r.aim('.titleline a');c=r.session.cdp.capture();p=service.cursor_result(c,'Explain the link')
-  out['real_news'].update(capture_ok=p['ok'],packet_chars=len(p['context']),owner_matches=c['browser_document']==a._context_unique_id)
+ # External article visit is optional; local-only feature verification never opens a real site.
+ if os.environ.get('GAZE_REVIEW_LOCAL_ONLY') != '1':
+  r.goto('https://news.ycombinator.com/',a,settle=.5)
+  out['real_news']={'title':r.page('document.title'),'overlay_ready':r.dbg()['talk']['ready'],'headlines':r.page('document.querySelectorAll(".titleline").length')}
+  if out['real_news']['headlines']:
+   r.aim('.titleline a');c=r.session.cdp.capture();p=service.cursor_result(c,'Explain the link')
+   out['real_news'].update(capture_ok=p['ok'],packet_chars=len(p['context']),owner_matches=c['browser_document']==a._context_unique_id)
+ else:
+  out['real_news']={'omitted':'Local-fixture-only run'}
  # Reads during navigation must not tear down a healthy socket and race the load rearm.
  out['rapid_navigation']=[]
  r.front(a)

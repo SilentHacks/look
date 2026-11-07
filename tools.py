@@ -66,18 +66,14 @@ GAZE_RESOLVE_SCHEMA = _schema(
 
 GAZE_CHOOSE_SCHEMA = _schema(
     "gaze_choose",
-    "Select a numbered candidate (1-4) from an open Semantic Lens disambiguation overlay, execute or confirm it, "
-    "and update the implicit online drift recalibrator.",
+    "Select a numbered candidate (1-4) from an open simulated Semantic Lens and update drift calibration. "
+    "Selection never clicks or approves; use fresh gaze_read and guarded action tools for browser input.",
     {
         "candidate_index": {
             "type": "integer",
             "minimum": 1,
             "maximum": LENS_MAX_CARDS,
             "description": "1-based index of the candidate card in the Semantic Lens (e.g. 1 for [1]).",
-        },
-        "execute": {
-            "type": "boolean",
-            "description": "Whether to click/activate the chosen DOM element in Chrome (default true).",
         },
     },
     required=["candidate_index"],
@@ -98,17 +94,17 @@ GAZE_HIGHLIGHT_SCHEMA = _schema(
 
 GAZE_CLICK_SCHEMA = _schema(
     "gaze_click",
-    "Click one current snapshot control, not a data container. Clarify ambiguous action requests first; "
-    "a question about a control is not permission to click. Claim execution only when executed is true. "
-    "If confirmation_required is returned, tell the user which control awaits their trusted primary click in Chrome. "
-    "Never approve through tools, speech, dwell or keys, and never bypass gaze_click or the confirmation with browser, "
-    "JavaScript or terminal tools. Changed, detached or expired targets need fresh gaze_resolve evidence. "
-    "An unknown click outcome must not be retried.",
+    "Click a captured non-consequential control. Use the current resolution_id from gaze_read. "
+    "Consequential or ambiguous controls open trusted confirmation instead; gaze_request_commit explicitly "
+    "requests review. Never claim execution unless executed is true. On stale resolution use the returned "
+    "fresh structure and retry with its epoch; never retry an unknown outcome. Explicitly choose new_tab: "
+    "true for a link when the user requests a NEW tab; false for buttons and same-tab links.",
     {
         "handle": {"type": "string", "description": "Current @ handle of the control to activate, not the data subject."},
         "resolution_id": {"type": "integer", "description": "Resolution number in the current gaze context."},
+        "new_tab": {"type": "boolean", "description": "Required tab choice: true opens a safe captured link in a NEW tab; false activates buttons or same-tab links."},
     },
-    required=["handle", "resolution_id"],
+    required=["handle", "resolution_id", "new_tab"],
 )
 
 GAZE_CALIBRATE_SCHEMA = _schema(
@@ -145,6 +141,83 @@ GAZE_BENCHMARK_SCHEMA = _schema(
         },
     },
 )
+
+_EPOCH_ARG = {"type": "integer", "description": "Latest resolution_id from gaze_read or a fresh tool structure; not a tab ID."}
+_HANDLE_ARG = {"type": "string", "description": "Exact captured @handle from the latest structure; never a selector."}
+_URL_ARG = {"type": "string", "description": "Absolute http(s) URL, preferably a discovered page link; no mailto, credentials or invented site."}
+
+GAZE_READ_SCHEMA = _schema("gaze_read",
+    "Read bounded current page structure: captured fields, options, controls, links and untrusted text, never field values. "
+    "Start browser tasks here; it returns the integer resolution_id for subsequent operations.", {})
+GAZE_FILL_SCHEMA = _schema("gaze_fill",
+    "Fill ALL known fields in one batch, including personal details from Hermes memory/context; ask for unknowns. "
+    "Native selects take a listed option; dates MUST use ISO YYYY-MM-DD. Existing text is replaced; "
+    "typing can itself have effects on rare sites.",
+    {"resolution_id": _EPOCH_ARG, "entries": {"type": "array", "minItems": 1, "maxItems": 32,
+        "items": {"type": "object", "additionalProperties": False, "properties": {
+            "handle": _HANDLE_ARG, "text": {"type": "string", "maxLength": 4000}}, "required": ["handle", "text"]}}},
+    ["resolution_id", "entries"])
+GAZE_PRESS_SCHEMA = _schema("gaze_press",
+    "Press a supported key on one captured nonsensitive field/control. Enter/Space use guarded activation; no shortcuts or approval. "
+    "Use gaze_fill for text.", {"resolution_id": _EPOCH_ARG, "handle": _HANDLE_ARG,
+        "key": {"type": "string", "enum": ["Enter", "Space", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Escape", "Tab"]}},
+    ["resolution_id", "handle", "key"])
+GAZE_OPEN_TAB_SCHEMA = _schema("gaze_open_tab",
+    "Open an http(s) URL in a NEW tab, make it the action target and return its fresh page structure and epoch. "
+    "For a new-tab request use this, not a same-tab link click.", {"resolution_id": _EPOCH_ARG, "url": _URL_ARG},
+    ["resolution_id", "url"])
+GAZE_NAVIGATE_SCHEMA = _schema("gaze_navigate",
+    "Navigate the task's foreground tab to an http(s) URL and return fresh structure and epoch.",
+    {"resolution_id": _EPOCH_ARG, "url": _URL_ARG}, ["resolution_id", "url"])
+GAZE_SCROLL_SCHEMA = _schema("gaze_scroll",
+    "Scroll the page or one captured container by bounded pixels, then gaze_read for newly visible controls.",
+    {"resolution_id": _EPOCH_ARG, "pixels": {"type": "integer", "minimum": -2000, "maximum": 2000},
+     "handle": _HANDLE_ARG}, ["resolution_id", "pixels"])
+GAZE_WAIT_SCHEMA = _schema("gaze_wait", "Wait briefly for page changes, then return fresh structure and epoch.",
+    {"seconds": {"type": "number", "minimum": 0, "maximum": 2}}, ["seconds"])
+GAZE_REQUEST_COMMIT_SCHEMA = _schema("gaze_request_commit",
+    "Show the user's protected confirmation card for one captured Submit/Send/Buy/Delete/publish or ambiguous control. "
+    "Required to finish preparing a draft for review even if the user says 'do not send/submit'. "
+    "This NEVER approves or executes the commit. Pass its exact control handle and latest epoch, then stop and ask the user to click.",
+    {"resolution_id": _EPOCH_ARG, "handle": _HANDLE_ARG}, ["resolution_id", "handle"])
+
+
+def _action(op: str, args: dict, kwargs: dict) -> str:
+    result = get_shared_session().tasks.handle(op, args, session_id=kwargs.get("session_id", ""),
+                                              turn_id=kwargs.get("turn_id", ""))
+    return json.dumps(result, ensure_ascii=False)
+
+
+def handle_gaze_read(args, **kwargs):
+    return _action("read", args, kwargs)
+
+
+def handle_gaze_fill(args, **kwargs):
+    return _action("fill", args, kwargs)
+
+
+def handle_gaze_press(args, **kwargs):
+    return _action("press", args, kwargs)
+
+
+def handle_gaze_open_tab(args, **kwargs):
+    return _action("open_tab", args, kwargs)
+
+
+def handle_gaze_navigate(args, **kwargs):
+    return _action("navigate", args, kwargs)
+
+
+def handle_gaze_scroll(args, **kwargs):
+    return _action("scroll", args, kwargs)
+
+
+def handle_gaze_wait(args, **kwargs):
+    return _action("wait", args, kwargs)
+
+
+def handle_gaze_request_commit(args, **kwargs):
+    return _action("request_commit", args, kwargs)
 
 
 def check_gaze_requirements() -> bool:
@@ -183,9 +256,8 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
 def handle_gaze_choose(args: Dict[str, Any], **kwargs: Any) -> str:
     session = get_shared_session()
     idx = int(args.get("candidate_index", 1))
-    execute = bool(args.get("execute", True))
     # Tool requests target the active resolution; binding requests supply their own epoch.
-    payload = session.choose(resolution_id=session.resolution_id, candidate_index=idx, execute=execute)
+    payload = session.choose(resolution_id=session.resolution_id, candidate_index=idx)
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
 
@@ -196,8 +268,7 @@ def handle_gaze_highlight(args: Dict[str, Any], **kwargs: Any) -> str:
 
 
 def handle_gaze_click(args: dict[str, Any], **kwargs: Any) -> str:
-    result = get_shared_session().actions.click(args.get("handle"), args.get("resolution_id"))
-    return json.dumps(result, ensure_ascii=False)
+    return _action("click", args, kwargs)
 
 
 def handle_gaze_calibrate(args: Dict[str, Any], **kwargs: Any) -> str:
@@ -245,6 +316,14 @@ ALL_TOOLS = (
     ("gaze_choose", GAZE_CHOOSE_SCHEMA, handle_gaze_choose, "🎯"),
     ("gaze_highlight", GAZE_HIGHLIGHT_SCHEMA, handle_gaze_highlight, "✨"),
     ("gaze_click", GAZE_CLICK_SCHEMA, handle_gaze_click, "🖱️"),
+    ("gaze_read", GAZE_READ_SCHEMA, handle_gaze_read, ""),
+    ("gaze_fill", GAZE_FILL_SCHEMA, handle_gaze_fill, ""),
+    ("gaze_press", GAZE_PRESS_SCHEMA, handle_gaze_press, ""),
+    ("gaze_open_tab", GAZE_OPEN_TAB_SCHEMA, handle_gaze_open_tab, ""),
+    ("gaze_navigate", GAZE_NAVIGATE_SCHEMA, handle_gaze_navigate, ""),
+    ("gaze_scroll", GAZE_SCROLL_SCHEMA, handle_gaze_scroll, ""),
+    ("gaze_wait", GAZE_WAIT_SCHEMA, handle_gaze_wait, ""),
+    ("gaze_request_commit", GAZE_REQUEST_COMMIT_SCHEMA, handle_gaze_request_commit, ""),
     ("gaze_calibrate", GAZE_CALIBRATE_SCHEMA, handle_gaze_calibrate, "🧭"),
     ("gaze_benchmark", GAZE_BENCHMARK_SCHEMA, handle_gaze_benchmark, "📊"),
 )

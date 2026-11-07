@@ -496,17 +496,45 @@
       const head = h('div', 'head');
       head.append(h('div', 'title', m.label || 'This control'));
       const sub = h('div', 'sub', 'Hermes wants to press this on the page. Click to allow it.');
+      const summary = h('div', 'sub', m.summary || 'No nonsensitive fields on this page.');
+      summary.style.whiteSpace = 'pre-wrap';
+      summary.style.overflowWrap = 'anywhere';
+      summary.style.maxHeight = `${Math.max(96, Number(m.maxBody) || 300)}px`;
+      summary.style.overflowY = 'auto';
+      const destination = h('div', 'sub', `Destination: ${m.destination || 'Current page'}`);
+      destination.style.overflowWrap = 'anywhere';
       const choices = h('div', 'choices');
       const yes = h('button', 'choice yes', 'Confirm');
       yes.dataset.act = 'confirm'; yes.dataset.value = 'yes';
       const no = h('button', 'choice', 'Cancel');
       no.dataset.act = 'confirm'; no.dataset.value = 'no';
+      if (m.doing) {
+        const stop = h('button', 'choice', 'Stop');
+        stop.dataset.act = 'stop_action_task';
+        choices.append(stop);
+      }
       choices.append(yes, no);
-      const foot = h('div', 'foot');
-      card.classList.add('quiet');
-      card.append(head, sub, choices, foot);
+      card.append(head, sub, summary, destination, choices);
       root.append(card);
     }
+  }
+
+  function renderDoing(m) {
+    if (shownKey !== 'doing') {
+      clearView();
+      shownKey = 'doing'; view = 'doing';
+      const card = h('div', 'card arrive quiet');
+      const head = h('div', 'head');
+      head.append(h('div', 'title', 'Doing'));
+      const label = h('div', 'sub', m.label || 'Working on this page');
+      label.dataset.doingLabel = '';
+      const choices = h('div', 'choices');
+      const stop = h('button', 'choice', 'Stop');
+      stop.dataset.act = 'stop_action_task';
+      choices.append(stop);
+      card.append(head, label, choices);
+      root.append(card);
+    } else root.querySelector('[data-doing-label]').textContent = m.label || 'Working on this page';
   }
 
   function renderLens(m) {
@@ -581,6 +609,7 @@
       if (m.view === 'answer') renderAnswer(m);
       else if (m.view === 'compose') renderCompose(m);
       else if (m.view === 'confirm') renderConfirm(m);
+      else if (m.view === 'doing') renderDoing(m);
       else if (m.view === 'lens') renderLens(m);
       else renderNote(m);
       report();
