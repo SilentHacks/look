@@ -70,8 +70,9 @@ def click(tab, selector):
 
 
 def aim(tab, selector):
-    page(tab, 'const r=document.querySelector(' + json.dumps(selector) + ').getBoundingClientRect();'
-        'window.dispatchEvent(new MouseEvent("mousemove",{clientX:r.left+2,clientY:r.top+2}));')
+    r = page(tab, 'const r=document.querySelector(' + json.dumps(selector) + ').getBoundingClientRect();'
+        'return {x:r.left+2,y:r.top+2};')
+    command(tab, 'Input.dispatchMouseEvent', {'type': 'mouseMoved', **r})
 
 
 def capture(tab):
@@ -610,22 +611,6 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
                   f'hit-test height only in coarse steps ({sorted(settled)[:6]}…, {lengths} answer lengths)')
             print('PASS markdown: hostile script, image, javascript: and control text render as inert allow-listed text; 0 requests')
 
-            # Quick Space taps are the website's: real trusted input, no recording, nothing on screen.
-            page(c, 'window.tapped=[];window.addEventListener("keydown",e=>tapped.push([e.code,e.isTrusted]));'
-                    'window.addEventListener("keyup",e=>tapped.push([e.code,e.isTrusted]));'
-                    'document.body.tabIndex=-1;document.body.focus()')
-            until(lambda: view(c)['view'] in (None, 'answer'))
-            key(c, 'Escape', 'Escape')
-            before = len(streams)
-            page(c, 'window.tapped=[]')
-            with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=FakeInput)):
-                command(c, 'Input.dispatchKeyEvent', {'type': 'keyDown', 'key': ' ', 'code': 'Space', 'windowsVirtualKeyCode': 32})
-                time.sleep(.03)
-                command(c, 'Input.dispatchKeyEvent', {'type': 'keyUp', 'key': ' ', 'code': 'Space', 'windowsVirtualKeyCode': 32})
-                until(lambda: len(page(c, 'return tapped')) == 2)
-            assert page(c, 'return tapped') == [['Space', True], ['Space', True]], page(c, 'return tapped')
-            assert len(streams) == before and view(c)['pill']['mode'] != 'wave', (len(streams), before, view(c)['pill'])
-            print('PASS tap: a quick Space reaches the page as two trusted events, with no recording')
             turns.close()
     finally:
         if session:

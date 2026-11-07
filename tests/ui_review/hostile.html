@@ -1,0 +1,20 @@
+<!doctype html><meta charset=utf-8><title>Hostile review fixture</title>
+<style>body{font:18px system-ui;min-height:4000px;margin:40px}p{width:440px;padding:20px;background:#eef}button,input{font:18px system-ui;padding:10px}#danger{margin:30px}#frame{width:600px;height:200px}#feed{position:fixed;left:800px;top:200px}</style>
+<p id=first>Ordinary source topic Alpha</p><p id=second>Another source topic Beta</p>
+<button id=danger>Delete all records</button><input id=edit placeholder="ordinary editable"><div contenteditable id=rich>Rich editor</div>
+<iframe id=frame srcdoc="<button id='child'>Media play/pause</button><input id='input'><script>window.events=[];addEventListener('keydown',e=>events.push({t:e.type,trusted:e.isTrusted,code:e.code}));</script>"></iframe>
+<div id=feed><p id=secret>Secret feed marker</p></div>
+<script>
+window.audit={events:[],clicks:0,patches:[],mutations:[],texts:[],shadows:[],animations:[]};
+for(const type of ['keydown','keyup','click'])window.addEventListener(type,e=>{
+ audit.events.push({type,code:e.code,target:e.target.id,trusted:e.isTrusted,detail:e.detail});
+ if(window.redirect && type==='keydown' && e.code==='Space') setTimeout(()=>document.getElementById('danger').focus(),0);
+ if(window.suppressUp && type==='keyup'&&e.code==='Space')e.stopImmediatePropagation();
+},true);
+danger.onclick=()=>audit.clicks++;
+const attach=Element.prototype.attachShadow;Element.prototype.attachShadow=function(o){audit.patches.push('attachShadow');const s=attach.call(this,o);audit.shadows.push(s);return s};
+const style=window.getComputedStyle;window.getComputedStyle=function(...a){audit.patches.push('getComputedStyle');return style(...a)};
+const point=document.elementFromPoint;document.elementFromPoint=function(...a){audit.patches.push('elementFromPoint');return point.apply(this,a)};
+new MutationObserver(ms=>{for(const m of ms){audit.mutations.push(m.target.nodeName);audit.texts.push(m.target.textContent)}}).observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true});
+window.harvest=()=>{let h=document.getElementById('hermes-gaze-root');let frames=[];for(const f of document.querySelectorAll('iframe')){try{frames.push(f.contentDocument?.body?.innerText)}catch(e){frames.push(e.name)}}return {body:document.body.innerText,shadows:audit.shadows.length,patches:audit.patches,mutations:audit.mutations,texts:audit.texts,animations:document.getAnimations().map(a=>({type:a.constructor.name,target:a.effect?.target?.outerHTML})),host:h?.outerHTML,selection:String(getSelection()),frames}};
+</script>

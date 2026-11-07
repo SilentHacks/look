@@ -394,6 +394,8 @@
     while (cursorHistory.length > 256 || (cursorHistory.length > 1 && cursorHistory[0].end < now - 60))
       cursorHistory.shift();
     const keep = new Set(cursorHistory.map(h => h.id));
+    for (const id of litIds) keep.add(id);
+    for (const target of S.hold?.targets || []) if (target.hit) keep.add(cursorId(target.hit));
     for (const key of cursorRefs.keys()) if (!keep.has(key)) cursorRefs.delete(key);
   }
   function cursorMetadata(el) {
@@ -528,10 +530,10 @@
       }
       return null;
     }
-    const refs = [...new Set(capture.history.map(h => h.id).filter(Boolean).reverse())].slice(0, 64).reverse();
+    const refs = [...new Set([...capture.lit, ...capture.history.map(h => h.id).filter(Boolean).reverse()])].slice(0, 64);
     const capturedTables = new Set(refs.map(id => cursorRefs.get(id))
       .filter(el => el?.isConnected && !sensitive(el)).map(el => el.closest("table,[role=grid]")).filter(Boolean));
-    for (const id of refs.slice().reverse()) {
+    for (const id of refs) {
       const el = cursorRefs.get(id);
       if (!el || !el.isConnected) { capture.targets.push({ id, available: false, reason: "historical node detached" }); continue; }
       const target = cursorMetadata(el);
@@ -1142,7 +1144,7 @@
     }));
     const local = anchors.get(raw.item_id);
     return {id: raw.item_id, subject: raw.subject || raw.target_label || "This part of the page", turns,
-      targets: local?.targets || [], local: !!local, archived: !!raw.archived,
+      targets: local?.targets || [], pointerAnchor: local?.pointerAnchor, local: !!local, archived: !!raw.archived,
       presented: !!raw.presented || S.shown.has(raw.item_id), unread: !!raw.unread, count: raw.target_count || 1,
       notice: raw.notice || "", host: hostOf(raw.source_url), url: raw.source_url || ""};
   }
@@ -1578,9 +1580,8 @@
     if (S.coachTimer) { clearTimeout(S.coachTimer); S.coachTimer = 0; }
     raise();
     const item = S.view === "answer" ? current() : null;
-    // Where you point says what it's about. On the card, or barely moved since you
-    // asked, you're still talking about the card.
-    const follow = item && (S.hoverCard || S.pointer.moved < FOLLOW_UP_PX) ? item : null;
+    // Small pointer travel keeps the card, unless the page moved a different identity underneath.
+    const follow = item && followsCurrent(item) ? item : null;
     S.hold = {started: performance.now(), targets: [], tentative: null, dwellFrom: 0, follow, region: null, moved: S.pointer.moved, onCard: !!follow && S.hoverCard};
     if (!S.view && typeof state.pointerX === "number") setTone(darkAt(Math.max(0, state.pointerX - 150), Math.max(0, state.pointerY - 100), 300, 200));
     if (!S.view) { dropAllRings(); S.capSpot = null; }
@@ -1612,12 +1613,18 @@
     if (y + PILL_H > vh - 10) y = Math.max(10, anchorY - PILL_H - 16);
     return {x: Math.max(10, x), y: Math.max(10, y)};
   }
+  function followsCurrent(item) {
+    if (S.hoverCard) return true;
+    if (S.pointer.moved >= FOLLOW_UP_PX) return false;
+    const anchor = item.pointerAnchor;
+    return !!anchor && hitNode(anchor.x, anchor.y) === anchor.hit;
+  }
   // Talking stops the card taking hover, which itself fires a mouse event with no travel.
   // So a hold that began on the card stays on it until the pointer really travels.
   function pointedElsewhere() {
     const H = S.hold;
     if (H?.onCard) return S.pointer.moved - H.moved >= FOLLOW_UP_PX;
-    return !S.hoverCard && S.pointer.moved >= FOLLOW_UP_PX;
+    return !S.hoverCard && (S.pointer.moved >= FOLLOW_UP_PX || H?.follow && !followsCurrent(H.follow));
   }
   function updatePointing(now, immediate) {
     const H = S.hold;
@@ -1752,6 +1759,7 @@
     if (rec) { requestOwner.set(intent.id, rec); }
   }
   function bindRequest(intent, rec) {
+    rec.pointerAnchor = {x: state.pointerX, y: state.pointerY, hit: hitNode(state.pointerX, state.pointerY)};
     if (intent.cursor_context?.snapshot_id) snapshotOwner.set(intent.cursor_context.snapshot_id, rec);
     S.localPending.push(rec);
   }
@@ -1773,7 +1781,7 @@
     if (S.hold) return;
     if (S.coachTimer) { clearTimeout(S.coachTimer); S.coachTimer = 0; if (S.pillMode === "coach") hidePill(true); }
     const open = S.view === "answer" ? current() : null;
-    const follow = open && (S.hoverCard || S.pointer.moved < FOLLOW_UP_PX) ? open : null;
+    const follow = open && followsCurrent(open) ? open : null;
     if (!follow) setTargetLocked(true);
     const node = lockedNode;
     const target = !follow && node && !ours(node) ? {el: pickElement(state.lockedX, state.lockedY) || node, hit: node, key: `t${++S.ids}`} : null;
@@ -2036,6 +2044,7 @@
     }
   }
   function onWindowMouseMove(e) {
+    if (!e.isTrusted) return;
     if (typeof state.pointerX === "number") S.pointer.moved += Math.hypot(e.clientX - state.pointerX, e.clientY - state.pointerY);
     S.hoverCard = false;
     cursorOverHud = false;
@@ -2266,7 +2275,19 @@
   const TALK_KEY = "Space";
   let isListening = false;
   let spaceHeld = false;
-  let replay = {left: 0, until: 0};
+  let mouseFocus = false;
+  function onWindowPointerDown(e) { if (e.isTrusted) mouseFocus = true; }
+  window.addEventListener("pointerdown", onWindowPointerDown, true);
+  let transportUntil = 0;
+  const transportTimer = setInterval(() => {
+    if (performance.now() >= transportUntil && spaceHeld) {
+      clearTimeout(S.armTimer);
+      S.keyArmed = false;
+      spaceHeld = false;
+      if (S.hold) holdEnd(true);
+    }
+    rawSend({type: "_ui_ping"});
+  }, 1000);
 
   function isEditableTarget(e) {
     const path = e.composedPath ? e.composedPath() : [e.target];
@@ -2282,13 +2303,9 @@
   }
 
   function onWindowKey(e) {
-    if (!trustedUi(e) || document.visibilityState !== "visible") return;
+    if (!trustedUi(e) || document.visibilityState !== "visible" || performance.now() >= transportUntil) return;
     const down = e.type === "keydown";
-    if (e.code === TALK_KEY && replay.left > 0 && performance.now() < replay.until) {
-      // Our own replayed tap, on its way to the website.
-      replay.left--;
-      return;
-    }
+    if (down && e.code !== TALK_KEY) mouseFocus = false;
     const swallow = () => { e.preventDefault(); e.stopImmediatePropagation(); };
     // A held key always finishes, wherever the release lands.
     if (e.code === TALK_KEY && !down && spaceHeld) {
@@ -2300,7 +2317,8 @@
       else if (S.keyArmed) tapThrough(e);
       return;
     }
-    if (!e.fromFrame && isEditableTarget(e)) return;
+    if (!e.fromFrame && (isEditableTarget(e) ||
+        e.code === TALK_KEY && !mouseFocus && document.activeElement !== document.body && document.activeElement?.matches(":focus-visible"))) return;
     if (e.code === (state.hotkey || "Backquote")) {
       if (down && !e.repeat) { swallow(); openComposer(); }
       return;
@@ -2308,6 +2326,7 @@
     if (e.altKey || e.metaKey || e.ctrlKey) return;
     if (e.code === TALK_KEY) {
       if (!down) return;
+      S.tapHandled = e.defaultPrevented;
       swallow();
       if (e.repeat || spaceHeld) return;
       spaceHeld = true;
@@ -2342,18 +2361,12 @@
     else if (e.code === "ArrowUp" || e.code === "ArrowLeft") { swallow(); if (!e.repeat) step(-1); }
     else if (e.code === "Enter") { swallow(); goBack(current()); }
   }
-  // A quick tap was never ours. It goes back as real input, so video players and focused
-  // buttons do their own thing, and nothing on screen says a recording failed.
-  function tapThrough(e) {
+  // Never mint input. Earlier site listeners may already have handled the original key.
+  function tapThrough() {
     S.keyArmed = false;
-    if (S.tapFromFrame) {
-      // Keyboard focus is in our own frame, so a replay would come straight back here.
-      releaseFrameFocus();
+    if (S.tapFromFrame) releaseFrameFocus();
+    if (!S.tapHandled)
       window.scrollBy({top: innerHeight * .85 * (S.armShift ? -1 : 1), behavior: reduced() ? "auto" : "smooth"});
-      return;
-    }
-    replay = {left: 2, until: performance.now() + 500};
-    rawSend({type: "_ui_replay_key", shift: S.armShift});
   }
 
   function onWindowBlur() {
@@ -2741,6 +2754,7 @@
     dialogWatch.disconnect();
     document.removeEventListener("toggle", onTopLayer, true);
     document.removeEventListener("fullscreenchange", onTopLayer, true);
+    clearInterval(transportTimer);
     clearTimeout(S.retreatTimer); clearTimeout(S.coachTimer); clearTimeout(S.armTimer); clearTimeout(S.micTimer);
     if (raf) cancelAnimationFrame(raf);
     window.removeEventListener("resize", onViewportResize);
@@ -2755,6 +2769,7 @@
     window.removeEventListener("scroll", onCursorScroll, true);
     cancelListening();
     window.removeEventListener("mousemove", onWindowMouseMove, { passive: true, capture: true });
+    window.removeEventListener("pointerdown", onWindowPointerDown, true);
     window.removeEventListener("keydown", onWindowKey, { capture: true });
     window.removeEventListener("keyup", onWindowKey, { capture: true });
     window.removeEventListener("blur", onWindowBlur);
@@ -2770,7 +2785,9 @@
     state,
     uiFrame,
     uiFrames,
+    transportAlive() { transportUntil = performance.now() + 4000; },
     uiReady() {
+      transportUntil = performance.now() + 4000;
       S.ready = true;
       setTone(false);
       S.pillLast = "";

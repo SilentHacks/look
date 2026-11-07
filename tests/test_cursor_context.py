@@ -122,6 +122,17 @@ class TestCursorContext(unittest.TestCase):
         self.assertIsNone(future["pointed"][0]["id"])
         self.assertFalse(future["needs_explain"])
 
+    def test_unavailable_lit_target_is_reported_not_replaced(self):
+        data = capture()
+        data["lit"] = ["@1", "@missing"]
+        data["targets"][0].update(available=False, reason="historical node detached")
+        result = cursor_result(data, "compare these")
+        self.assertEqual([t["label"] for t in result["ranked"]], ["Beta"])
+        self.assertEqual([p["id"] for p in result["pointed"]], ["@2", "@1", "@missing"])
+        self.assertFalse(result["pointed"][1]["available"])
+        self.assertIn("detached", result["pointed"][1]["reason"])
+        self.assertIn("lit target evidence unavailable", result["context"])
+
     def test_full_small_table_large_table_omissions_and_fence(self):
         data = capture()
         result = cursor_result(data, "this", [{"word": "this", "start": 11}])

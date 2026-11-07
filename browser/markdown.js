@@ -21,11 +21,13 @@
   const space = c => !c || /\s/.test(c);
 
   function parseInline(text, depth = 0) {
+    if (depth >= MAX_DEPTH) return [{k: 'text', text}];
     const out = [];
     let buf = '';
     const flush = () => { if (buf) { out.push({k: 'text', text: buf}); buf = ''; } };
     let i = 0;
     while (i < text.length) {
+      if (--stream.work < 0) { buf += text.slice(i); break; }
       const c = text[i];
       if (c === '\\' && i + 1 < text.length && /[\\`*_{}[\]()#+\-.!|>~]/.test(text[i + 1])) { buf += text[i + 1]; i += 2; continue; }
       if (c === '`') {
@@ -120,6 +122,7 @@
   function findClose(text, from, c, len) {
     let i = from;
     while (i < text.length) {
+      if (--stream.work < 0) return -1;
       if (text[i] === '\\') { i += 2; continue; }
       if (text[i] === '`') {
         let run = 1;
@@ -145,6 +148,7 @@
   function linkAt(text, i) {
     let depth = 0, j = i;
     for (; j < text.length; j++) {
+      if (--stream.work < 0) return null;
       if (text[j] === '\\') { j++; continue; }
       if (text[j] === '[') depth++;
       else if (text[j] === ']' && --depth === 0) break;
@@ -153,6 +157,7 @@
     if (text[j + 1] !== '(') return j + 1 >= text.length && stream.on ? false : null;
     let parens = 1, k = j + 2;
     for (; k < text.length && parens; k++) {
+      if (--stream.work < 0) return null;
       if (text[k] === '\\') { k++; continue; }
       if (text[k] === '(') parens++;
       else if (text[k] === ')') parens--;
@@ -241,11 +246,11 @@
         continue;
       }
       if (isTableStart(lines, i)) {
-        const head = cells(line), width = head.length;
-        const align = cells(lines[i + 1]).map(c => c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : 'left');
+        const head = cells(line).slice(0, 32), width = head.length;
+        const align = cells(lines[i + 1]).slice(0, 32).map(c => c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : 'left');
         i += 2;
         const rows = [];
-        while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+        while (i < lines.length && rows.length < 128 && lines[i].trim() && lines[i].includes('|')) {
           const row = cells(lines[i++]);
           rows.push(Array.from({length: width}, (_, c) => parseInline(row[c] || '')));
         }
@@ -301,11 +306,12 @@
     return lines.join('\n');
   }
 
-  const stream = {on: false};
+  const stream = {on: false, work: 0};
   function parse(text, opts = {}) {
     let source = String(text || '').replace(/\r\n?/g, '\n');
     if (source.length > MAX_INPUT) source = source.slice(-MAX_INPUT);
     stream.on = !!opts.streaming;
+    stream.work = MAX_INPUT * 8;
     try {
       return parseBlocks((opts.streaming ? settleStream(source) : source).split('\n'));
     } finally { stream.on = false; }

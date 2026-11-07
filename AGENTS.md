@@ -83,18 +83,36 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   it shows its host. Mid-stream, half-finished markup waits offstage rather than flashing
   raw markers. DOM updates patch in place so private focus, selection and scroll survive.
   Answers cannot supply confirmations or controls.
+  Inline recursion (including unfinished links) and scan work are bounded; tables render
+  at most 32 columns and 128 rows per block; extra columns are omitted and extra rows become text.
 - **Stack state is Python's.** `presented`, `archived`, names, hints and read-aloud state
   come in the inbox, so they follow navigation and tabs; springs and placement are local.
   The first answer that has started and not been shown comes forward by itself. Each gets
   its turn of `answer_turn_seconds` (12s default, longer by reading speed; hover holds),
   then the next unseen one, then the stack retreats. Esc answers for everything settled.
 - **What Space asks.** On the card, or moved under 90px since asking, is a follow-up;
-  pointed elsewhere is a new question. A hold that began on the card stays on it until
+  pointed elsewhere is a new question. Re-hit-test the saved pointer anchor: scrolling or
+  layout that puts another identity there starts a new question, without making ordinary
+  sub-90px pointer travel more eager. A hold that began on the card stays on it until
   the pointer travels 90px, because the card stops taking hover while talking.
-- **A quick Space tap is the website's.** Under 130ms it is replayed as real trusted
-  input over CDP, so media sites keep their behaviour. Holds under 220ms cancel silently.
-- **Everything lit counts.** The capture lists what was lit (`lit`) and the resolver adds
-  those to `pointed`, after any spoken-word anchors.
+- **Space never creates privileged browsing input.** Keyboard-focused (`:focus-visible`)
+  page controls keep the original Space gesture, without capture. Trusted pointer presses
+  distinguish mouse focus even when Chrome retains/promotes `:focus-visible`; mouse-focused
+  controls do not block talking. Editable fields always keep Space.
+  Under 130ms a tap scrolls by 85% of the viewport (Shift reverses), using `scrollBy`, not
+  synthetic input. If an earlier site listener prevented default, do not also scroll.
+  Holds under 220ms cancel silently. Taps never start the microphone or show a failed recording.
+  No direct media toggle: an earlier site shortcut may already have toggled playback, and
+  a second toggle undoes it. Unfocused media shortcuts are not guaranteed; use the site's
+  player controls or keyboard-focus them for native Space.
+- **Transport loss fails open.** Explicit close destroys each owned page overlay before
+  dropping CDP. An isolated-world ping/ack renews a four-second input lease every second;
+  expired leases stop intercepting keys and cancel held capture. This is transport liveness,
+  not resolution polling. Page/frame messages cannot renew it or bypass nonce/owner checks.
+- **Everything lit counts.** The capture lists what was lit (`lit`) and reserves those
+  five identities within the existing 64-target cap, retaining their references even when
+  recent history rolls over. The resolver adds them to `pointed`, after spoken-word anchors;
+  detached or hidden lit targets remain explicitly unavailable, never selector-rematched.
   Immediate names use bounded `safeText` only; combined targets use the first short
   subject and a count. Queued cards keep that fallback until their answer starts.
   Exact-owned browsing requests ask for an ordinary `## Subject` heading and blank
@@ -198,9 +216,11 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   pause admission. Disconnect must not release host admission ownership:
   reconnect/Retry/Resume still wait for the actual terminal hook; the host can
   remain busy while unbound. Retry adds a new answer attempt (or retries saved in-memory ASR),
-  Skip discards the failed attempt, Resume continues waiting work. ASR releases the
-  intent worker so another recording can start; its bytes stay only in memory
-  through transcription/retry. Reasoning and foreign/late deltas never reach Chrome.
+  Skip discards the failed attempt, Resume continues waiting work. Failed ASR attempts
+  leave runnable FIFO but remain visible/retryable with in-memory audio. Try again requeues
+  that ASR attempt; new questions and Resume can admit other runnable work. ASR releases the
+  intent worker so another recording can start; its bytes stay only in memory through
+  transcription/retry. Reasoning and foreign/late deltas never reach Chrome.
   Recovery commands identify the failed request, not merely its item: an item may
   already have newer queued follow-ups. ASR finalizes the item's label/evidence;
   dependent follow-ups copy that finalized evidence only when admitted.
@@ -261,6 +281,9 @@ node --check browser/overlay.js                  # JS syntax check
 ruff check                                        # if ruff is installed
 .venv/bin/python tests/trust_boundaries_chrome.py    # private Chrome; includes the patched-API page
 .venv/bin/python tests/recording_hold_chrome.py
+# Named review regressions: private Chrome, scripted answers and the benchmark audio stub.
+# Run each probe_{security,space,evidence,queue,markdown,ownership,confirmation,input}.py:
+# GAZE_REVIEW_OUT=/absolute/existing/output-dir .venv/bin/python tests/ui_review/probe_evidence.py
 # whole flow on a real Hermes backend, serial, free model; run with the Hermes venv's Python:
 # HERMES_DISABLE_LAZY_INSTALLS=1 <venv>/bin/python benchmark/probe_companion_ui.py --out DIR --headless
 # accuracy table — benchmark has package-relative imports, so load the tests shell first:

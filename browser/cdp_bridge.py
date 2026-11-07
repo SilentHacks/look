@@ -229,13 +229,20 @@ class CdpSession:
             loop, thread = self._loop, self._thread
         if loop is not None and loop.is_running():
             try:
-                asyncio.run_coroutine_threadsafe(self._drop_ws(), loop).result(timeout=3.0)
+                asyncio.run_coroutine_threadsafe(self._shutdown_overlay(), loop).result(timeout=7.0)
             except Exception:
                 pass
             loop.call_soon_threadsafe(loop.stop)
         self._handler_pool.shutdown(wait=False)
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
+
+    async def _shutdown_overlay(self) -> None:
+        try:
+            if self._ws is not None and self._context_unique_id:
+                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.destroy();true", timeout=2.)
+        finally:
+            await self._drop_ws()
 
     # -- connection machinery (all coroutines run on the worker loop) --
 
@@ -327,12 +334,6 @@ class CdpSession:
                 self._level_busy = False
         asyncio.run_coroutine_threadsafe(send(), loop)
 
-    async def _replay_key(self, message: dict) -> None:
-        # A quick tap belongs to the website: send it back as real trusted input.
-        modifiers = 8 if message.get("shift") else 0
-        base = {"key": " ", "code": "Space", "windowsVirtualKeyCode": 32, "modifiers": modifiers}
-        await self._send_cmd("Input.dispatchKeyEvent", {"type": "keyDown", "text": " ", **base}, timeout=2.)
-        await self._send_cmd("Input.dispatchKeyEvent", {"type": "keyUp", **base}, timeout=2.)
 
     async def _deliver_reply(self, document: str, message: dict) -> None:
         if document != self._context_unique_id:
@@ -363,8 +364,8 @@ class CdpSession:
                                       + json.dumps(message) + ");true", timeout=5.)
             elif message.get("type") == "_ui_render":
                 await self._render_ui(message)
-            elif message.get("type") == "_ui_replay_key":
-                await self._replay_key(message)
+            elif message.get("type") == "_ui_ping":
+                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.transportAlive();true", timeout=2.)
         except Exception:
             logger.debug("Private UI unavailable", exc_info=True)
 
@@ -426,7 +427,7 @@ class CdpSession:
             elif context == self._context_id:
                 payload = params.get("payload")
                 try:
-                    internal = json.loads(payload).get("type") in ("_ui_render", "_ui_replay_key")
+                    internal = json.loads(payload).get("type") in ("_ui_render", "_ui_ping")
                 except (TypeError, ValueError, AttributeError):
                     return
                 if internal:

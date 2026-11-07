@@ -1,5 +1,6 @@
 """Inbox ordering, frozen evidence, ownership and recovery; no host process."""
 import copy
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -63,6 +64,30 @@ class VoiceTurnsTests(unittest.TestCase):
 
     def end(self, turn, **kwargs):
         self.turns.end(session_id='session', turn_id=turn, **kwargs)
+
+    def test_failed_asr_retains_retry_but_does_not_block_resume(self):
+        first = self.turns.capture(snapshot('first'), transcribing=True)
+        second = self.turns.capture(snapshot('second'), transcribing=True)
+        self.turns.transcribed(first['request_id'], '', error='No speech recognized')
+        self.turns.transcribed(second['request_id'], 'Second question', snapshot('second'))
+        self.assertEqual(self.host.messages, [])
+        self.turns.control('resume')
+        self.assertIn('Second question', self.host.messages[0][0])
+        self.assertEqual(self.turns.runs[0]['status'], 'failed')
+        self.assertEqual(self.turns.items[0]['item_id'], first['item_id'])
+        # Retried ASR returns to FIFO, but cannot steal the active host turn.
+        ready = threading.Event()
+        def retry():
+            self.turns.transcribed(first['request_id'], 'First retried')
+            ready.set()
+        self.turns.runs[0]['transcribe'] = retry
+        self.assertTrue(self.turns.control('retry', first['item_id'], first['request_id'])['ok'])
+        self.assertTrue(ready.wait(1))
+        self.assertEqual(len(self.host.messages), 1)
+        self.pre('second')
+        self.end('second')
+        self.assertIn('First retried', self.host.messages[-1][0])
+        self.turns.close()
 
     def test_local_speech_owns_answer_text_and_only_autoplays_completed_answers(self):
         processes = []

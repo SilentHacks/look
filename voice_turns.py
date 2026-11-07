@@ -263,6 +263,7 @@ class VoiceTurns:
                     and isinstance(text, str) and has_deictic_pronoun(text)):
                 error = str(snapshot.get("error") or "No available cursor target")
             if not isinstance(text, str) or len(text) > self.MAX_TEXT or error or not text.strip():
+                self.pending.remove(run)
                 self.paused = True
                 self._event(run, "failed", error=error or "No speech recognized")
                 return {"ok": False, "error": run["error"], "request_id": request_id, "item_id": run["item_id"]}
@@ -321,6 +322,7 @@ class VoiceTurns:
                     item = self._item(run["item_id"])
                     if not item["evidence_ready"]:
                         self.paused = True
+                        self.pending.remove(run)
                         self._event(run, "failed", error="The original capture has no transcribed evidence.")
                         return
                     if not run["snapshot"].get("early_highlight"):
@@ -486,6 +488,9 @@ class VoiceTurns:
                     if not run.get("transcribe") or not self.connected:
                         return {"ok": False, "error": "Capture is no longer available"}
                     self.paused = False
+                    if len(self.pending) >= self.MAX_PENDING:
+                        return {"ok": False, "error": "Inbox full"}
+                    self.pending.insert(0, run)
                     self._event(run, "transcribing", error="")
                     self.start_transcription(run["request_id"], run["transcribe"])
                     return {"ok": True}
