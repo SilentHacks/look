@@ -138,6 +138,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   under the inbox lock. Older work cannot clear newer speaking state. If Phonon
   cannot initialize, choose macOS `/usr/bin/say` (text on stdin) before any audio,
   report backend/error in-band, and never replay a partly spoken answer.
+  Starting talk closes output before input opens, outside the inbox lock; a one-second
+  stop timeout refuses capture. Manual/automatic speech cannot start during capture.
   `auto_speak` is an explicit runtime toggle, initially off; disconnect cancels playback.
 - **Whisper word timestamps are audio-relative.** `transcribe_audio_buffer` takes
   `audio_epoch` (the first native input buffer's ADC wall-clock epoch for Chrome,

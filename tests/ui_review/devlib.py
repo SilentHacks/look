@@ -89,7 +89,8 @@ class Rig:
         os.environ['GAZE_FAKE_SPEECH']=str(pcm)
         stub=types.ModuleType('sounddevice'); exec(STUB,stub.__dict__)
         self.patches=[patch.object(service,'get_shared_session',return_value=self.session),patch.object(service,'_VOICE_TURNS',self.turns),
-            patch.object(service,'_CONFIG',GazeConfig(early_highlight=False)),patch.dict(sys.modules,sounddevice=SimpleNamespace(RawInputStream=stub.RawInputStream))]
+            patch.object(service,'_CONFIG',GazeConfig(early_highlight=False)),patch.dict(sys.modules,sounddevice=SimpleNamespace(RawInputStream=stub.RawInputStream)),
+            patch('hermes_gaze.speech.SpeechPlayback.say',side_effect=AssertionError('Real say forbidden'))]
         for p in self.patches: p.start()
         self.session.configure(hotkey='AltRight')
         self.tab=None

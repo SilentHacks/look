@@ -112,6 +112,22 @@ class VoiceTurns:
             self.capture_state = status
             self.publish()
 
+    def prepare_recording(self):
+        """Close speech output before opening input; never wait under the inbox lock."""
+        with self.lock:
+            if self.capture_state in ("starting", "recording"):
+                return {"ok": False, "error": "Microphone is already in use"}
+            self.capture_state = "starting"
+            self._stop_speaking()
+            worker = self._speech_thread
+            self.publish()
+        if worker is not None:
+            worker.join(1)
+            if worker.is_alive():
+                self.capture_status("failed")
+                return {"ok": False, "error": "Read aloud is still stopping; try talking again."}
+        return {"ok": True}
+
     def publish(self):
         """Versioned, UI-independent replacement state; no DOM identities leave Python."""
         self.revision += 1
@@ -151,7 +167,8 @@ class VoiceTurns:
                 item["unread"] = True
         run["last_display"] = time.monotonic()
         if (status == "complete" and previous_status != "complete" and self.auto_speak
-                and self.connected and run["text"].strip()):
+                and self.connected and self.capture_state not in ("starting", "recording")
+                and run["text"].strip()):
             self._speak(speech_text(run["text"]))
             self.speaking = run["item_id"]
         self.publish()
@@ -357,8 +374,11 @@ class VoiceTurns:
             self._speech_cancel.set()
             self._speech_cancel = None
         self.speaking = ""
+        self.speech_status = ""
 
     def _speak(self, text):
+        if self.capture_state in ("starting", "recording"):
+            return {"ok": False, "error": "Finish talking before reading aloud."}
         self._stop_speaking()
         self.speech_error = ""
         self.speech_backend = ""

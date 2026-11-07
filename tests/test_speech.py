@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from hermes_gaze.speech import MODEL_FILES, MODEL_REVISION, VOICE_REVISION, SpeechPlayback
 from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze import service
 from tests.test_voice_turns import Chrome, Host, snapshot
 
 
@@ -46,6 +47,7 @@ class Output:
     def __init__(self, **kwargs):
         self.writing = threading.Event()
         self.aborted = threading.Event()
+        self.closed = threading.Event()
         self.stopped = False
         self.queued = 0
         self.sizes = []
@@ -68,7 +70,7 @@ class Output:
         self.aborted.set()
 
     def close(self):
-        pass
+        self.closed.set()
 
 
 class SpeechTests(unittest.TestCase):
@@ -81,6 +83,7 @@ class SpeechTests(unittest.TestCase):
         self.enterContext(patch.dict(sys.modules, sounddevice=SimpleNamespace(OutputStream=output)))
         model = SimpleNamespace(stream=Mock(side_effect=streams))
         self.enterContext(patch.object(SpeechPlayback, 'load', return_value=model))
+        self.enterContext(patch.object(SpeechPlayback, 'say', side_effect=AssertionError('Real say forbidden')))
         turns = VoiceTurns(Host(), Chrome())
         turns.bind(session_key='k', session_id='s')
         self.addCleanup(turns.close)
@@ -172,6 +175,104 @@ class SpeechTests(unittest.TestCase):
             self.assertIn('device lost', turns.speech_error)
             self.assertEqual(turns.speech_backend, 'phonon')
             self.assertTrue(stream.closed.is_set())
+
+    def test_output_start_failure_falls_back_before_any_pcm_is_written(self):
+        stream, output, playback = Stream(), Mock(), SpeechPlayback()
+        output.start.side_effect = RuntimeError('device cannot start')
+        with patch.object(playback, 'load', return_value=SimpleNamespace(stream=lambda *a, **k: stream)), \
+                patch.dict(sys.modules, sounddevice=SimpleNamespace(OutputStream=lambda **k: output)), \
+                patch.object(playback, 'say') as fallback:
+            playback.play('private answer', 'Russell', threading.Event(), Mock())
+        fallback.assert_called_once()
+        self.assertIn('device cannot start', fallback.call_args.args[-1])
+        output.write.assert_not_called()
+        output.close.assert_called_once()
+        self.assertTrue(stream.closed.is_set())
+
+    def test_talk_closes_output_before_input_and_blocks_read_aloud_until_release(self):
+        stream = Stream()
+        turns, _ = self.rig([stream])
+        run = self.start(turns, 'talk')
+        session = turns.session
+        session._intent_nonce = 'nonce'
+        session.cdp = Mock()
+        def start_input(*args, **kwargs):
+            self.assertTrue(self.outputs[-1].closed.is_set(), 'speech output overlaps microphone')
+            self.assertTrue(stream.closed.is_set())
+            # A completed answer and a trusted Read click can race the held microphone.
+            turns.control('auto_speak')
+            with turns.lock:
+                turns._event(turns.runs[-1], 'complete')
+            self.assertFalse(turns.control('speak', run['item_id'])['ok'])
+            self.assertEqual(turns.speaking, '')
+            return {'ok': True}
+        session.microphone = Mock()
+        session.microphone.start.side_effect = start_input
+        intent = dict(type='record_start', nonce='nonce', _browser_target='tab',
+                      _browser_document='document')
+        replies = []
+        with patch.object(service, 'get_shared_session', return_value=session), \
+                patch.object(service, '_VOICE_TURNS', turns):
+            service.handle_intent(intent, replies.append)
+            self.assertEqual(replies, [{'ok': True}])
+            self.assertEqual(turns.capture_state, 'recording')
+            service.handle_intent(intent, replies.append)
+            self.assertFalse(replies[-1]['ok'])
+            self.assertEqual(turns.capture_state, 'recording')
+            service.handle_intent({**intent, 'type': 'record_cancel'}, replies.append)
+        self.assertEqual(turns.capture_state, 'idle')
+        self.assertTrue(turns.control('speak', run['item_id'])['ok'])
+        turns.control('stop_speaking')
+        self.finish(turns)
+
+    def test_tool_recording_also_stops_output_and_releases_speech_after_input_error(self):
+        from hermes_gaze import voice
+        turns, _ = self.rig([Stream()])
+        run = self.start(turns, 'tool')
+        def broken_input(*args, **kwargs):
+            self.assertTrue(self.outputs[-1].closed.is_set())
+            self.assertFalse(turns.control('speak', run['item_id'])['ok'])
+            raise RuntimeError('input device unavailable')
+        turns.session.microphone = Mock()
+        turns.session.microphone.start.side_effect = broken_input
+        with patch('hermes_gaze.browser.cdp_bridge.get_shared_session', return_value=turns.session), \
+                patch.object(service, '_VOICE_TURNS', turns):
+            with self.assertRaisesRegex(RuntimeError, 'input device unavailable'):
+                voice.record_microphone()
+        self.assertEqual(turns.capture_state, 'idle')
+        self.assertEqual(turns.speaking, '')
+        turns.session.microphone.cancel.assert_not_called()
+
+    def test_stalled_loading_refuses_microphone_without_holding_inbox_lock(self):
+        entered, release = threading.Event(), threading.Event()
+        turns, _ = self.rig([])
+        def load(voice):
+            entered.set()
+            release.wait(3)
+            return Mock()
+        with patch.object(turns._playback, 'load', side_effect=load):
+            run = turns.submit('question', snapshot('loading'))
+            turns.runs[-1]['text'] = 'Answer'
+            turns.control('speak', run['item_id'])
+            self.assertTrue(entered.wait(1))
+            results = []
+            preparing = threading.Thread(target=lambda: results.append(turns.prepare_recording()))
+            preparing.start()
+            try:
+                deadline = time.monotonic() + 1
+                while turns.capture_state != 'starting' and time.monotonic() < deadline:
+                    time.sleep(.001)
+                self.assertTrue(turns.lock.acquire(timeout=.1))
+                turns.lock.release()
+                preparing.join(2)
+                self.assertFalse(preparing.is_alive())
+                self.assertFalse(results[0]['ok'])
+                self.assertEqual(turns.capture_state, 'failed')
+            finally:
+                release.set()
+                preparing.join(2)
+                self.finish(turns)
+        self.assertEqual(self.outputs, [])
 
     def test_local_assets_load_once_without_hub_or_network(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -83,6 +83,10 @@ class SpeechPlayback:
                                          dtype="float32", blocksize=max(1, stream.sample_rate // 50),
                                          latency="low")
                 stack.callback(output.close)
+                if cancel.is_set():
+                    return
+                output.start()  # Device-start errors still precede the first audio write.
+                stack.callback(output.abort)
             except Exception as exc:
                 stack.close()  # Stop native producers before selecting the fallback.
                 if not cancel.is_set():
@@ -91,19 +95,15 @@ class SpeechPlayback:
             if cancel.is_set():
                 return
             report("phonon", f"Reading with Phonon · {voice}.", "")
-            output.start()
-            try:
-                # Small blocking writes bound queued audio; no full-answer PCM buffer.
-                frames = max(1, stream.sample_rate // 50)
-                for pcm in itertools.chain((first,), stream):
-                    for start in range(0, len(pcm), frames):
-                        if cancel.is_set():
-                            return
-                        output.write(pcm[start:start + frames])
-                if not cancel.is_set():
-                    output.stop()  # Drain before the inbox clears speaking state.
-            finally:
-                output.abort()  # Discard queued audio on cancellation/error, never drain it.
+            # Small blocking writes bound queued audio; no full-answer PCM buffer.
+            frames = max(1, stream.sample_rate // 50)
+            for pcm in itertools.chain((first,), stream):
+                for start in range(0, len(pcm), frames):
+                    if cancel.is_set():
+                        return
+                    output.write(pcm[start:start + frames])
+            if not cancel.is_set():
+                output.stop()  # Drain before the inbox clears speaking state.
 
     @staticmethod
     def say(text, cancel, report, reason):

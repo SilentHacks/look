@@ -107,6 +107,19 @@ try:
         r.turns.control('stop_speaking')
         stopped()
         r.turns.control('auto_speak')
+        click_control('[data-act=read]')
+        until(lambda: r.turns.speaking and sinks[-1].writing.is_set())
+        r.aim('#topic')
+        r.space_down()
+        until(lambda: r.session.microphone._stream is not None)
+        assert sinks[-1].closed.is_set() and streams[-1].closed.is_set()
+        assert not r.turns.speaking
+        result['talk_closes_speech_before_input'] = True
+        r.press('Escape', 'Escape')
+        r.space_up()
+        until(lambda: r.session.microphone._stream is None)
+        r.press('KeyQ', 'q')
+        until(lambda: 'Read aloud' in r.text())
         def fallback(text, cancel, report, reason):
             report('say', 'Reading with macOS say.', f'Using macOS say; Phonon unavailable: {reason}')
         with patch.object(SpeechPlayback, 'load', side_effect=ImportError('ptts missing')), \

@@ -526,18 +526,26 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             owner = f"{target}:{document}"
             if itype == "record_start":
+                if _VOICE_TURNS is not None:
+                    ready = _VOICE_TURNS.prepare_recording()
+                    if not ready["ok"]:
+                        reply(ready)
+                        return
                 def cancelled(error):
                     if _VOICE_TURNS is not None:
                         _VOICE_TURNS.capture_status("idle")
                     reply({"type": "record_cancel", "ok": False, "error": error})
-                result = session.microphone.start(
-                    owner, lambda: session.cdp.recording_loss(target, document),
-                    on_cancel=cancelled,
-                    on_warning=lambda seconds: reply({"type": "record_warning", "seconds_remaining": seconds}),
-                    # Straight to the protected frame over CDP; voice level never touches the page.
-                    on_level=lambda level: session.cdp.push_level(target, level))
-                if _VOICE_TURNS is not None:
-                    _VOICE_TURNS.capture_status("recording" if result.get("ok") else "failed")
+                result = {"ok": False}
+                try:
+                    result = session.microphone.start(
+                        owner, lambda: session.cdp.recording_loss(target, document),
+                        on_cancel=cancelled,
+                        on_warning=lambda seconds: reply({"type": "record_warning", "seconds_remaining": seconds}),
+                        # Straight to the protected frame over CDP; voice level never touches the page.
+                        on_level=lambda level: session.cdp.push_level(target, level))
+                finally:
+                    if _VOICE_TURNS is not None:
+                        _VOICE_TURNS.capture_status("recording" if result.get("ok") else "failed")
                 reply(result)
             elif itype == "record_cancel":
                 session.microphone.cancel(owner)

@@ -237,6 +237,10 @@ Hands-on audible check (user only):
 4. During speech enter `/gaze disconnect`. Confirm silence; reconnect and read again.
 5. Enable automatic reading; complete a new answer. Confirm it reads once, not while
    streaming. Disable it and confirm the next completed answer remains silent.
+6. Start talking while an answer is reading. Speech closes before the microphone
+   opens; wait for **Listening**. Read aloud is blocked while talking, and answers
+   completed during the hold stay silent. Read them explicitly after release.
+   If output cannot stop within one second, capture fails rather than overlapping it.
 
 No-speaker regression: `python3 -m unittest tests.test_speech tests.test_voice_turns`.
 With `ptts` and assets installed, run `python tests/phonon_smoke.py`: real Russell

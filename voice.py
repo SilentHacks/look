@@ -332,13 +332,24 @@ def record_microphone(
 ) -> bytes:
     """Record through the same single-owner native device as the Chrome talk key."""
     from .browser.cdp_bridge import get_shared_session
+    from .service import _VOICE_TURNS
 
     microphone = get_shared_session().microphone
-    result = microphone.start("tool", lambda: None, sample_rate=sample_rate)
-    if not result["ok"]:
-        raise RuntimeError(result["error"])
+    if _VOICE_TURNS is not None:
+        ready = _VOICE_TURNS.prepare_recording()
+        if not ready["ok"]:
+            raise RuntimeError(ready["error"])
+    result = {"ok": False}
     try:
+        result = microphone.start("tool", lambda: None, sample_rate=sample_rate)
+        if not result["ok"]:
+            raise RuntimeError(result["error"])
+        if _VOICE_TURNS is not None:
+            _VOICE_TURNS.capture_status("recording")
         time.sleep(duration_s)
         return microphone.stop("tool")[0]
     finally:
-        microphone.cancel("tool")
+        if result["ok"]:
+            microphone.cancel("tool")
+        if _VOICE_TURNS is not None:
+            _VOICE_TURNS.capture_status("idle")

@@ -61,7 +61,8 @@ def main():
                               lambda *args: reports.append(args))
             except Exception as exc:
                 errors.append(str(exc))
-        with patch.dict(sys.modules, sounddevice=SimpleNamespace(OutputStream=output)):
+        with patch.dict(sys.modules, sounddevice=SimpleNamespace(OutputStream=output)), \
+                patch.object(SpeechPlayback, 'say', side_effect=AssertionError('Real say forbidden')):
             start = time.monotonic()
             worker = threading.Thread(target=run)
             worker.start()
