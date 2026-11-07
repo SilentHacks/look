@@ -102,7 +102,7 @@ class Rig:
         self.tab=tab
         return tab
     def front(self,tab):
-        for t in self.session.cdp._tabs.values():
+        for t in tuple(self.session.cdp._tabs.values()):
             if t is not tab and t.is_connected:
                 try: self.cmd('Emulation.setFocusEmulationEnabled',{'enabled':False},t)
                 except Exception: pass
