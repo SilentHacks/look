@@ -1,6 +1,6 @@
 """Offline candidates only. No live defaults, camera access or reusable gaze weights.
 
-Run: python -c 'import tests, runpy; runpy.run_module("hermes_gaze.benchmark.gaze_tuning", run_name="__main__")' ...
+Run from the repository root with scripts/gaze.py tune.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .gaze_eval import EvalRidge, evaluate, private_directory, save_json, scoreboard
+from .gaze_eval import EvalRidge, PROTOCOLS, evaluate, private_directory, save_json, scoreboard, summaries
 from ..tracker.webcam_gaze import ScreenPoint
 
 
@@ -32,8 +32,8 @@ class Regression:
         return z
 
     def calibrate(self, observations, screen):
-        if len(observations) < 3:
-            raise ValueError("Fewer than three valid selected calibration frames")
+        if len(observations) < 45:
+            raise ValueError("Need at least 45 valid selected calibration frames")
         x = np.asarray([r[0] for r in observations], dtype=float)
         y = np.asarray([r[1:] for r in observations], dtype=float)
         if x.ndim != 2 or not np.isfinite(x).all() or not np.isfinite(y).all():
@@ -51,7 +51,7 @@ class Regression:
             for axis in range(2):
                 indices = [axis, axis + 2, 4, 5, 6, 7] if self.kind == "axes" else list(range(z.shape[1]))
                 a = z[:, indices]
-                # Dual solve keeps the frozen appearance embedding fit bounded by calibration count.
+                # Dual solve avoids a 264×264 appearance matrix at small point budgets.
                 w = a.T @ np.linalg.solve(a @ a.T + self.ridge * np.eye(len(a)), y[:, axis] - self.ymean[axis])
                 self.weights[indices, axis] = w
         profile = dict(model_id=self.model_id, mean=self.mean.tolist(), scale=self.scale.tolist(),
@@ -163,6 +163,7 @@ def main():
     parser.add_argument("--configs", nargs="+", choices=CONFIGS, default=list(CONFIGS))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--jitter-trace", type=Path, help="fake-camera trace; score filters for jitter only")
+    parser.add_argument("--protocols", nargs="+", choices=PROTOCOLS, default=list(PROTOCOLS))
     args = parser.parse_args()
     if min(args.points) < 3:
         parser.error("Calibration needs at least three points")
@@ -173,12 +174,13 @@ def main():
         representation, factory = CONFIGS[name]
         prepared = observations_for(data, representation)
         for points in args.points:
-            for protocol in ("same-session", "cross-day"):
+            for protocol in args.protocols:
                 scored, trace = evaluate(prepared, factory, name, points, protocol,
                                          "appearance" if representation == "appearance" else "observation")
                 rows.extend(scored)
                 save_json(out / f"{name}-{points}-{protocol}-trace.json", dict(version=1, samples=trace))
     save_json(out / "results.json", rows)
+    save_json(out / "summary.json", summaries(rows))
     (out / "SCOREBOARD.md").write_text(scoreboard(rows))
     (out / "SCOREBOARD.md").chmod(0o600)
     if args.jitter_trace:

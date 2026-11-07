@@ -1,7 +1,6 @@
 """Local frame-exact evaluation through GazeEstimator; never opens a capture device.
 
-Entry point: python -c 'import tests; from hermes_gaze.benchmark.gaze_eval import main; main()' ...
-SciPy is optional and needed only to read MPIIFaceGaze's MATLAB geometry.
+Run from the repository root with scripts/gaze.py eval.
 """
 from __future__ import annotations
 
@@ -10,7 +9,6 @@ import base64
 from collections import defaultdict
 import hashlib
 import importlib
-import io
 import json
 import math
 import mimetypes
@@ -20,7 +18,6 @@ import subprocess
 import tempfile
 import time
 import urllib.request
-import zipfile
 
 import numpy as np
 
@@ -39,7 +36,9 @@ def private_directory(path: Path) -> Path:
     repo = Path(__file__).resolve().parents[1]
     if path == repo or repo in path.parents:
         raise ValueError("Evaluation data must stay outside the repository")
-    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    missing = [p for p in (path, *path.parents) if not p.exists()]
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700)
     if path.is_symlink() or path.stat().st_mode & 0o077:
         raise ValueError("Choose a private directory (mode 0700)")
     return path
@@ -61,58 +60,7 @@ def screen(width, height, **extra):
                 screen_width=float(width), screen_height=float(height), screen_left=0, screen_top=0, **extra)
 
 
-def load_mpiiface(archive: Path, out: Path, people: list[str], limit: int, days: int = 0, per_day: int = 100) -> dict:
-    """Preserve original pixels, day ordering, true targets and calibrated screen plane."""
-    from scipy.io import loadmat
-    from scipy.spatial.transform import Rotation
-    out = private_directory(out)
-    sessions = []
-    with zipfile.ZipFile(archive) as z:
-        for person in people:
-            prefix = f"MPIIFaceGaze/{person}/"
-            size = loadmat(io.BytesIO(z.read(prefix + "Calibration/screenSize.mat")), squeeze_me=True)
-            pose = loadmat(io.BytesIO(z.read(prefix + "Calibration/monitorPose.mat")), squeeze_me=True)
-            geometry = screen(size["width_pixel"], size["height_pixel"],
-                              width_mm=float(size["width_mm"]), height_mm=float(size["height_mm"]),
-                              rotation=Rotation.from_rotvec(np.ravel(pose.get("rvecs", pose.get("rvects")))).as_matrix().tolist(),
-                              translation=np.ravel(pose["tvecs"]).tolist())
-            rows = [line.split() for line in z.read(prefix + person + ".txt").decode().splitlines() if line.strip()]
-            rows.sort(key=lambda r: (int(r[0].split("/")[0][3:]), int(Path(r[0]).stem)))
-            # Sample by acquisition order, not gaze/appearance; no test-dependent selection.
-            chosen = np.linspace(0, len(rows) - 1, min(limit, len(rows)), dtype=int)
-            if days:
-                by_day = defaultdict(list)
-                for i, r in enumerate(rows):
-                    by_day[r[0].split("/")[0]].append(i)
-                # Label/face-blind first/middle/last eligible days; enough early frames for 25 points.
-                eligible = [indices for indices in by_day.values() if len(indices) >= 80]
-                if len(eligible) < days:
-                    raise ValueError(f"{person}: fewer than {days} days with at least 80 images")
-                chosen = [i for j in np.linspace(0, len(eligible) - 1, days, dtype=int)
-                          for i in np.asarray(eligible[j])[np.linspace(0, len(eligible[j]) - 1,
-                                                                     min(per_day, len(eligible[j])), dtype=int)]]
-            frames = []
-            for index in chosen:
-                r = rows[index]
-                name = r[0]
-                day = int(name.split("/")[0][3:])
-                dest = out / f"{person}-{name.replace('/', '-')}"
-                if not dest.exists():
-                    with dest.open("xb") as f:
-                        dest.chmod(0o600); f.write(z.read(prefix + name))
-                frames.append(dict(path=str(dest), t=float(day), order=int(index), target=[float(r[1]), float(r[2])],
-                                   eye_origin=[float(v) for v in r[21:24]], phase="unassigned"))
-            sessions.append(dict(person=person, session="mpii-" + person, screen=geometry,
-                                 temporal=False, clock="acquisition day; intra-day order only", frames=frames))
-    with archive.open("rb") as source:
-        digest = hashlib.file_digest(source, "sha256").hexdigest()
-    result = dict(version=1, dataset="MPIIFaceGaze", licence="CC BY-NC-SA 4.0; internal research evaluation only",
-                  source_sha256=digest, sampling=dict(days=days, per_day=per_day, limit=limit), sessions=sessions)
-    save_json(out / "manifest.json", result)
-    return result
-
-
-def load_recording(directory: Path, out: Path, stride: int = 3) -> dict:
+def load_recording(directory: Path, out: Path, stride: int = 2) -> dict:
     """Decode the retained camera video; match real decoder PTS to recorded targets."""
     meta = json.loads((directory / "recording.json").read_text())
     if not meta.get("finished"):
@@ -149,6 +97,9 @@ def load_recording(directory: Path, out: Path, stride: int = 3) -> dict:
     result = dict(version=1, dataset="personal-fake" if meta["fake_camera"] else "personal",
                   licence="Private local recording; no upload", sessions=[dict(person=meta["person"],
                   session=meta["session"], start_epoch=meta["epoch"], screen=meta["screen"], temporal=True,
+                  condition=meta.get("condition", "upright"), glasses=meta.get("glasses", "unknown"),
+                  device=meta.get("device", "unknown"), calibration_source=meta.get("calibration_source"),
+                  condition_details=meta.get("condition_details", {}), fake_camera=meta["fake_camera"],
                   clock="video PTS aligned to MediaRecorder start (within one camera frame)", frames=frames)])
     save_json(out / "manifest.json", result)
     return result
@@ -219,10 +170,9 @@ def extract_manifest(data: dict) -> dict:
 
 
 class EvalRidge(LandmarkEstimator):
-    """Shipped predictor/standardization/solver; offline calibration accepts arbitrary target counts.
+    """Shipped predictor and solver, with 9/16/25 targets for dataset experiments.
 
-    Live UI guards (45 frames, exactly nine targets, fit rejection) cannot apply to
-    sparse public stills. Never saves a profile into the live tracker's location.
+    Keep sample-count, movement and fit-quality checks; never install these fits.
     """
     def __init__(self, ridge=1.):
         super().__init__()
@@ -231,52 +181,38 @@ class EvalRidge(LandmarkEstimator):
     def calibrate(self, observations, geometry):
         x = np.asarray([r[0] for r in observations], dtype=float)
         y = np.asarray([[r[1], r[2]] for r in observations], dtype=float)
-        if x.shape != (len(x), self.feature_count) or len(x) < 3 or not np.isfinite(x).all() or not np.isfinite(y).all():
-            raise ValueError("Insufficient finite calibration observations")
+        if x.shape != (len(x), self.feature_count) or len(x) < 45 or not np.isfinite(x).all() or not np.isfinite(y).all():
+            raise ValueError("Need at least 45 finite calibration observations")
+        if len(np.unique(y, axis=0)) < 3 or max(x.std(axis=0)) < .001:
+            raise ValueError("Insufficient target coverage or eye movement")
         mean, scale = x.mean(axis=0), np.maximum(x.std(axis=0), .001)
         a = np.column_stack((np.ones(len(x)), (x - mean) / scale))
         penalty = np.eye(self.feature_count + 1) * self.ridge; penalty[0, 0] = 0
         weights = np.linalg.solve(a.T @ a + penalty, a.T @ y)
+        if float(np.sqrt(np.mean((a @ weights - y) ** 2))) > .20:
+            raise ValueError("Calibration did not fit the targets")
         profile = dict(model_id=self.model_id, mean=mean.tolist(), scale=scale.tolist(), weights=weights.tolist(),
                        screen=geometry, fit_error=float(np.sqrt(np.mean((a @ weights - y) ** 2))))
         self.load(profile)
         return profile
 
 
-def split_frames(sessions: list[dict], points: int, protocol: str = "cross-day"):
-    """Freeze chronology before face filtering; never select calibration from test labels."""
-    ordered = [(s, f) for s in sessions for f in s["frames"]]
-    if all(f["phase"] == "unassigned" for _, f in ordered):
-        ordered.sort(key=lambda row: (row[1]["t"], row[1].get("order", 0)))
-        if protocol == "same-session":
-            if len(sessions) != 1 or len({f["t"] for _, f in ordered}) != 1:
-                raise ValueError("Same-session stills require one acquisition day")
-            cutoff = max(1, int(len(ordered) * .4))
-            early, later = ordered[:cutoff], ordered[cutoff:]
-        else:
-            days = sorted({f["t"] for _, f in ordered})
-            if len(days) < 2:
-                raise ValueError("Need at least two acquisition days")
-            cutoff = days[max(1, int(len(days) * .4)) - 1]
-            early = [(s, f) for s, f in ordered if f["t"] <= cutoff]
-            later = [(s, f) for s, f in ordered if f["t"] > cutoff]
-    else:
-        first = sessions[0]
-        boundary = next((i for i, f in enumerate(first["frames"]) if f["phase"] != "calibration"), len(first["frames"]))
-        early = [(first, f) for f in first["frames"][:boundary]]
-        if protocol == "same-session":
-            later = [(first, f) for f in first["frames"][boundary:]]
-        else:
-            later = [(s, f) for s in sessions[1:] for f in s["frames"] if f["phase"] != "calibration"]
-    available = [(s, f) for s, f in early if f.get("features") is not None]
+def split_frames(sessions: list[dict], points: int, protocol: str = "same-session"):
+    """Select targets from the initial calibration only, before any face filtering."""
+    first = sessions[0]
+    boundary = next((i for i, f in enumerate(first["frames"]) if f["phase"] != "calibration"), len(first["frames"]))
+    early = [(first, f) for f in first["frames"][:boundary]]
+    targets = sessions[:1] if protocol == "same-session" else sessions[1:]
+    later = [(s, f) for s in targets for f in s["frames"]
+             if f["phase"] in ("fixed", "moving", "reading")]
     groups = defaultdict(list)
-    for s, f in available:
+    for s, f in early:
         groups[tuple(f["target"])].append((s, f))
     if len(groups) < points:
-        raise ValueError(f"Only {len(groups)} valid early targets for {points}-point calibration")
+        raise ValueError(f"Only {len(groups)} initial targets for {points}-point calibration")
     # Farthest-point selection on calibration coordinates only, normalized to screen size.
     keys = sorted(groups)
-    g = available[0][0]["screen"]
+    g = first["screen"]
     xy = np.asarray(keys) / [g["width"], g["height"]]
     chosen = [int(np.argmin(np.sum((xy - .5) ** 2, axis=1)))]
     while len(chosen) < points:
@@ -293,13 +229,7 @@ def split_frames(sessions: list[dict], points: int, protocol: str = "cross-day")
 
 
 def angular_error(prediction, frame, geometry):
-    if all(k in geometry for k in ("rotation", "translation", "width_mm", "height_mm")) and "eye_origin" in frame:
-        def ray(xy):
-            point = np.array([xy[0] / geometry["width"] * geometry["width_mm"],
-                              xy[1] / geometry["height"] * geometry["height_mm"], 0.])
-            v = np.asarray(geometry["rotation"]) @ point + geometry["translation"] - frame["eye_origin"]
-            return v / np.linalg.norm(v)
-    elif all(geometry.get(k, 0) > 0 for k in ("width_mm", "height_mm", "distance_mm")):
+    if all(geometry.get(k, 0) > 0 for k in ("width_mm", "height_mm", "distance_mm")):
         def ray(xy):
             v = np.array([(xy[0] / geometry["width"] - .5) * geometry["width_mm"],
                           (xy[1] / geometry["height"] - .5) * geometry["height_mm"], geometry["distance_mm"]])
@@ -313,30 +243,74 @@ def summarize(values):
     return {"mean": float(np.mean(values)), "median": float(np.median(values)), "p95": float(np.percentile(values, 95))} if values else None
 
 
-def evaluate(data: dict, factory, name: str, points: int, protocol: str = "cross-day",
-             feature_key: str = "features") -> tuple[list[dict], list[dict]]:
-    if protocol not in ("same-session", "cross-day"):
-        raise ValueError("Unknown evaluation protocol")
-    people = defaultdict(list)
-    for session in data["sessions"]:
-        if protocol == "same-session" and all(f["phase"] == "unassigned" for f in session["frames"]):
-            for day in sorted({f["t"] for f in session["frames"]}):
-                window = {**session, "session": f"{session['session']}-day{day:g}",
-                          "frames": [f for f in session["frames"] if f["t"] == day]}
-                people[(session["person"], window["session"])].append(window)
+PROTOCOLS = ("same-session", "cross-condition", "cross-glasses")
+
+
+def evaluation_pairs(data, protocol):
+    sessions = sorted(data["sessions"], key=lambda s: (s.get("start_epoch", 0), s["session"]))
+    for target in sessions:
+        compatible = [s for s in sessions if s["person"] == target["person"]
+                      and s.get("device") == target.get("device")
+                      and all(s["screen"].get(k) == target["screen"].get(k)
+                              for k in ("width", "height", "dpr", "screen_width", "screen_height"))
+                      and s.get("start_epoch", 0) <= target.get("start_epoch", 0)
+                      and s["frames"] and s["frames"][0]["phase"] == "calibration"]
+        if protocol == "same-session":
+            source = next((s for s in compatible if s["session"] == (target.get("calibration_source") or target["session"])), None)
+        elif protocol == "cross-condition":
+            source = next((s for s in compatible if s["session"] != target["session"]
+                           and s.get("glasses") == target.get("glasses")
+                           and s.get("condition") == "upright" and target.get("condition") != "upright"), None)
         else:
-            people[(session["person"], session["session"] if protocol == "same-session" else "all")].append(session)
+            source = next((s for s in compatible if s.get("glasses") != target.get("glasses")
+                           and s.get("condition") == target.get("condition")), None)
+        yield source, target
+
+
+def validation_metrics(model, session, feature_key):
+    groups = defaultdict(list)
+    for frame in session["frames"]:
+        if frame["phase"] not in ("validation-start", "validation-end"):
+            continue
+        p = model.predict(frame[feature_key], frame["t"]) if frame.get(feature_key) is not None else None
+        groups[frame["phase"]].append((frame, p))
+    result = {}
+    biases = {}
+    for phase, rows in groups.items():
+        residuals = [np.array([p.x, p.y]) - f["target"] for f, p in rows if p is not None]
+        result[phase] = dict(frames=len(rows), predicted=len(residuals),
+                            error_px=summarize([float(np.linalg.norm(r)) for r in residuals]),
+                            region_hit={str(n): 100 * sum(
+                                all(min(n - 1, int(a / session["screen"][k] * n)) ==
+                                    min(n - 1, int(b / session["screen"][k] * n))
+                                    for a, b, k in zip((p.x, p.y), f["target"], ("width", "height")))
+                                for f, p in rows if p is not None) / len(rows) for n in (3, 4, 5)})
+        if residuals:
+            biases[phase] = np.mean(residuals, axis=0)
+    if len(biases) == 2:
+        result["bias_shift_px"] = float(np.linalg.norm(biases["validation-end"] - biases["validation-start"]))
+    return result
+
+
+def evaluate(data: dict, factory, name: str, points: int, protocol: str = "same-session",
+             feature_key: str = "features") -> tuple[list[dict], list[dict]]:
+    if protocol not in PROTOCOLS:
+        raise ValueError("Unknown evaluation protocol")
     results, traces = [], []
-    for (person, window), sessions in people.items():
-        sessions.sort(key=lambda s: s.get("start_epoch", 0))
-        row = dict(dataset=data["dataset"], person=person, session=window, protocol=protocol,
-                   config=name, calibration_points=points)
+    for source, target in evaluation_pairs(data, protocol):
+        person = target["person"]
+        row = dict(dataset=data["dataset"], person=person, session=target["session"], protocol=protocol,
+                   condition=target.get("condition", "unknown"), glasses=target.get("glasses", "unknown"),
+                   device=target.get("device", "unknown"), calibration_session=source["session"] if source else None,
+                   fake_camera=target.get("fake_camera", False), config=name, calibration_points=points)
         try:
-            calibration, test, early_count = split_frames(sessions, points, protocol)
+            if source is None:
+                raise ValueError("No compatible earlier calibration for this protocol")
+            sessions = [source] if source is target else [source, target]
+            calibration, test, early_count = split_frames(sessions, points,
+                                                          "same-session" if source is target else "cross-condition")
             model: GazeEstimator = factory()
-            geometry = calibration[0][0]["screen"]
-            if any(s["screen"] != geometry for s in sessions):
-                raise ValueError("Screen changed within a person; evaluate geometry sessions separately")
+            geometry = source["screen"]
             observations = [(f[feature_key], (f["target"][0] - geometry["left"]) / geometry["width"],
                              (f["target"][1] - geometry["top"]) / geometry["height"])
                             for _, f in calibration if f.get(feature_key) is not None]
@@ -360,7 +334,7 @@ def evaluate(data: dict, factory, name: str, points: int, protocol: str = "cross
                 trace["prediction"] = xy; traces.append(trace)
                 delta = np.asarray(xy) - frame["target"]
                 errors.append(float(np.linalg.norm(delta)))
-                angle = angular_error(xy, frame, geometry)
+                angle = angular_error(xy, frame, s["screen"])
                 if angle is not None:
                     angles.append(angle)
                 residuals.append((frame["t"], delta, errors[-1]))
@@ -389,6 +363,7 @@ def evaluate(data: dict, factory, name: str, points: int, protocol: str = "cross
                        region_hit={str(n): 100 * hit / len(test) for n, hit in hits.items()},
                        error_px=summarize(errors), error_deg=summarize(angles), jitter_px=math.sqrt(np.mean(jitter)) if jitter else None,
                        drift=drift, latency_ms=summarize(latency), predict_cpu_ms=summarize(cpu),
+                       validation=validation_metrics(model, target, feature_key),
                        extract_cpu_ms=summarize(extract_cpu))
         except ValueError as exc:
             row.update(status="unscorable", reason=str(exc))
@@ -396,44 +371,67 @@ def evaluate(data: dict, factory, name: str, points: int, protocol: str = "cross
     return results, traces
 
 
+def summaries(rows):
+    """Frame-weighted within each person; equal-person macro for the cross-person row."""
+    groups = defaultdict(list)
+    for r in rows:
+        if r["status"] == "ok":
+            groups[tuple(r[k] for k in ("person", "condition", "glasses", "protocol", "config", "calibration_points"))].append(r)
+    result = []
+    for key, values in groups.items():
+        total = sum(r["test_frames"] for r in values)
+        result.append(dict(zip(("person", "condition", "glasses", "protocol", "config", "calibration_points"), key),
+                           sessions=len(values), test_frames=total,
+                           coverage=sum(r["coverage"] * r["test_frames"] for r in values) / total,
+                           region_hit={str(n): sum(r["region_hit"][str(n)] * r["test_frames"] for r in values) / total for n in (3, 4, 5)}))
+    macro = defaultdict(list)
+    for r in result:
+        macro[tuple(r[k] for k in ("condition", "glasses", "protocol", "config", "calibration_points"))].append(r)
+    cross = [dict(zip(("condition", "glasses", "protocol", "config", "calibration_points"), key),
+                  people=len(values), region_hit={str(n): float(np.mean([v["region_hit"][str(n)] for v in values])) for n in (3, 4, 5)})
+             for key, values in macro.items()]
+    return dict(per_person=result, cross_person=cross)
+
+
 def scoreboard(rows):
     lines = ["# Offline gaze scoreboard", "", "Region hits include missing/off-screen predictions as misses. Errors are conditional on a prediction.",
-             "Public results describe those participants and setups, not the user's laptop. Fake-camera results test plumbing only.", "",
-             "| Dataset/person/session | Protocol | Configuration | Cal points/frames | Test/predicted | Coverage | 3×3 | 4×4 | 5×5 | px mean/median/p95 | degrees mean/median/p95 | jitter px | latency mean ms | CPU extract/predict ms | Drift first→last px |",
+             "Personal calibration only. Fake-camera results test plumbing, not human accuracy.", "",
+             "| Dataset/person/session (condition; glasses) | Protocol | Configuration | Cal points/frames | Test/predicted | Coverage | 3×3 | 4×4 | 5×5 | px mean/median/p95 | degrees mean/median/p95 | jitter px | latency mean ms | CPU extract/predict ms | Drift first→last px |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     def stats(v):
         return "/".join(f"{v[k]:.2f}" for k in ("mean", "median", "p95")) if v else "N/A"
     for r in rows:
         if r["status"] != "ok":
-            lines.append(f"| {r['dataset']}/{r['person']}/{r['session']} | {r['protocol']} | {r['config']} | {r['calibration_points']} | unscorable: {r['reason']} | — | — | — | — | — | — | — | — | — | — |")
+            lines.append(f"| {r['dataset']}/{r['person']}/{r['session']} ({r['condition']}; {r['glasses']}) | {r['protocol']} | {r['config']} | {r['calibration_points']} | unscorable: {r['reason']} | — | — | — | — | — | — | — | — | — | — |")
             continue
         drift = r["drift"]
         drift_text = f"{drift['first_third_mean_px']:.1f}→{drift['last_third_mean_px']:.1f} ({drift['elapsed']:.1f} {drift['unit']})" if drift else "N/A"
         jitter = f"{r['jitter_px']:.2f}" if r['jitter_px'] is not None else "N/A"
         hits = " | ".join(f"{r['region_hit'][str(n)]:.1f}%" for n in (3, 4, 5))
-        lines.append(f"| {r['dataset']}/{r['person']}/{r['session']} | {r['protocol']} | {r['config']} | {r['calibration_points']}/{r['calibration_frames']} | {r['test_frames']}/{r['predicted']} | {r['coverage']:.1f}% | {hits} | {stats(r['error_px'])} | {stats(r['error_deg'])} | {jitter} | {r['latency_ms']['mean']:.2f} | {r['extract_cpu_ms']['mean']:.2f}/{r['predict_cpu_ms']['mean']:.3f} | {drift_text} |")
+        lines.append(f"| {r['dataset']}/{r['person']}/{r['session']} ({r['condition']}; {r['glasses']}) | {r['protocol']} | {r['config']} | {r['calibration_points']}/{r['calibration_frames']} | {r['test_frames']}/{r['predicted']} | {r['coverage']:.1f}% | {hits} | {stats(r['error_px'])} | {stats(r['error_deg'])} | {jitter} | {r['latency_ms']['mean']:.2f} | {r['extract_cpu_ms']['mean']:.2f}/{r['predict_cpu_ms']['mean']:.3f} | {drift_text} |")
+    summary = summaries(rows)
+    lines += ["", "## Cross-person summary (equal weight per person; personal fits, never cross-person training)", "",
+              "| Condition | Glasses | Protocol | Configuration | Points | People | 3×3 | 4×4 | 5×5 |",
+              "|---|---|---|---|---|---|---|---|---|"]
+    for r in summary["cross_person"]:
+        hits = " | ".join(f"{r['region_hit'][str(n)]:.1f}%" for n in (3, 4, 5))
+        lines.append(f"| {r['condition']} | {r['glasses']} | {r['protocol']} | {r['config']} | {r['calibration_points']} | {r['people']} | {hits} |")
     lines += ["", "Latency = WASM inference + Python predict wall time, excludes decoding, CDP and camera exposure.",
               "CPU = Chrome renderer thread CPU (includes image decode/model reset/CDP work) / Python prediction thread CPU.",
               "Jitter = RMS successive residual displacement on stationary targets ≤250 ms apart; still images: N/A.",
               "Drift is descriptive early/late error and bias shift, confounded by target/posture changes; not causal sensor drift.",
-              "Baseline uses the shipped predictor and λ=1 solver; offline calibration relaxes live nine-target/45-frame/fit-rejection UI guards.",
-              "No model profiles or public-data weights are shipped; live defaults are unchanged.", ""]
+              "Baseline keeps the shipped sample/movement/fit guards; offline target counts may vary.",
+              "End validation and matched start validation are reported separately in results.json.",
+              "No fitted profiles are installed; live defaults are unchanged.", ""]
     return "\n".join(lines)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest="command", required=True)
-    mpii = subs.add_parser("mpiiface")
-    mpii.add_argument("archive", type=Path)
-    mpii.add_argument("--people", nargs="+", default=["p00", "p01", "p02"])
-    mpii.add_argument("--limit", type=int, default=300)
-    mpii.add_argument("--days", type=int, default=0, help="sample this many dense acquisition days instead of sparse whole-history sampling")
-    mpii.add_argument("--per-day", type=int, default=100)
-    mpii.add_argument("--out", type=Path, required=True)
     rec = subs.add_parser("recording")
     rec.add_argument("directory", type=Path)
-    rec.add_argument("--stride", type=int, default=3)
+    rec.add_argument("--stride", type=int, default=2)
     rec.add_argument("--out", type=Path, required=True)
     extract = subs.add_parser("extract")
     extract.add_argument("manifest", type=Path)
@@ -441,17 +439,11 @@ def main():
     score = subs.add_parser("score")
     score.add_argument("manifests", type=Path, nargs="+")
     score.add_argument("--points", type=int, nargs="+", default=[9, 16, 25])
-    score.add_argument("--protocols", nargs="+", choices=["same-session", "cross-day"], default=["same-session", "cross-day"])
+    score.add_argument("--protocols", nargs="+", choices=PROTOCOLS, default=list(PROTOCOLS))
     score.add_argument("--estimator", help="optional trusted local module:factory implementing GazeEstimator")
     score.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    if args.command == "mpiiface":
-        if args.limit < 10:
-            parser.error("--limit must be at least 10")
-        if args.days < 0 or args.per_day < 80:
-            parser.error("--days must be nonnegative and --per-day at least 80")
-        load_mpiiface(args.archive, args.out, args.people, args.limit, args.days, args.per_day)
-    elif args.command == "recording":
+    if args.command == "recording":
         if args.stride < 1:
             parser.error("--stride must be positive")
         load_recording(args.directory, args.out, args.stride)
@@ -477,6 +469,7 @@ def main():
                         rows.extend(scored)
                         save_json(out / f"{manifest.parent.name}-{name.replace(':', '-')}-{points}-{protocol}-trace.json", dict(version=1, samples=traces))
         save_json(out / "results.json", rows)
+        save_json(out / "summary.json", summaries(rows))
         (out / "SCOREBOARD.md").write_text(scoreboard(rows)); (out / "SCOREBOARD.md").chmod(0o600)
         print(scoreboard(rows))
 

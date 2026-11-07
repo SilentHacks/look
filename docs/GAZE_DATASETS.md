@@ -1,67 +1,14 @@
-# Public gaze data survey — 2026-11-07
+# Dataset decision
 
-Decision: use **MPIIFaceGaze original images** for this milestone's internal
-non-commercial evaluation. It is the only checked option combining explicit
-permission, no account/agreement form, a sub-10-GB download, full faces and real
-laptop screen coordinates. No public data, extracted features, personal fits or
-weights are included in the plugin. Do not train or ship weights from research-only
-or non-commercial data, or present these scores as this user's laptop accuracy.
+Public gaze datasets were surveyed and are not used by this project. Available
+releases had research-only or unclear reuse terms, access agreements, large disk
+requirements, cropped eyes rather than full faces, or sparse stills without the
+continuous timing and controlled camera/posture/glasses changes we need.
 
-| Dataset / primary source | Licence and allowed use | Access / action for user | Size | Personal calibration-style data | Laptop-webcam match / decision |
-|---|---|---|---|---|---|
-| [MPIIGaze](https://www.collaborative-ai.org/research/datasets/MPIIGaze/) | Non-commercial scientific purposes; cite Zhang et al., CVPR 2015. | Direct download; no registration/signature shown. | Official archive 2.1 GB; 213,659 images, 15 people, over three months. | Repeated 20-target sessions, screen pixel/mm and camera/monitor geometry, day folders. | Excellent setting, but released “Original” images are **eye rectangles**, not whole faces. Not usable with this MediaPipe full-face extractor; use MPIIFaceGaze instead. Not downloaded. |
-| [MPIIFaceGaze](https://www.mpi-inf.mpg.de/de/departments/computer-vision-and-machine-learning/research/gaze-based-human-computer-interaction/its-written-all-over-your-face-full-face-appearance-based-gaze-estimation) | CC BY-NC-SA 4.0; page and bundled readme say non-commercial scientific purposes. Cite Zhang et al., CVPRW 2017. **Internal evaluation only here.** | [Direct original ZIP](https://datasets.d2.mpi-inf.mpg.de/MPIIGaze/MPIIFaceGaze.zip); no account, signature or agreement form. | Official “940 MB”; observed Content-Length **942,343,290 bytes**, 37,667 JPEG images, 15 people. | Per-person, per-day full-face images; 2D screen targets, 3D face/target positions, screen dimensions and monitor pose. No dense video or precise within-day timestamps. | Best immediately usable laptop match. Downloaded original, not normalized/rotated face patches. Evaluated 300 acquisition-order samples each from p00/p01/p02. |
-| [GazeCapture](https://gazecapture.csail.mit.edu/), [licence](https://github.com/CSAILVision/GazeCapture/blob/master/LICENSE.md) | Research-only licence; no redistribution or commercial use, including extracted features, derivatives and trained models. | [Download account](https://gazecapture.csail.mit.edu/download.php): user registers with institutional/non-freemail address, waits for manual activation, reviews research licence. No account created. Site timed out during direct fetch; account details also checked in indexed official page. | ~2.4M images, >1,400 people; byte total not verified from accessible primary source. Common ~200-GB estimates are **not verified here**. Request a <10-GB subject subset, not the full release. | Repeated dot targets and participant IDs; mobile-device screen/pose metadata. | Phone/tablet camera and varying orientation, not a fixed laptop; not first choice. |
-| [EYEDIAP](https://www.idiap.ch/en/dataset/eyediap), [restricted files](https://zenodo.org/records/4467455) | Non-commercial research under an EULA. | User needs a Zenodo account and an authorized **permanent-position signatory**: full name, organization, job title, professional email and verification URL; request access and complete EULA. Generic email requests rejected. No request submitted. | 94 sessions, 16 people; VGA RGB/depth 30 fps, HD RGB where available. Byte total not publicly verified. Ask for screen-target DS/CS sessions under 10 GB each. | Repeated static/moving-head sessions, discrete/continuous screen targets and calibration files. Exclude floating 3D ball sessions for screen metrics. | Good temporal/posture evaluation, though lab Kinect/HD cameras at 80–90 cm differ from a laptop. |
-| [ETH-XGaze](https://ait.ethz.ch/xgaze) | CC BY-NC-SA 4.0 **plus additional terms**. | User reviews linked License.pdf and submits project registration form with institutional/supervisor details. No registration or terms accepted. | >1M images, 110 people; **130 GB** at 224², **497 GB** at 448², **~7 TB** raw. All full downloads exceed limit. | Many labelled targets per person, calibrated multiview rig. Can hold in a personal subset, not a normal laptop calibration sequence. | 18 DSLR cameras, extreme head poses, controlled lighting: useful stress test, weak deployment match. |
-| [EVE](https://ait.ethz.ch/eve), [additional terms](https://files.ait.ethz.ch/projects/EVE/EVE%20dataset%20Terms%20and%20Conditions.pdf), [format](https://github.com/swook/EVE/blob/master/DATASET.md) | CC BY-NC-SA 4.0 **plus no-distribution terms**; only one archival copy allowed. Internal evaluation only if user obtains permission/access. | User reads complete terms and submits the linked Google access-request form. Do not submit participant/user details automatically. No form submitted. Public test labels withheld; use labelled train/validation subjects for personal holdout. | 54 people, ~12.3M frames / ~105 camera-hours ([paper](https://swook.net/assets/pdf/2020_eccv_eve.pdf)); total download bytes not publicly verified. Ask for **one labelled central-webcam participant/session <10 GB**. | Continuous face video, synchronized screen stimulus, Tobii gaze, per-person sequences and calibrated geometry. | **Best next temporal dataset**: screen viewing, multiple webcam views. Closest to our moving/reading and later-time evaluation; access is the blocker. |
-| [Columbia Gaze](https://www.cs.columbia.edu/CAVE/databases/columbia_gaze/) | Non-commercial only; cite Smith et al., UIST 2013. | Download link opens a form asking for a **primary email address**. User can fill it themselves; none supplied. | 5,880 images, 56 people, 5184×3456; archive byte size not visible before form. | 5 head poses × 21 known gaze angles per person; possible personal angular holdout. No true screen pixels or video clock. | DSLR at 2 m, chinrest, dots on a wall: not laptop viewing. Do **not** fabricate a screen to claim region/pixel accuracy. No loader in this screen-gaze milestone. |
-| [TabletGaze](https://sh.rice.edu/project/screen-engagement/) | Project says participant release consent, but **no explicit reuse licence verified**. Consent is not a dataset licence. | Public Box link exists. User should obtain written reuse terms from Rice before evaluation; no account/agreement accepted. | Collected 816 videos from 51 people; release excludes 10 people. 1280×720 front-camera video, 35 targets. Byte size unverified. | 16 recordings/person across four postures, fixed 7×5 target grid. | Good posture diversity, handheld tablet not fixed laptop. Not used without clear terms. |
-| [WebGazer EOTT](https://webgazer.cs.brown.edu/data/) | Dataset page labels release GPLv3; cite Papoutsaki et al., ETRA 2018. No additional participant-image terms verified. Internal-only candidate; do not bundle its code/data. | Direct ZIP, no registration shown. | Observed ZIP Content-Length **21,263,599,023 bytes** (>10 GB); page recommends 50 GB+ working space. 51 valid participants. **Not downloaded.** | Initial/final nine-point tests, reading/search/typing, webcam video plus Tobii 120-Hz gaze and physical screen/distance metadata. | Excellent: MacBook Pro and desktop webcam. Authors warn timing is approximate; preserve per-video start events. User could ask authors for an individual participant archive <10 GB. |
-| [WEyeDS, 2024](https://robbinslab.github.io/weyeds/) | No explicit dataset licence on project page; request permission, not inferred from collection-code licence. | User supplies institutional email through linked Qualtrics form and asks authors for permitted internal-evaluation terms. No form submitted. | Expanded from 38 to 54 people; full faces and eye crops, byte/frame total not listed. | Person IDs, normalized viewport dot coordinates and machine/screen metadata; personal held-in subset possible. | Strong newer desktop-webcam match, but permission/access not cleared. |
+All tuning now uses our own consented, pseudonymous local recordings. Keep original
+camera video and target timestamps so future extractors can reuse the evidence.
+No public dataset loader, download recipe, public-data scoreboard, pretrained gaze
+checkpoint or public-data fit is part of the evaluation path. The Apache-2.0
+MediaPipe face localizer is unchanged; it is not a pretrained gaze estimator.
 
-## What was actually used
-
-- Official MPIIFaceGaze ZIP downloaded into `~/.cache/hermes-gaze-eval/`.
-  The loader records its SHA-256 in the private manifest; no third-party mirror.
-- Zhang, Sugano, Fritz & Bulling, “It's Written All Over Your Face: Full-Face
-  Appearance-Based Gaze Estimation,” CVPRW 2017, pp. 2299–2308.
-- This milestone fits ephemeral **personal calibration** for evaluation, not a
-  reusable/publicly shipped model. Profiles are neither committed nor installed
-  into the live tracker.
-- No GazeFollower/GazeFollower2 or Glance source/data was read or used.
-- Arbitrary YouTube/webcam footage without synchronized gaze ground truth cannot
-  establish accuracy. A labelled face is not evidence of its gaze target.
-- Not adding speculative loaders for inaccessible or unsuitable data. Authorized
-  future data can enter the documented common frame manifest; implement native
-  EVE/EOTT decoding only against an actual authorized sample and its time bases.
-
-## Appearance model provenance
-
-Checked upstream [RedForestAI/WebEyeTrack](https://github.com/RedForestAI/WebEyeTrack/tree/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c),
-commit `75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c`, without installing its package
-or downloading/executing weights. Its [code licence](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/LICENSE)
-is MIT. BlazeGaze takes a 128×512 RGB eye patch, head vector and face origin.
-
-The [Python guide](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/python/README.md)
-describes separate MPIIFaceGaze, GazeCapture and EYEDIAP training. **GazeCapture's
-[research-only terms](https://github.com/CSAILVision/GazeCapture/blob/master/LICENSE.md)
-explicitly restrict commercial use of models trained on it**; MIT code does not
-remove training-data restrictions. No sign-up or licence acceptance was performed.
-
-Importantly, the [browser conversion script](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/python/scripts/ml_routines/tfjs_convert.py)
-points to an **MPIIFaceGaze** run, not proof that the browser checkpoint is
-GazeCapture-trained. The [MPII training recipe](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/python/scripts/ml_routines/configs/train/maml_mpiifacegaze_config.yml)
-lists p00–p09 as training people, overlapping all six people in this sweep.
-The correspondence between each distributed checkpoint and its training run is
-not independently established. Thus a score on these people could leak
-pretraining, and unrestricted production-weight rights are **not established**.
-No upstream weights are shipped, enabled, or silently treated as MIT-cleared.
-
-The scored `appearance` alternative is our own personal ridge on normalized
-16×8 grayscale patches from **both eyes**, plus the existing eight landmarks.
-The face localizer is the already-audited Apache-2.0 MediaPipe model. No external
-gaze checkpoint or reusable public-data weights exist in this path; ephemeral
-calibration fits remain evaluation-only. It is an appearance baseline, **not an
-evaluation of BlazeGaze or evidence against pretrained appearance models**.
-
+See [the recording guide](GAZE_RECORDING.md) and [evaluation protocols](GAZE_EVAL.md).

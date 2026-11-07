@@ -23,19 +23,6 @@ class GazeEvaluationTests(unittest.TestCase):
         features = [.3, .7, .06, .21, 1., -.4, .3, .1]
         self.assertEqual(live.predict(features, 1.), offline.predict(features, 1.))
 
-    def test_whole_days_and_target_identities_are_held_out_before_face_filtering(self):
-        frames = [dict(t=day, target=[x, y], phase="unassigned", features=[x, y] + [0.] * 6)
-                  for day in (1., 2., 3., 4.) for x, y in ((10., 10.), (20., 80.), (90., 20.), (80., 90.))]
-        session = dict(person="a", session="days", screen=screen(100, 100), temporal=False, frames=frames)
-        calibration, test, _ = split_frames([session], 3)
-        self.assertTrue(all(f["t"] == 1 for _, f in calibration))
-        self.assertTrue(all(f["t"] > 1 for _, f in test))
-        self.assertTrue({tuple(f["target"]) for _, f in calibration}.isdisjoint({tuple(f["target"]) for _, f in test}))
-        # Missing early faces do not move the cutoff into the test days.
-        for f in frames[:4]:
-            f["features"] = None
-        with self.assertRaises(ValueError):
-            split_frames([session], 3)
 
     def test_missing_faces_are_region_misses_not_discarded_rows(self):
         frames = [dict(t=i * .1, phase="calibration", features=f, target=[x * 100, y * 100])
@@ -61,34 +48,36 @@ class GazeEvaluationTests(unittest.TestCase):
         self.assertTrue(all(s is first for s, _ in calibration + held_out))
         self.assertIn((first, test), held_out)
         later["frames"].append({**test, "t": 110.})
-        _, cross_day, _ = split_frames([first, later], 9, "cross-day")
-        self.assertEqual(cross_day, [(later, later["frames"][-1])])
+        _, cross, _ = split_frames([first, later], 9, "cross-condition")
+        self.assertEqual(cross, [(later, later["frames"][-1])])
 
-    def test_same_day_freezes_early_cutoff_and_refits_each_day(self):
-        frames = [dict(t=day, order=i, target=[10. + i * 4, 20. + (i % 3) * 20],
-                       features=[float(i)] * 8, phase="unassigned")
-                  for day in (1., 2.) for i in range(20)]
-        session = dict(person="a", session="days", screen=screen(100, 100), temporal=False, frames=frames)
-        seen = []
-        class Capture(EvalRidge):
-            def calibrate(self, observations, geometry):
-                seen.append([r[0][0] for r in observations])
-                return super().calibrate(observations, geometry)
-        rows, trace = evaluate(dict(dataset="check", sessions=[session]), Capture, "capture", 3, "same-session")
-        self.assertEqual(len(seen), 2)
-        self.assertEqual(seen[0], seen[1])
-        self.assertTrue(all(i < 8 for fit in seen for i in fit))
-        self.assertEqual([r["test_frames"] for r in rows], [12, 12])
-        self.assertTrue(all(t["target"][0] >= 42 for t in trace))
-        first = {**session, "frames": frames[:20]}
-        calibration, test, cutoff = split_frames([first], 3, "same-session")
-        self.assertEqual(cutoff, 8)
-        self.assertTrue({tuple(f["target"]) for _, f in calibration}.isdisjoint(
-                        {tuple(f["target"]) for _, f in test}))
-        for f in first["frames"][:8]:
-            f["features"] = None
-        with self.assertRaises(ValueError):
-            split_frames([first], 3, "same-session")
+    def test_recording_protocols_never_cross_people_devices_or_future_calibration(self):
+        early = [dict(t=i * .1, phase="calibration", features=f, target=[x * 100, y * 100])
+                 for i, (f, x, y) in enumerate(observations())]
+        test = dict(t=10., phase="fixed", features=[.3] * 8, target=[30., 70.])
+        def session(name, epoch):
+            return dict(person="a", session=name, start_epoch=epoch, screen=screen(100, 100),
+                        temporal=True, frames=early + [test], device="laptop", glasses="none", condition="upright")
+        first = session("first", 1)
+        changed = {**session("distance", 2), "condition": "distance"}
+        nofit = {**session("no-fit", 3), "condition": "no-recalibration", "calibration_source": "first", "frames": [test]}
+        glasses = {**session("glasses", 4), "glasses": "glasses"}
+        foreign = {**session("foreign", 0), "person": "b"}
+        other_device = {**session("other", 0), "device": "other"}
+        data = dict(dataset="check", sessions=[other_device, foreign, first, changed, nofit, glasses])
+        same, _ = evaluate(data, EvalRidge, "baseline", 9, "same-session")
+        self.assertEqual(next(r for r in same if r["session"] == "no-fit")["calibration_session"], "first")
+        cross, _ = evaluate(data, EvalRidge, "baseline", 9, "cross-condition")
+        self.assertEqual({r["calibration_session"] for r in cross if r["status"] == "ok"}, {"first"})
+        eyewear, _ = evaluate(data, EvalRidge, "baseline", 9, "cross-glasses")
+        self.assertEqual([(r["session"], r["calibration_session"]) for r in eyewear if r["status"] == "ok"],
+                         [("glasses", "first")])
+        # Point selection stays label-only when an early face is missing.
+        selected, _, count = split_frames([first], 9)
+        first["frames"][0]["features"] = None
+        again, _, missing_count = split_frames([first], 9)
+        self.assertEqual([f["target"] for _, f in selected], [f["target"] for _, f in again])
+        self.assertEqual(count, missing_count)
 
     def test_candidate_models_fit_only_calibration_and_abstain_offscreen(self):
         data = observations()
@@ -142,6 +131,9 @@ class GazeEvaluationTests(unittest.TestCase):
             event("record_start", nonce="forged", screen=SCREEN)
             event("record_start", context=8, screen=SCREEN)
             self.assertFalse((directory / "camera.webm").exists())
+            event("record_start", screen=SCREEN, epoch=1.)
+            self.assertFalse((directory / "camera.webm").exists())  # Consent precedes storage.
+            event("record_consent", accepted=True)
             event("record_start", screen={**SCREEN, "height": 450}, epoch=1., viewport_origin=[0, 0])
             event("record_frame", t=.1, target=[10, 20], phase="calibration", settling=False, media_time=.1, presented_frame=1)
             event("record_frame", t=.1, target=[10, 20], phase="calibration", settling=False, media_time=.1, presented_frame=1)
