@@ -61,9 +61,9 @@ Saved-item comparisons can offer both targets/rows only when both identities are
 already in the current capture on the same document. Otherwise highlighting stays
 on the selected item's document; comparison evidence can still include both items.
 
-**Browser-action acceptance is not complete:** the last full real-Hermes trial
-scored 3/5 for new-tab email. The final explicit tab-choice schema awaits a free
-quota reset; [results and resumption](docs/BROWSER_ACTIONS.md#production-measurements).
+**Browser-action acceptance is not complete:** the earlier forced-direct free
+trial scored 3/5 for new-tab email. Final default-dispatch measurement awaits a
+free quota reset; [results and resumption](docs/BROWSER_ACTIONS.md#production-measurements).
 
 `gaze_read` starts a separate, turn-owned action capture: bounded structure and
 captured field/control identities, never field values. `gaze_fill` batches text,

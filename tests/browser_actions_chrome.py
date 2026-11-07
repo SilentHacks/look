@@ -50,6 +50,41 @@ def probe(rig, tools, fixtures):
         assert count(rig) == 0
         return result
 
+    info = fresh()
+    rig.page("""(() => {
+      const next=document.createElement('button');next.type='button';next.textContent='Next';
+      next.onclick=()=>{
+        history.pushState({}, '', location.href+'&step=two');
+        const input=document.createElement('input');input.id='next-entry';input.setAttribute('aria-label','Next entry');
+        document.body.prepend(input);
+      };
+      document.body.prepend(next);return true;
+    })()""")
+    info = tools.read()
+    next_control = next(c for c in info['controls'] if c['label'] == 'Next')
+    result = call('gaze_click', resolution_id=info['resolution_id'], handle=next_control['handle'], new_tab=False)
+    assert result.get('executed'), result
+    info = tools.read()
+    assert info.get('ok'), info
+    field = next(f for f in info['fields'] if f['label'] == 'Next entry')
+    assert call('gaze_fill', resolution_id=info['resolution_id'],
+                entries=[{'handle':field['handle'], 'text':'Continued'}]).get('executed')
+    assert rig.page("document.querySelector('#next-entry').value") == 'Continued'
+    checks.append('non-link navigation continues on the same owned tab with fresh destination identities')
+
+    info = fresh()
+    rig.page("""(() => {
+      const next=document.createElement('button');next.type='button';next.textContent='Next';
+      next.onclick=()=>location.assign('/slow-redirect');document.body.prepend(next);return true;
+    })()""")
+    info = tools.read()
+    next_control = next(c for c in info['controls'] if c['label'] == 'Next')
+    result = call('gaze_click', resolution_id=info['resolution_id'], handle=next_control['handle'], new_tab=False)
+    assert result.get('executed'), result
+    assert rig.page('location.pathname') == '/browser_actions_unseen.html', result
+    assert tools.read().get('ok')
+    checks.append('non-link document navigation waits through a delayed redirect without replay or focus retargeting')
+
     # Exact values on five generic fixture kinds; no fixture knowledge enters production code.
     for kind in ('form', 'layout', 'wizard', 'unseen'):
         info = fresh(kind)
@@ -131,21 +166,89 @@ def probe(rig, tools, fixtures):
     rig.front(source)
     rig.cmd('Page.close', tab=link_tab)
 
+    for new_tab in (False, True):
+        info = fresh()
+        rig.page("""(() => {const a=document.createElement('a');a.id='private-jump';a.textContent='Jump to notes';
+          a.href=location.href+'&access_token=URL_PRIVATE_CANARY#notes';document.body.prepend(a);return true;})()""")
+        info = tools.read()
+        jump = next(c for c in info['controls'] if c['label'] == 'Jump to notes')
+        result = call('gaze_click', resolution_id=info['resolution_id'], handle=jump['handle'], new_tab=new_tab)
+        assert result.get('ok') and result.get('executed'), result
+        if new_tab:
+            sync_tab(rig)
+            assert rig.tab is not source
+        assert rig.page("location.href.includes('URL_PRIVATE_CANARY') && location.hash === '#notes'")
+        assert 'URL_PRIVATE_CANARY' not in json.dumps(result)
+        if new_tab:
+            rig.session.tasks.stop()
+            private_tab = rig.tab
+            rig.front(source)
+            rig.cmd('Page.close', tab=private_tab)
+    checks.append('captured links preserve private query and fragment in current and new tabs without model exposure')
+
     info = fresh()
-    rig.page("""(() => {const a=document.createElement('a');a.id='private-jump';a.textContent='Jump to notes';
-      a.href=location.href+'&access_token=URL_PRIVATE_CANARY#notes';document.body.prepend(a);return true;})()""")
+    rig.page("document.body.insertAdjacentHTML('afterbegin','<a id=redirect href=/redirect>Read next page</a>');true")
     info = tools.read()
-    jump = next(c for c in info['controls'] if c['label'] == 'Jump to notes')
+    jump = next(c for c in info['controls'] if c['label'] == 'Read next page')
     result = call('gaze_click', resolution_id=info['resolution_id'], handle=jump['handle'], new_tab=False)
-    assert result.get('ok') and result.get('executed'), result
-    assert rig.page("location.href.includes('URL_PRIVATE_CANARY') && location.hash === '#notes'")
-    assert 'URL_PRIVATE_CANARY' not in json.dumps(result)
-    checks.append('native captured link preserves private query and fragment without serializing either')
+    assert result.get('ok') and result.get('executed') and result.get('fields'), result
+    assert rig.tab is source and rig.page('location.href') == fixtures.url('unseen')
+    checks.append('captured same-tab links follow HTTP redirects and return the pinned destination structure')
+
+    info = fresh()
+    rig.page("""(() => { const titled=document.createElement('input');titled.id='titled-otp';titled.title='One-time code';
+      titled.value='OTP_PRIVATE_CANARY';document.querySelector('#registration-form').prepend(titled);
+      const label=document.createElement('span');label.id='aria-secret-label';label.textContent='Security code';
+      const coded=document.createElement('input');coded.id='aria-otp';coded.setAttribute('aria-labelledby',label.id);
+      coded.value='ARIA_PRIVATE_CANARY';document.querySelector('#registration-form').prepend(label,coded);
+      const nested=document.createElement('span');nested.id='nested-label';nested.append('Reference');
+      const privateText=document.createElement('textarea');privateText.name='password';privateText.textContent='NESTED_PRIVATE_CANARY';
+      nested.append(privateText);const ordinary=document.createElement('input');ordinary.setAttribute('aria-labelledby',nested.id);
+      document.querySelector('#registration-form').prepend(nested,ordinary);return true;})()""")
+    info = tools.read()
+    assert not any(f['label'] in ('One-time code', 'Security code') for f in info['fields'])
+    assert not any(s in json.dumps(info) for s in ('OTP_PRIVATE_CANARY','ARIA_PRIVATE_CANARY','NESTED_PRIVATE_CANARY','Security code'))
+    fill(info)
+    commit(info)
+    until(lambda: rig.dbg().get('view') == 'confirm')
+    assert not any(s in rig.text() for s in ('OTP_PRIVATE_CANARY','ARIA_PRIVATE_CANARY','NESTED_PRIVATE_CANARY'))
+    assert rig.page("document.querySelector('#titled-otp').value==='OTP_PRIVATE_CANARY' && document.querySelector('#aria-otp').value==='ARIA_PRIVATE_CANARY'")
+    checks.append('title and root-scoped ARIA labels exclude secret fields from reads, writes and approval summaries')
+
+    info = fresh()
+    rig.page("""(() => {document.body.replaceChildren();for(let n=0;n<90;n++){
+      const field=document.createElement('input');field.id='field-'+n;field.setAttribute('aria-label','Entry '+n);
+      field.style.cssText='display:block;height:40px;margin:12px';document.body.append(field);
+    }return true;})()""")
+    info = tools.read()
+    assert 'Entry 0' in [f['label'] for f in info['fields']] and len(info['fields']) <= 64
+    rig.page("document.querySelector('#field-89').scrollIntoView();true")
+    info = tools.read()
+    last = next(f for f in info['fields'] if f['label'] == 'Entry 89')
+    assert call('gaze_fill', resolution_id=info['resolution_id'], entries=[{'handle':last['handle'],'text':'Reachable after scroll'}]).get('executed')
+    assert rig.page("document.querySelector('#field-89').value") == 'Reachable after scroll'
+    checks.append('scrolling and recapture exposes later controls beyond the 64-identity cap')
+
+    info = fresh()
+    rig.page("""(() => {const base=document.createElement('base');base.href=location.origin+'/other-root/';
+      document.head.append(base);document.querySelector('#submit').setAttribute('formaction','charge');return true;})()""")
+    info = tools.read()
+    fill(info)
+    commit(info)
+    until(lambda: '/other-root/charge' in rig.text())
+    rig.page("document.querySelector('base').href=location.origin+'/changed-root/';document.querySelector('base').href=location.origin+'/other-root/';true")
+    time.sleep(.8)
+    rig.click_panel('[data-act="confirm"][data-value="yes"]')
+    time.sleep(.2)
+    assert count(rig) == 0
+    checks.append('confirmation shows browser-resolved base/formaction destination and rejects a changed base')
 
     info = fresh()
     fill(info)
     field = next(f for f in info['fields'] if f['label'] == 'Full name')
     rig.page("window.keySeen=false;document.querySelector('#full-name').addEventListener('keydown',e=>{window.keySeen=e.isTrusted&&e.key==='ArrowLeft';});true")
+    rejected = call('gaze_press', resolution_id=info['resolution_id'], handle=field['handle'], key='Escape')
+    assert not rejected.get('executed'), rejected  # Reserved user Stop must not masquerade as a page key.
     result = call('gaze_press', resolution_id=info['resolution_id'], handle=field['handle'], key='ArrowLeft')
     assert result.get('executed') and rig.page('window.keySeen'), result
     result = call('gaze_press', resolution_id=info['resolution_id'], handle=field['handle'], key='Enter')
@@ -220,6 +323,8 @@ def probe(rig, tools, fixtures):
     tab = next(c for c in info['controls'] if c['label'] == 'Schedule')
     assert call('gaze_click', resolution_id=info['resolution_id'], handle=tab['handle'], new_tab=False).get('executed')
     assert rig.page('audit.choice') == 1
+    info = tools.read()
+    tab = next(c for c in info['controls'] if c['label'] == 'Schedule')
     rig.page("document.querySelector('#choice-tab').style.opacity='0';true")
     assert not call('gaze_click', resolution_id=info['resolution_id'], handle=tab['handle'], new_tab=False).get('executed')
     external = next(c for c in info['controls'] if c['label'] == 'Next')
@@ -280,6 +385,26 @@ def probe(rig, tools, fixtures):
     checks.append('lost mutation reply revokes grant without replay')
 
     info = fresh()
+    import io
+    import urllib.request
+    original_open = urllib.request.urlopen
+    created = []
+    def malformed_reply(request, *args, **kwargs):
+        if '/json/new?' in getattr(request, 'full_url', str(request)):
+            with original_open(request, *args, **kwargs) as response:
+                created.append(json.load(response)['id'])
+            return io.BytesIO(b'not valid JSON')
+        return original_open(request, *args, **kwargs)
+    with patch.object(urllib.request, 'urlopen', side_effect=malformed_reply):
+        result = call('gaze_open_tab', resolution_id=info['resolution_id'], url=fixtures.url('mail'))
+    assert result.get('outcome') == 'unknown' and result.get('executed') is None, result
+    assert len(created) == 1 and not tools.read().get('ok')
+    created_tab = until(lambda: (tab if (tab := rig.session.cdp._tabs.get(created[0])) and tab.is_connected else None))
+    rig.front(source)
+    rig.cmd('Page.close', tab=created_tab)
+    checks.append('malformed create-tab reply revokes authority after one real tab creation without replay')
+
+    info = fresh()
     fill(info)
     commit(tools.read())
     result = rig.session.tasks.stop()
@@ -288,6 +413,18 @@ def probe(rig, tools, fixtures):
         {'handle': info['fields'][0]['handle'], 'text': 'AFTER STOP'}])
     assert not result.get('executed') and not tools.read().get('ok') and count(rig) == 0, result
     checks.append('Stop cancels pending approval and revokes read/mutation authority')
+
+    info = fresh()
+    fill(info)
+    commit(info)
+    grant = dict(rig.session.tasks.grant)
+    rig.session.tasks.finish(grant['session_id'], grant['turn_id'])
+    until(lambda: rig.dbg().get('view') == 'confirm')
+    time.sleep(.8)
+    rig.click_panel('[data-act="stop_action_task"]')
+    until(lambda: rig.session.actions._pending is None)
+    assert count(rig) == 0
+    checks.append('visible confirmation Stop revokes pending approval after model completion')
 
     # Exercise actual inbox admission from both protected typing and fake native speech.
     from hermes_gaze import voice
@@ -349,12 +486,15 @@ def probe(rig, tools, fixtures):
     until(lambda: rig.session.tasks._stopped.is_set())
     assert not tools.read().get('ok') and count(rig) == 0
     checks.append('visible Doing/Stop revokes the task through trusted protected-frame input')
-    fresh()
-    until(lambda: rig.dbg().get('view') == 'doing')
-    rig.press('Escape', 'Escape')
-    until(lambda: rig.session.tasks._stopped.is_set())
-    assert not tools.read().get('ok') and count(rig) == 0
-    checks.append('trusted Escape revokes the running task')
+    for selector in (None, '#full-name', '#notes'):
+        fresh()
+        until(lambda: rig.dbg().get('view') == 'doing')
+        if selector:
+            rig.page(f"document.querySelector({json.dumps(selector)}).focus();true")
+        rig.press('Escape', 'Escape')
+        until(lambda: rig.session.tasks._stopped.is_set())
+        assert not tools.read().get('ok') and count(rig) == 0
+    checks.append('trusted Escape revokes the task from body, input and textarea focus')
     assert not any(s in json.dumps(tools.calls) for s in SECRETS)
     rig.front(source)
     return {'checks': checks, 'calls': tools.calls,

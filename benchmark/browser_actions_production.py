@@ -56,6 +56,13 @@ class Fixtures:
         allowed = {'/browser_actions_page.html', '/browser_actions_extra.html', '/browser_actions_unseen.html'}
         class Handler(SimpleHTTPRequestHandler):
             def do_GET(self):
+                if urlsplit(self.path).path in ('/redirect', '/slow-redirect'):
+                    if urlsplit(self.path).path == '/slow-redirect':
+                        time.sleep(.35)
+                    self.send_response(302)
+                    self.send_header('Location', '/browser_actions_unseen.html')
+                    self.end_headers()
+                    return
                 if urlsplit(self.path).path not in allowed:
                     self.send_error(404)
                     return
@@ -262,7 +269,6 @@ def seed_memory(home, missing_phone=False):
 
 def run_turn(rig, tools, ask, key, origin, ingress='terminal'):
     from run_agent import AIAgent
-    schemas = [schema for schema, _ in tools.entries.values()]
     started = time.monotonic()
     tools.calls.clear()
     agent = None
@@ -275,8 +281,6 @@ def run_turn(rig, tools, ask, key, origin, ingress='terminal'):
             load_soul_identity=False, cwd=os.environ['HERMES_HOME'],
             ephemeral_system_prompt=tools.rules + '\nOnly owned local fixture origin ' + origin +
                 ' is permitted. No external sites or real accounts. Prepare the requested draft and offer review.')
-        agent.tools = [{'type': 'function', 'function': s} for s in schemas]
-        agent.valid_tool_names = {s['name'] for s in schemas}
         loaded = agent._memory_store._system_prompt_snapshot['user']
         assert 'Alex Morgan' in loaded and 'alex@example.test' in loaded
         tools.plugin_turns.bind(session_key='production-trial', session_id=agent.session_id)

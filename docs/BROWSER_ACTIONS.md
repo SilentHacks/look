@@ -1,9 +1,10 @@
 # Browser actions
 
-**Acceptance is not complete.** The last fully measured production path passed
-23/25 workflows, but new-tab email was 3/5. The final explicit tab-choice schema
-has local Chrome coverage; its free-model rerun is blocked by OpenRouter's daily
-HTTP 429 quota. Do not call the ≥4/5-per-fixture release gate passed.
+**Acceptance is not complete.** The last complete free-model harness scored
+23/25, including new-tab email 3/5. Review found that its manually promoted tool
+surface masked Hermes's default deferral behavior; those overrides are removed.
+The final production surface needs a fresh five-per-fixture run after the
+OpenRouter daily HTTP 429 quota resets. The ≥4/5 release gate is not passed.
 
 ## Production policy and tools
 
@@ -14,15 +15,22 @@ Connect a new Hermes conversation with `/gaze connect`. Voice, the private typed
 question card and typed Hermes questions can run multi-step tasks. Saved inbox
 evidence remains immutable; an exact user session/turn gets a separate fresh
 action capture on its foreground source document. A recalled answer or page text
-does not grant action authority. A task can transfer ownership only through its
-own navigation/new-tab operation.
+does not grant action authority. Only the task's own navigation, new-tab operation
+or captured-control click can transfer ownership; changing foreground focus cannot.
+
+Use the operation schemas on Hermes's normal executable surface. When tool search
+defers them, load a schema with `tool_describe(names=["gaze_fill"])`, then invoke
+one operation with `tool_call(calls=[{name:"gaze_fill",arguments:{...}}])`.
+Only approved guarded tool names pass that bridge; it is not a code/browser
+fallback. Request filtering preserves the provider's native schema format and
+never advertises direct tools absent from Hermes's executable set.
 
 | Tool | Arguments and result |
 |---|---|
-| `gaze_read` | No arguments; bounded structure, up to 64 captured fields/controls, options and sanitized HTTP(S) links, no field values. Returns `resolution_id`. |
+| `gaze_read` | No arguments; bounded structure, up to 64 captured fields/controls, viewport first, options and sanitized HTTP(S) links, no field values. Returns `resolution_id`. |
 | `gaze_fill` | `resolution_id`, batch `entries:[{handle,text}]`; replaces text/native-select/contenteditable values. |
 | `gaze_click` | `resolution_id`, `handle`, required boolean `new_tab`; false for buttons/same-tab links, true opens a safe captured link in a new tab and returns its structure. Consequential/ambiguous controls request review. |
-| `gaze_press` | `resolution_id`, `handle`, listed `key`; Enter/Space route to the guarded captured activation target. No arbitrary shortcuts. |
+| `gaze_press` | `resolution_id`, `handle`, listed `key`; Enter/Space use guarded activation. Escape belongs exclusively to the user's Stop, not model page input. No arbitrary shortcuts. |
 | `gaze_open_tab` | `resolution_id`, HTTP(S) `url`; genuinely new foreground tab, becomes action target, returns its fresh structure. |
 | `gaze_navigate` | Same arguments; navigates the task tab and returns fresh structure. |
 | `gaze_scroll` | `resolution_id`, bounded `pixels`, optional captured container `handle`. |
@@ -31,8 +39,9 @@ own navigation/new-tab operation.
 
 Every mutation uses the latest integer epoch and real captured identities, never
 model selectors or coordinates. A stale epoch returns fresh structure without
-executing; the model can recover with its new epoch. Navigation, scroll and
-recapture do not invent a pointer hit. Detached/changed controls fail honestly.
+executing; the model can recover with its new epoch. Executed clicks return fresh
+structure/epoch, including non-link buttons that change routes or documents.
+Navigation, scroll and recapture do not invent a pointer hit. Detached/changed controls fail honestly.
 Lost mutation replies mean unknown outcome, revoke the task and are never replayed.
 The existing glass surface shows Doing and Stop; Esc stops further task steps.
 Already completed typing/navigation cannot be undone by Stop.
@@ -45,6 +54,12 @@ turn context, including textareas, link destinations and the current action
 epoch. Research keeps its saved scope. The model can still call `gaze_read` for a
 fresh structure. Native date/number formats are validated before any batch write,
 so an invalid date cannot silently clear an existing value.
+Captured-link clicks preserve the browser's native destination, including private
+query/fragment parts and new tabs, without returning those parts to the model.
+Confirmation destinations use the browser-resolved form/link properties and bind
+base-URL changes too. Secret-label filtering covers title and root-scoped ARIA
+references without reading descendant field values.
+
 
 ### Approval and its boundary
 
@@ -83,7 +98,8 @@ persistent Chrome profile. Hermes's ordinary browser tool launches a separate
 browser by default. **Never set `BROWSER_CDP_URL`, `BU_CDP_URL`, `BU_CDP_WS`, or
 Hermes `browser.cdp_url` to the companion, or give `browser_exec`/`browser_cdp`
 its endpoint.** Connected sessions remove unsafe code/browser/terminal/delegate
-tools from model requests and veto their calls; direct guarded tools remain.
+tools from model requests and veto their calls. Guarded direct tools or the
+constrained native `tool_describe`/`tool_call` bridge remain.
 Disconnect `/gaze` to restore normal Hermes tool use.
 The companion's own debugging port is reserved and cannot be a model navigation
 destination, including through loopback aliases. Exact tool-call identity is
@@ -120,9 +136,11 @@ must not perform it.
 
 ## Production measurements
 
-Real Hermes registration, pre/post/end hooks, execution middleware and tool
-dispatch; temporary HERMES_HOME and normal fake USER.md memory. Serial OpenRouter
-`nvidia/nemotron-3-ultra-550b-a55b:free`, reasoning enabled, no paid fallback:
+The pre-review harness used real Hermes registration, lifecycle hooks, execution
+middleware and handlers, but manually replaced its advertised and authorized
+tool sets. This masked the default-deferred dispatch defect and is **not
+production-default acceptance**. Temporary HERMES_HOME and fake normal USER.md;
+serial `nvidia/nemotron-3-ultra-550b-a55b:free`, reasoning on, no paid fallback:
 
 | Local fixture | Successes | Median seconds |
 |---|---:|---:|
@@ -132,10 +150,10 @@ dispatch; temporary HERMES_HOME and normal fake USER.md memory. Serial OpenRoute
 | New tab + email | 3/5 | 12.121 |
 | Unseen layout | 5/5 | 9.351 |
 
-These measurements precede the required `gaze_click.new_tab` argument and removal
-of legacy simulated click execution. Both email misses produced correct,
-guarded drafts in the wrong tab. An explicit boolean tab choice now makes that
-decision part of the click schema; it is not an email adapter.
+These measurements precede the strict `gaze_click.new_tab` argument, selection-only
+Lens, normal deferred dispatch and review corrections. Both email misses made
+correct guarded drafts in the wrong tab. Required tab choice is general, not an
+email adapter. No old row counts toward final production acceptance.
 
 All 25 measured workflows kept secret fields unchanged, exposed no secret values,
 committed nothing before approval, rejected synthetic consent and committed once
@@ -144,10 +162,12 @@ Real Hermes private-typed and fake-audio voice inbox turns also completed one
 form each. With phone omitted from normal memory, Hermes asked for it and left
 the field blank. These are local fake-data checks, not Gmail validation.
 
-The final-schema attempt made no tool calls: all 25 turns were rejected by the
-free provider's daily quota. Those are blocked measurements, not 0/5 behavioral
-results. The runner now stops on a provider rejection before tool execution
+The required-tab-choice attempt, before review, made no tool calls: all 25 turns
+were rejected by the free provider's daily quota. Those are blocked measurements,
+not 0/5 behavioral results. The runner now stops on a provider rejection before tool execution
 instead of consuming every remaining fixture attempt.
+The provider announced reset at **2026-11-08 00:00 UTC** (Nov 7, 7 PM EST);
+the last clock check was 2026-11-07 20:23 UTC, before that reset.
 
 Resume the full five-per-fixture trial after the free quota resets, using the
 Hermes Python with `HERMES_DISABLE_LAZY_INSTALLS=1`:
@@ -155,8 +175,8 @@ Hermes Python with `HERMES_DISABLE_LAZY_INSTALLS=1`:
 Do not resume from pre-schema results or the quota-rejected dataset.
 
 
-Local gates: **180 Python tests, 27 DOM tests, all seven browser JS syntax
-checks, and 25 deterministic action checks passed**. The trust-boundary (14
+Local gates: **181 Python tests, 27 DOM tests, all seven browser JS syntax
+checks, and 33 deterministic action checks passed**. The trust-boundary (14
 checks), recording-hold (7), fake-webcam and all eight UI-review probes passed.
 The latter used `GAZE_REVIEW_LOCAL_ONLY=1`; external news/media visits were omitted.
 The default `browser_exec` smoke launched an independent blank target with no CDP
@@ -166,6 +186,34 @@ unavailable packaged Chromium; its profile and runtime were temporary.
 Machine-readable counts, failures, safety evidence and the quota blocker:
 [`browser_actions_production_results.json`](../benchmark/browser_actions_production_results.json).
 Paid model API spend: **$0**.
+
+### Independent review disposition
+
+One fresh independent review returned nine confirmed defects. All were corrected:
+
+| Finding | Correction and check |
+|---|---|
+| Advertised tools not executable | No injected schemas or authorization overrides; normal deferred bridge. Real Hermes + scripted-local-provider Chrome smoke passes terminal, private typing and fake voice. |
+| Missing secret-label sources | Shared title/ARIA filtering; bounded label words exclude descendant fields. Chrome privacy/write/review checks. |
+| Esc ignored in editable controls | User Escape stops before the editable-target return. Chrome input/textarea/body checks. |
+| Wrong provider-native schema format | Filter the existing native surface, never append Chat-only definitions. Chat/Responses/Anthropic/Bedrock unit cases. |
+| Wrong relative submit destination | Browser-resolved action properties; base edit-and-restore invalidates approval. Chrome check. |
+| Redirects rejected | Follow the clicked target through redirects without switching by focus. Local HTTP 302 check. |
+| Later controls unreachable | Viewport-first capture before the 64 cap. Scroll to field 90 and write through its captured identity. |
+| Malformed reply reported unexecuted | Separate pre-dispatch URL validation from post-dispatch failures. One real tab creation, corrupted reply, unknown outcome, no replay. |
+| Stop ignored after model completion | Pending confirmation keeps Stop effective after idle. Chrome check. |
+
+The shared click path also preserves current-task ownership after non-link Next
+buttons change a route or document. A regression reproduced the old route rejection;
+the corrected Chrome probe fills the newly revealed field and follows a delayed
+HTTP redirect without replay. This does not authorize unrelated navigation.
+
+`tests/browser_actions_dispatch_chrome.py` uses the real Hermes agent class,
+default tool search, lifecycle and dispatcher, scripting only provider I/O.
+Each ingress rejects a deliberately attempted raw browser call, discovers the
+actual operation schemas, fills the form, offers review and accepts one trusted
+approval. This proves dispatch and policy, **not free-model performance**.
+No second review pass or production-default free-model acceptance is claimed.
 
 ## Historical feasibility experiment
 

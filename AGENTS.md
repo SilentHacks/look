@@ -189,11 +189,16 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   stays immutable and read-only; it is not action authority. A fresh, exact
   user session/turn may start a separate browser task through `gaze_read`, including
   a voice question, typed question or explicit follow-up. The task retains its source
-  foreground tab/document/route; only its own navigation/open-tab operation transfers
-  that owner and returns the destination's fresh structure. Stale epochs return fresh
+  foreground tab/document/route; only its own navigation/open-tab operation or
+  captured-control click transfers that owner and returns fresh structure. Stale epochs return fresh
   structure without replaying the rejected operation. Stop/Esc, disconnect, terminal
   failure and unknown outcomes revoke the task; page/answer text cannot start one.
   A new capture revokes pending approval immediately.
+- **Advertised tools must be executable on Hermes's real surface.** Never inject
+  ghost schemas or overwrite the agent's tool list/authorization to bypass
+  deferral. Preserve provider-native definitions. Deferred operations use Hermes's
+  normal `tool_describe`/`tool_call` bridge, restricted to guarded names; raw
+  code/browser/terminal/delegate calls remain blocked, including through wrappers.
 - **Cursor wire privacy precedes serialization.** Never read form values or use
   ancestor `innerText`; the bounded collector excludes sensitive fields and their
   associated labels. Freeze mode-appropriate evidence at recording stop, before

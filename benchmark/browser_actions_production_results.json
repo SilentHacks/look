@@ -1,10 +1,283 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "acceptance_blocked",
   "branch": "feature/browser-actions-build",
   "base": "f93c186",
-  "measured_production": {
-    "scope": "Real Hermes plugin registration, lifecycle hooks, execution middleware, tool dispatch, normal fake USER.md memory; before required click.new_tab and selection-only Lens cutover",
+  "final_schema": {
+    "click_tab_choice": "required boolean new_tab",
+    "simulated_choose": "selection only; execute parameter and selector click removed",
+    "free_model_rerun": {
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "rows": 25,
+      "tools_executed": 0,
+      "all_incomplete": true,
+      "provider_message": "OpenRouter rate-limited every one of 3 attempts \u2014 it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 429: Rate limit exceeded: free-models-per-day-high-balance. \n\nLimit resets at 00:00 (in 5h 44m).",
+      "scope": "Quota-rejected dataset has no model tool execution; not behavioral failures and not production-default acceptance. The final default-dispatch implementation remains unmeasured with the free model.",
+      "implementation_stage": "Required-tab-choice schema before independent review and normal-dispatch corrections; known quota blocked a fresh post-review model trial."
+    },
+    "acceptance_passed": false,
+    "resumption": "Run all five fixtures five times in a fresh output directory after free quota reset; do not reuse old-schema or quota-rejected rows.",
+    "default_dispatch": "Preserves native executable surface and provider-native formats; guarded native tool_describe/tool_call bridge; no authorization overrides.",
+    "programmatic_escape": "Removed; Escape is exclusively the user Stop.",
+    "click_continuation": "Every executed captured click returns fresh structure/epoch on its pinned target, including non-link route/document navigation.",
+    "completed_production_default_free_model_samples": 0,
+    "quota_reset_utc": "2026-11-08T00:00:00Z",
+    "quota_last_time_observation_utc": "2026-11-07T20:23:39Z",
+    "per_fixture": [
+      {
+        "fixture": "form",
+        "planned_runs": 5,
+        "completed_runs": 0,
+        "successes": null,
+        "status": "blocked by provider daily free-model quota"
+      },
+      {
+        "fixture": "layout",
+        "planned_runs": 5,
+        "completed_runs": 0,
+        "successes": null,
+        "status": "blocked by provider daily free-model quota"
+      },
+      {
+        "fixture": "wizard",
+        "planned_runs": 5,
+        "completed_runs": 0,
+        "successes": null,
+        "status": "blocked by provider daily free-model quota"
+      },
+      {
+        "fixture": "mail",
+        "planned_runs": 5,
+        "completed_runs": 0,
+        "successes": null,
+        "status": "blocked by provider daily free-model quota"
+      },
+      {
+        "fixture": "unseen",
+        "planned_runs": 5,
+        "completed_runs": 0,
+        "successes": null,
+        "status": "blocked by provider daily free-model quota"
+      }
+    ]
+  },
+  "inbox_real_hermes": [
+    {
+      "ingress": "typed",
+      "success": true,
+      "draft_correct": true,
+      "pre_approval_count": 0,
+      "approval": {
+        "synthetic_rejected": true,
+        "trusted_once": true
+      },
+      "completed": true,
+      "api_calls": 3,
+      "answer": "Done. All fields are filled with your profile details \u2014 name, email, phone, address, city, postal code, workshop (Gardening), date (2026-11-10), and dietary note (Vegetarian lunch). The Submit registration confirmation card is now open for your review in Chrome; it won't submit unless you click it there."
+    },
+    {
+      "ingress": "voice",
+      "success": true,
+      "draft_correct": true,
+      "pre_approval_count": 0,
+      "approval": {
+        "synthetic_rejected": true,
+        "trusted_once": true
+      },
+      "completed": true,
+      "api_calls": 3,
+      "answer": "Done. The registration form is filled with your profile details and the requested choices:\n\n- **Workshop:** Gardening\n- **Preferred date:** 2026-11-10\n- **Accessibility/dietary notes:** Vegetarian lunch\n\nThe Submit registration button now shows a confirmation card for your review. Click it in Chrome when you're ready to submit, or close the card if you decide not to proceed."
+    }
+  ],
+  "missing_memory": {
+    "completed": true,
+    "api_calls": 1,
+    "answer": "I have your details from the profile for most fields, but I don't have your phone number. What's your phone number?",
+    "phone_blank": true,
+    "asks_for_phone": true,
+    "no_commit": true,
+    "sensitive_value_in_output": false
+  },
+  "final_chrome": {
+    "checks": [
+      "non-link navigation continues on the same owned tab with fresh destination identities",
+      "non-link document navigation waits through a delayed redirect without replay or focus retargeting",
+      "form: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
+      "layout: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
+      "wizard: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
+      "unseen: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
+      "content-bound confirmation remains usable in a390-by420 viewport",
+      "mail: genuinely new foreground tab, exact draft and guarded Send",
+      "captured navigation link transfers ownership and returns fresh destination structure",
+      "explicit captured-link tab choice opens and owns a genuinely new tab",
+      "captured links preserve private query and fragment in current and new tabs without model exposure",
+      "captured same-tab links follow HTTP redirects and return the pinned destination structure",
+      "title and root-scoped ARIA labels exclude secret fields from reads, writes and approval summaries",
+      "scrolling and recapture exposes later controls beyond the 64-identity cap",
+      "confirmation shows browser-resolved base/formaction destination and rejects a changed base",
+      "native navigation keys, guarded Enter, bounded scroll/wait and same-tab HTTP navigation",
+      "stale epoch rejected with fresh structure and no mutation",
+      "invalid native date is rejected before any batch write, preserving existing values",
+      "missing commit handle fails honestly without inferred target",
+      "content edit invalidates approval before trusted click",
+      "ARIA selection, hidden rejection, external form submit and content-chip approval binding",
+      "model navigation cannot reach the companion debugger origin",
+      "foreground boundary rejects stale task mutation",
+      "route boundary rejects stale task mutation",
+      "document boundary rejects stale task mutation",
+      "lost mutation reply revokes grant without replay",
+      "malformed create-tab reply revokes authority after one real tab creation without replay",
+      "Stop cancels pending approval and revokes read/mutation authority",
+      "visible confirmation Stop revokes pending approval after model completion",
+      "typed inbox user turn runs production read/fill/review with exact source ownership",
+      "voice inbox user turn runs production read/fill/review with exact source ownership",
+      "visible Doing/Stop revokes the task through trusted protected-frame input",
+      "trusted Escape revokes the task from body, input and textarea focus"
+    ],
+    "browser_exec_defaults": {
+      "cdp_override_absent": true,
+      "installed_source": "/Users/Abid/.hermes/hermes-agent/tools/browser_use_cli.py",
+      "raw_debugger_limit": "Explicit arbitrary-code/debugger authority can synthesize trusted CDP input; not human-unforgeable.",
+      "result": {
+        "success": true,
+        "exit_code": 0,
+        "output": "{'targetId': '33DD9C99FD9DC992C1F9F23630F39214', 'target_id': '33DD9C99FD9DC992C1F9F23630F39214', 'url': 'about:blank', 'title': 'about:blank'}\n{'url': 'about:blank', 'title': '', 'w': 756, 'h': 469, 'sx': 0, 'sy': 0, 'pw': 756, 'ph': 469}\n",
+        "workspace": "/var/folders/w7/yzwrqz155_n69pgn3qpb_y1w0000gp/T/gaze-production-7ttl8pjl/cache/browser-use/workspace/default",
+        "session": "gaze-default-isolation"
+      },
+      "companion_target_absent": true,
+      "exercised": true,
+      "limitation": null
+    },
+    "limitations": [
+      "Local fixtures do not prove cross-origin frames, closed shadow or canvas/custom widgets.",
+      "Native CDP driver stands in for human input. Websites cannot mint it; explicitly granted raw debugger code can.",
+      "Typing and GET navigation may trigger site-side effects; no universal application-semantic containment."
+    ]
+  },
+  "local_gates": {
+    "unittest": {
+      "tests": 181,
+      "result": "OK"
+    },
+    "cursor_context_dom": {
+      "tests": 27,
+      "failures": 0
+    },
+    "browser_js_syntax": {
+      "files": 7,
+      "result": "exit 0"
+    },
+    "trust_boundaries_chrome": {
+      "pass_lines": 14,
+      "result": "exit 0"
+    },
+    "recording_hold_chrome": {
+      "pass_lines": 7,
+      "result": "exit 0"
+    },
+    "webcam_chrome": {
+      "result": "exit 0",
+      "devices": "fake portrait camera/audio only",
+      "calibration_points": 9,
+      "private_calibration_mode": "0600",
+      "hidden_samples_in_two_seconds": 20,
+      "out": "/tmp/gaze-actions-release-webcam"
+    },
+    "ui_review": {
+      "passed": [
+        "security",
+        "space",
+        "evidence",
+        "queue",
+        "markdown",
+        "ownership",
+        "confirmation",
+        "input"
+      ],
+      "mode": "GAZE_REVIEW_LOCAL_ONLY=1",
+      "external_news_and_media": "omitted",
+      "ownership_rearms": 40,
+      "out": "/tmp/gaze-actions-release-ui"
+    },
+    "final_batch": {
+      "result": "exit 0",
+      "seconds": 270.54,
+      "source": "artifact://101",
+      "scope": "trust, recording, fake webcam, all eight local-only UI probes and default-dispatch Chrome smoke"
+    },
+    "action_chrome": {
+      "result": "exit 0",
+      "checks": 33,
+      "source": "tests/browser_actions_chrome.py",
+      "artifact": "/tmp/gaze-actions-nonlink-delayed-before/security.json"
+    }
+  },
+  "review": {
+    "status": "complete_with_all_confirmed_findings_fixed",
+    "independent_reviews": 1,
+    "confirmed_findings": 9,
+    "fixed_findings": 9,
+    "second_review": false,
+    "dispositions": [
+      {
+        "finding": "Advertised tools absent from real executable set",
+        "fix": "Remove ghost-schema injection and runner authorization overrides; preserve the native deferred discovery/call bridge.",
+        "check": "Real AIAgent scripted-local-provider smoke through terminal, private typing and fake voice."
+      },
+      {
+        "finding": "Sensitive fields missed title and aria-labelledby",
+        "fix": "Shared bounded label filtering, excluding descendant control values and secret-associated labels.",
+        "check": "Chrome read/write/approval privacy cases."
+      },
+      {
+        "finding": "Escape ignored from editable controls",
+        "fix": "Handle trusted Stop before the editable-target return.",
+        "check": "Chrome Escape from body, input and textarea."
+      },
+      {
+        "finding": "Chat tool schemas injected into other provider-native formats",
+        "fix": "Filter existing native Chat/Responses/Anthropic/Bedrock definitions without appending incompatible schemas.",
+        "check": "Provider-native schema unit cases."
+      },
+      {
+        "finding": "Relative submission destination ignored base resolution",
+        "fix": "Use native resolved action/formAction/href and invalidate approval on base edits, including restore.",
+        "check": "Chrome resolved-destination and base edit/restore case."
+      },
+      {
+        "finding": "Same-target redirects rejected",
+        "fix": "Follow only the pinned clicked target through redirect and capture fresh stable ownership.",
+        "check": "Local HTTP302 and delayed non-link document navigation."
+      },
+      {
+        "finding": "First64 controls starved later viewport controls",
+        "fix": "Capture viewport controls before offscreen fallback within the same bounded64.",
+        "check": "Scroll and fill field90."
+      },
+      {
+        "finding": "Malformed post-mutation JSON reported as argument failure",
+        "fix": "Separate pre-dispatch InvalidDestination from post-dispatch ValueError/JSON errors; revoke as unknown without replay.",
+        "check": "Unit malformed reply and Chrome one actual new-tab creation with corrupted reply."
+      },
+      {
+        "finding": "Stop ignored once the model finished with confirmation pending",
+        "fix": "Keep Stop effective for pending confirmation/approval independently of active model task.",
+        "check": "Protected confirmation Stop after task.finish."
+      }
+    ]
+  },
+  "paid_model_api_spend_usd": 0,
+  "limits": [
+    "No completed final production-default free-model samples: OpenRouter daily free-model quota exhausted. The older forced-direct email score was3/5; release bar NOT passed.",
+    "Gmail and real accounts were not opened. User-only sign-in and first-tries checklist is in docs/BROWSER_ACTIONS.md.",
+    "No physical microphone or webcam; fake audio and camera only.",
+    "Typing and GET navigation can cause site-side effects. Explicit arbitrary raw CDP/OS authority can synthesize trusted input; it must never be granted access to the companion.",
+    "Cross-origin frames, closed-shadow/canvas controls and arbitrary custom keyboard semantics are unsupported, not a raw-code fallback.",
+    "An initial one-shot UI check timed out then passed with diagnostics; its focus wait now observes the protected input. Ownership test waits for Listening before the mid-recording route change."
+  ],
+  "measured_before_review": {
+    "scope": "Real Hermes registration, hooks, handlers and free-model calls, but the harness manually replaced agent.tools and agent.valid_tool_names. Forced-direct measurement only; NOT production-default acceptance. Before required click.new_tab, selection-only Lens and all independent-review corrections.",
     "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
     "reasoning_enabled": true,
     "serial": true,
@@ -253,158 +526,56 @@
       }
     ]
   },
-  "final_schema": {
-    "click_tab_choice": "required boolean new_tab",
-    "simulated_choose": "selection only; execute parameter and selector click removed",
-    "free_model_rerun": {
-      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
-      "rows": 25,
-      "tools_executed": 0,
-      "all_incomplete": true,
-      "provider_message": "OpenRouter rate-limited every one of 3 attempts \u2014 it looks temporarily unavailable. Wait a minute and send /retry, or switch models with /model. To avoid this in future, add a backup provider with `hermes fallback add`.\n\nProvider said: HTTP 429: Rate limit exceeded: free-models-per-day-high-balance. \n\nLimit resets at 00:00 (in 5h 44m)."
-    },
-    "acceptance_passed": false,
-    "resumption": "Run all five fixtures five times in a fresh output directory after free quota reset; do not reuse old-schema or quota-rejected rows."
-  },
-  "inbox_real_hermes": [
-    {
-      "ingress": "typed",
-      "success": true,
-      "draft_correct": true,
-      "pre_approval_count": 0,
-      "approval": {
-        "synthetic_rejected": true,
-        "trusted_once": true
-      },
-      "completed": true,
-      "api_calls": 3,
-      "answer": "Done. All fields are filled with your profile details \u2014 name, email, phone, address, city, postal code, workshop (Gardening), date (2026-11-10), and dietary note (Vegetarian lunch). The Submit registration confirmation card is now open for your review in Chrome; it won't submit unless you click it there."
-    },
-    {
-      "ingress": "voice",
-      "success": true,
-      "draft_correct": true,
-      "pre_approval_count": 0,
-      "approval": {
-        "synthetic_rejected": true,
-        "trusted_once": true
-      },
-      "completed": true,
-      "api_calls": 3,
-      "answer": "Done. The registration form is filled with your profile details and the requested choices:\n\n- **Workshop:** Gardening\n- **Preferred date:** 2026-11-10\n- **Accessibility/dietary notes:** Vegetarian lunch\n\nThe Submit registration button now shows a confirmation card for your review. Click it in Chrome when you're ready to submit, or close the card if you decide not to proceed."
-    }
+  "inbox_real_hermes_scope": "Pre-review forced-direct harness; real free-model typed and fake-voice ingress, not final default-dispatch acceptance.",
+  "missing_memory_scope": "Pre-review forced-direct free-model check with ordinary fake USER.md and phone omitted.",
+  "additional_checks": [
+    "Captured native link destinations preserve private URL parts in both tab modes without model exposure.",
+    "Non-link Next route rejection reproduced before the shared-click fix; new field filled afterward.",
+    "Non-link Next document navigation followed a delayed HTTP redirect without replay or focus retarget."
   ],
-  "missing_memory": {
-    "completed": true,
-    "api_calls": 1,
-    "answer": "I have your details from the profile for most fields, but I don't have your phone number. What's your phone number?",
-    "phone_blank": true,
-    "asks_for_phone": true,
-    "no_commit": true,
-    "sensitive_value_in_output": false
-  },
-  "final_chrome": {
-    "checks": [
-      "form: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
-      "layout: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
-      "wizard: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
-      "unseen: exact values, sensitive exclusion, zero preapproval commits, synthetic rejection, trusted single-use approval",
-      "content-bound confirmation remains usable in a390-by420 viewport",
-      "mail: genuinely new foreground tab, exact draft and guarded Send",
-      "captured navigation link transfers ownership and returns fresh destination structure",
-      "explicit captured-link tab choice opens and owns a genuinely new tab",
-      "native captured link preserves private query and fragment without serializing either",
-      "native navigation keys, guarded Enter, bounded scroll/wait and same-tab HTTP navigation",
-      "stale epoch rejected with fresh structure and no mutation",
-      "invalid native date is rejected before any batch write, preserving existing values",
-      "missing commit handle fails honestly without inferred target",
-      "content edit invalidates approval before trusted click",
-      "ARIA selection, hidden rejection, external form submit and content-chip approval binding",
-      "model navigation cannot reach the companion debugger origin",
-      "foreground boundary rejects stale task mutation",
-      "route boundary rejects stale task mutation",
-      "document boundary rejects stale task mutation",
-      "lost mutation reply revokes grant without replay",
-      "Stop cancels pending approval and revokes read/mutation authority",
-      "typed inbox user turn runs production read/fill/review with exact source ownership",
-      "voice inbox user turn runs production read/fill/review with exact source ownership",
-      "visible Doing/Stop revokes the task through trusted protected-frame input",
-      "trusted Escape revokes the running task"
-    ],
-    "browser_exec_defaults": {
-      "cdp_override_absent": true,
-      "installed_source": "/Users/Abid/.hermes/hermes-agent/tools/browser_use_cli.py",
-      "raw_debugger_limit": "Explicit arbitrary-code/debugger authority can synthesize trusted CDP input; not human-unforgeable.",
-      "result": {
-        "success": true,
-        "exit_code": 0,
-        "output": "{'targetId': 'E5DA094D84662A8C988BF343B5C30E1F', 'target_id': 'E5DA094D84662A8C988BF343B5C30E1F', 'url': 'about:blank', 'title': 'about:blank'}\n{'url': 'about:blank', 'title': '', 'w': 756, 'h': 469, 'sx': 0, 'sy': 0, 'pw': 756, 'ph': 469}\n",
-        "workspace": "/var/folders/w7/yzwrqz155_n69pgn3qpb_y1w0000gp/T/gaze-production-3ais93_h/cache/browser-use/workspace/default",
-        "session": "gaze-default-isolation"
+  "default_dispatch_smoke": {
+    "scope": "Real unmodified AIAgent class and normal executable tool surface; only provider network I/O scripted locally. NOT free-model performance. No external model API key or call.",
+    "source": "tests/browser_actions_dispatch_chrome.py",
+    "rows": [
+      {
+        "ingress": "terminal",
+        "completed": true,
+        "api_calls": 6,
+        "draft_correct": true,
+        "approval": {
+          "synthetic_rejected": true,
+          "trusted_once": true
+        },
+        "scripted_local_backend": true,
+        "advertised_names_executable": true,
+        "raw_browser_blocked": true
       },
-      "companion_target_absent": true,
-      "exercised": true,
-      "limitation": null
-    },
-    "limitations": [
-      "Local fixtures do not prove cross-origin frames, closed shadow or canvas/custom widgets.",
-      "Native CDP driver stands in for human input. Websites cannot mint it; explicitly granted raw debugger code can.",
-      "Typing and GET navigation may trigger site-side effects; no universal application-semantic containment."
+      {
+        "ingress": "typed",
+        "completed": true,
+        "api_calls": 6,
+        "draft_correct": true,
+        "approval": {
+          "synthetic_rejected": true,
+          "trusted_once": true
+        },
+        "scripted_local_backend": true,
+        "advertised_names_executable": true,
+        "raw_browser_blocked": true
+      },
+      {
+        "ingress": "voice",
+        "completed": true,
+        "api_calls": 6,
+        "draft_correct": true,
+        "approval": {
+          "synthetic_rejected": true,
+          "trusted_once": true
+        },
+        "scripted_local_backend": true,
+        "advertised_names_executable": true,
+        "raw_browser_blocked": true
+      }
     ]
-  },
-  "local_gates": {
-    "unittest": {
-      "tests": 180,
-      "result": "OK"
-    },
-    "cursor_context_dom": {
-      "tests": 27,
-      "failures": 0
-    },
-    "browser_js_syntax": {
-      "files": 7,
-      "result": "exit 0"
-    },
-    "trust_boundaries_chrome": {
-      "pass_lines": 14,
-      "result": "exit 0"
-    },
-    "recording_hold_chrome": {
-      "pass_lines": 7,
-      "result": "exit 0"
-    },
-    "webcam_chrome": {
-      "result": "exit 0",
-      "devices": "fake portrait camera/audio only",
-      "calibration_points": 9,
-      "private_calibration_mode": "0600",
-      "hidden_samples_in_two_seconds": 20
-    },
-    "ui_review": {
-      "passed": [
-        "security",
-        "space",
-        "evidence",
-        "queue",
-        "markdown",
-        "ownership",
-        "confirmation",
-        "input"
-      ],
-      "mode": "GAZE_REVIEW_LOCAL_ONLY=1",
-      "external_news_and_media": "omitted",
-      "ownership_rearms": 40
-    }
-  },
-  "review": {
-    "status": "pending"
-  },
-  "paid_model_api_spend_usd": 0,
-  "limits": [
-    "Final schema has no completed free-model samples because daily quota was exhausted. Last complete email sample was 3/5; release bar not passed.",
-    "Gmail and real accounts were not opened. User-only hands-on checklist is in docs/BROWSER_ACTIONS.md.",
-    "No physical microphone or webcam; fake audio and camera only.",
-    "Typing and GET navigation can trigger application side effects; raw CDP/OS authority can synthesize trusted input.",
-    "An initial one-shot UI probe timed out, then passed with diagnostics; the final probe waits for actual protected-input focus. An ownership probe was changed to wait for Listening before its mid-recording route test."
-  ]
+  }
 }

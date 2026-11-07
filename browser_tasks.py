@@ -8,18 +8,22 @@ from .resolver.cursor_context import build_context, safe_url
 from .actions import control_requires_confirmation
 
 
+class InvalidDestination(ValueError):
+    """A rejected URL before any browser command, not a post-dispatch failure."""
+
+
 def navigation_url(value):
     """Validate without rewriting the destination or exposing credentials."""
     if not isinstance(value, str) or not value or len(value) > 8192 or any(ord(c) <= 32 for c in value):
-        raise ValueError("Use an absolute http(s) URL")
+        raise InvalidDestination("Use an absolute http(s) URL")
     try:
         parsed = urlsplit(value)
         port = parsed.port
     except ValueError:
-        raise ValueError("Invalid destination URL") from None
+        raise InvalidDestination("Invalid destination URL") from None
     if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username is not None
             or parsed.password is not None or "\\" in value or port == 0):
-        raise ValueError("Use an absolute http(s) URL without credentials")
+        raise InvalidDestination("Use an absolute http(s) URL without credentials")
     return value
 
 
@@ -148,7 +152,7 @@ class BrowserTasks:
         destination = urlsplit(url)
         control = urlsplit(self.session.cdp_http_url)
         if (destination.port or (443 if destination.scheme == 'https' else 80)) == (control.port or 80):
-            raise ValueError('The companion debugging port is not a browsing destination')
+            raise InvalidDestination('The companion debugging port is not a browsing destination')
         return url
 
     def _navigate(self, url, *, new_tab):
@@ -169,17 +173,20 @@ class BrowserTasks:
         if new_tab and (live.get('tag') != 'a' or control_requires_confirmation(live)):
             return failure('new_tab:true requires a safe navigation link; use false for buttons and guarded controls')
         if live.get('tag') == 'a' and live.get('url') and not control_requires_confirmation(live):
+            destination = self._dom('actionLinkUrl', handle, live['fingerprint'])
+            if not destination.get('ok'):
+                return destination
             if new_tab or live.get('new_tab'):
-                return {**self._navigate(live['url'], new_tab=True), 'executed': True}
-            self._destination(live['url'])
-            result = self.session.actions.click(handle, rid)
-            if result.get('executed'):
-                capture = self.session.cdp.action_after_link(live['url'], same_document=bool(live.get('same_document')), **self._owner())
-                self.grant.update({key: capture[key] for key in self._owner()})
-                self._display('doing')
-                return {**self._read(capture), 'executed': True, 'opened_new_tab': False}
-            return result
-        return self.session.actions.click(handle, rid)
+                return {**self._navigate(destination['url'], new_tab=True), 'executed': True}
+            self._destination(destination['url'])
+        result = self.session.actions.click(handle, rid)
+        if result.get('executed'):
+            capture = self.session.cdp.action_after_click(
+                same_document=live.get('tag') != 'a' or bool(live.get('same_document')), **self._owner())
+            self.grant.update({key: capture[key] for key in self._owner()})
+            self._display('doing')
+            return {**self._read(capture), 'executed': True, 'opened_new_tab': False}
+        return result
 
 
     def handle(self, op, args, *, session_id='', turn_id=''):
@@ -230,7 +237,7 @@ class BrowserTasks:
                     if key in ('Enter', 'Space'):
                         target = self._dom('actionKeyTarget', handle)
                         result = self._click(target['handle']) if target.get('ok') else target
-                    elif key in ('ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape', 'Tab'):
+                    elif key in ('ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Tab'):
                         result = self._dom('actionPress', handle, key)
                         if result.get('ok') and result.get('focused'):
                             self.session.cdp.action_key(key, **self._owner())
@@ -250,7 +257,7 @@ class BrowserTasks:
                     self.stop()
                     self.session.clear_hover_snapshot()
                 return result
-            except ValueError as exc:
+            except InvalidDestination as exc:
                 return failure(str(exc))
             except Exception as exc:
                 # Transport loss during any mutation is not a safe-to-replay failure.

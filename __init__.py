@@ -150,24 +150,35 @@ def register(ctx: Any) -> None:
 
     # Restrict the connected companion session, not unrelated Hermes sessions.
     # Raw code/debugger tools can mint trusted CDP clicks; hooks cannot sandbox them.
-    direct_tools = {name: schema for name, schema, _, _ in ALL_TOOLS
-                    if name not in ("gaze_calibrate", "gaze_benchmark", "gaze_choose")}
-    safe_names = set(direct_tools) | {"web_search", "web_extract", "memory"}
+    safe_names = {name for name, _, _, _ in ALL_TOOLS
+                  if name not in ("gaze_calibrate", "gaze_benchmark")} | {"web_search", "web_extract", "memory"}
+    bridge_names = {"tool_describe", "tool_call"}
+
+    def safe_call(name, args):
+        if name == "tool_describe":
+            names = args.get("names") if isinstance(args, dict) else None
+            return (isinstance(names, list) and bool(names) and
+                    all(isinstance(tool, str) and tool in safe_names for tool in names))
+        if name != "tool_call":
+            return name in safe_names or name in bridge_names
+        calls = args.get("calls") if isinstance(args, dict) else None
+        return (isinstance(calls, list) and len(calls) == 1 and
+                isinstance(calls[0], dict) and isinstance(calls[0].get("name"), str) and calls[0]["name"] in safe_names)
 
     def bound(session_id):
         return bool(turns.binding and turns.binding["session_id"] == session_id)
 
-    def pre_tool_call(tool_name="", session_id="", turn_id="", **kwargs):
+    def pre_tool_call(tool_name="", args=None, session_id="", turn_id="", **kwargs):
         if not bound(session_id):
             return None
-        if tool_name not in safe_names:
+        if not safe_call(tool_name, args):
             return {"action": "block", "message": "Companion session uses guarded gaze tools only. Disconnect /gaze before using code or browser tools."}
         return None
 
-    def tool_execution(next_call, tool_name="", session_id="", turn_id="", **kwargs):
+    def tool_execution(next_call, tool_name="", args=None, session_id="", turn_id="", **kwargs):
         if not bound(session_id):
             return next_call()
-        if tool_name not in safe_names:
+        if not safe_call(tool_name, args):
             return '{"ok":false,"executed":false,"error":"Use guarded companion tools only"}'
         session.tasks.authorize_call(session_id, turn_id)
         try:
@@ -178,12 +189,34 @@ def register(ctx: Any) -> None:
     def llm_request(request, session_id="", **kwargs):
         if not bound(session_id):
             return None
-        tools = [tool for tool in request.get("tools", [])
-                 if tool.get("function", tool).get("name") in safe_names]
-        names = {tool.get("function", tool).get("name") for tool in tools}
-        tools.extend({"type": "function", "function": schema} for name, schema in direct_tools.items()
-                     if name not in names)
-        return {"request": {**request, "tools": tools}}
+        # Keep Hermes's assembled, provider-native surface and executable names in sync.
+        # Deferred gaze tools use the normal guarded tool_call bridge, never ghost schemas.
+        def allowed(tool):
+            definition = tool.get("function", tool.get("toolSpec", tool))
+            return definition.get("name") in safe_names | bridge_names
+
+        result = dict(request)
+        if "toolConfig" in request:  # Bedrock Converse
+            config = dict(request["toolConfig"])
+            config["tools"] = [tool for tool in config.get("tools", []) if allowed(tool)]
+            choice = config.get("toolChoice", {}).get("tool", {}).get("name")
+            if choice and choice not in safe_names | bridge_names:
+                config.pop("toolChoice", None)
+            if config["tools"]:
+                result["toolConfig"] = config
+            else:
+                result.pop("toolConfig")
+        elif "tools" in request:  # Chat Completions, Responses and Anthropic
+            result["tools"] = [tool for tool in request["tools"] if allowed(tool)]
+            choice = request.get("tool_choice")
+            if isinstance(choice, dict):
+                choice_name = choice.get("function", choice).get("name")
+                if choice_name and choice_name not in safe_names | bridge_names:
+                    result.pop("tool_choice", None)
+            if not result["tools"]:
+                result.pop("tools")
+                result.pop("tool_choice", None)
+        return {"request": result}
 
     ctx.register_hook("pre_tool_call", pre_tool_call)
     ctx.register_middleware("llm_request", llm_request)

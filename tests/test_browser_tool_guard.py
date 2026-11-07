@@ -40,11 +40,40 @@ class BrowserToolGuardTests(unittest.TestCase):
                     self.assertEqual(guard(tool_name=tool, session_id='connected', turn_id='t')['action'], 'block')
                     self.assertIsNone(guard(tool_name=tool, session_id='unrelated', turn_id='t'))
             self.assertIsNone(guard(tool_name='gaze_read', session_id='connected', turn_id='t'))
-            request = {'tools': [{'type': 'function', 'function': {'name': name}} for name in ('browser_exec', 'terminal', 'web_search')]}
+            bridged = {'calls': [{'name': 'gaze_read', 'arguments': {}}]}
+            self.assertIsNone(guard(tool_name='tool_call', args=bridged, session_id='connected'))
+            self.assertIsNone(guard(tool_name='tool_describe', args={'names':['gaze_fill']}, session_id='connected'))
+            self.assertEqual(guard(tool_name='tool_describe', args={'names':['browser_exec']},
+                                   session_id='connected')['action'], 'block')
+            for target in ('browser_exec', 'terminal', 'tool_call', 'gaze_confirm'):
+                self.assertEqual(guard(tool_name='tool_call', session_id='connected',
+                    args={'calls': [{'name': target, 'arguments': {}}]})['action'], 'block')
+            request = {'tools': [{'type': 'function', 'function': {'name': name}} for name in
+                       ('browser_exec', 'terminal', 'web_search', 'gaze_read', 'tool_call')]}
             reduced = middleware['llm_request'](request, session_id='connected')['request']['tools']
             names = {tool['function']['name'] for tool in reduced}
-            self.assertTrue({'gaze_read', 'gaze_fill', 'gaze_request_commit', 'web_search'} <= names)
-            self.assertFalse({'browser_exec', 'terminal', 'tool_call', 'delegate_task'} & names)
+            self.assertEqual(names, {'gaze_read', 'web_search', 'tool_call'})
+            self.assertNotIn('gaze_fill', names)  # Never advertise a tool absent from the executable surface.
+            for safe, unsafe, choice in (
+                ({'type':'function','name':'gaze_read','parameters':{'type':'object'}},
+                 {'type':'function','name':'terminal'}, {'type':'function','name':'terminal'}),
+                ({'name':'gaze_read','input_schema':{'type':'object'}},
+                 {'name':'terminal','input_schema':{'type':'object'}}, {'type':'tool','name':'terminal'}),
+            ):
+                filtered = middleware['llm_request']({'tools':[safe,unsafe], 'tool_choice':choice},
+                                                      session_id='connected')['request']
+                self.assertEqual(filtered['tools'], [safe])
+                self.assertNotIn('tool_choice', filtered)
+            bedrock = {'toolConfig': {'tools': [
+                {'toolSpec': {'name':'gaze_read','inputSchema':{'json':{'type':'object'}}}},
+                {'toolSpec': {'name':'terminal','inputSchema':{'json':{'type':'object'}}}}],
+                'toolChoice': {'tool': {'name':'terminal'}}}}
+            filtered = middleware['llm_request'](bedrock, session_id='connected')['request']
+            self.assertNotIn('tools', filtered)
+            self.assertEqual([t['toolSpec']['name'] for t in filtered['toolConfig']['tools']], ['gaze_read'])
+            self.assertNotIn('toolChoice', filtered['toolConfig'])
+            self.assertEqual(middleware['llm_request']({'messages': []}, session_id='connected'),
+                             {'request': {'messages': []}})
             session.tasks.begin('connected', 't', owner={
                 'browser_target': 'tab', 'browser_document': 'doc', 'browser_route': 0})
             # Hermes policy callbacks run on bounded workers, not the executor.

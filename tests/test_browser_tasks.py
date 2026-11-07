@@ -44,6 +44,16 @@ class BrowserTaskTests(unittest.TestCase):
         self.assertFalse(self.tasks.handle('read', {}, session_id='session', turn_id='turn')['ok'])
         self.assertEqual(self.session.cdp.action_navigate.call_count, 1)
 
+    def test_malformed_navigation_reply_revokes_authority_without_replay(self):
+        self.tasks._current = lambda epoch: None
+        self.session.cdp.action_navigate.side_effect = json.JSONDecodeError('malformed reply', '', 0)
+        result = self.tasks.handle('open_tab', dict(resolution_id=1, url='https://example.test/'),
+                                   session_id='session', turn_id='turn')
+        self.assertIsNone(result['executed'])
+        self.assertEqual(result['outcome'], 'unknown')
+        self.assertFalse(self.tasks.handle('read', {}, session_id='session', turn_id='turn')['ok'])
+        self.assertEqual(self.session.cdp.action_navigate.call_count, 1)
+
     def test_destination_validation_preserves_ordinary_urls(self):
         url = 'https://example.test/watch?v=123#chapter'
         self.assertEqual(navigation_url(url), url)

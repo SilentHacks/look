@@ -98,7 +98,8 @@ GAZE_CLICK_SCHEMA = _schema(
     "Consequential or ambiguous controls open trusted confirmation instead; gaze_request_commit explicitly "
     "requests review. Never claim execution unless executed is true. On stale resolution use the returned "
     "fresh structure and retry with its epoch; never retry an unknown outcome. Explicitly choose new_tab: "
-    "true for a link when the user requests a NEW tab; false for buttons and same-tab links.",
+    "true for a link when the user requests a NEW tab; false for buttons and same-tab links. "
+    "Executed clicks return fresh structure and epoch; use that epoch for the next step.",
     {
         "handle": {"type": "string", "description": "Current @ handle of the control to activate, not the data subject."},
         "resolution_id": {"type": "integer", "description": "Resolution number in the current gaze context."},
@@ -148,6 +149,7 @@ _URL_ARG = {"type": "string", "description": "Absolute http(s) URL, preferably a
 
 GAZE_READ_SCHEMA = _schema("gaze_read",
     "Read bounded current page structure: captured fields, options, controls, links and untrusted text, never field values. "
+    "Viewport controls come first within the 64-identity cap; scroll and re-read for later controls. "
     "Start browser tasks here; it returns the integer resolution_id for subsequent operations.", {})
 GAZE_FILL_SCHEMA = _schema("gaze_fill",
     "Fill ALL known fields in one batch, including personal details from Hermes memory/context; ask for unknowns. "
@@ -159,12 +161,14 @@ GAZE_FILL_SCHEMA = _schema("gaze_fill",
     ["resolution_id", "entries"])
 GAZE_PRESS_SCHEMA = _schema("gaze_press",
     "Press a supported key on one captured nonsensitive field/control. Enter/Space use guarded activation; no shortcuts or approval. "
-    "Use gaze_fill for text.", {"resolution_id": _EPOCH_ARG, "handle": _HANDLE_ARG,
-        "key": {"type": "string", "enum": ["Enter", "Space", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Escape", "Tab"]}},
+    "Use gaze_fill for text. Escape is reserved for the user's Stop, not page input.",
+    {"resolution_id": _EPOCH_ARG, "handle": _HANDLE_ARG,
+        "key": {"type": "string", "enum": ["Enter", "Space", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End", "Tab"]}},
     ["resolution_id", "handle", "key"])
 GAZE_OPEN_TAB_SCHEMA = _schema("gaze_open_tab",
     "Open an http(s) URL in a NEW tab, make it the action target and return its fresh page structure and epoch. "
-    "For a new-tab request use this, not a same-tab link click.", {"resolution_id": _EPOCH_ARG, "url": _URL_ARG},
+    "For a captured link prefer gaze_click(new_tab:true), which preserves its native destination.",
+    {"resolution_id": _EPOCH_ARG, "url": _URL_ARG},
     ["resolution_id", "url"])
 GAZE_NAVIGATE_SCHEMA = _schema("gaze_navigate",
     "Navigate the task's foreground tab to an http(s) URL and return fresh structure and epoch.",

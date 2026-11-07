@@ -124,8 +124,8 @@ class Companion:
                 break
         raise ConnectionError("Navigation outcome unknown; do not repeat it automatically")
 
-    def action_after_link(self, url: str, *, same_document: bool, **owner) -> dict:
-        """Follow only the clicked tab and observed sanitized destination; never retarget by focus."""
+    def action_after_click(self, *, same_document: bool, **owner) -> dict:
+        """Follow only the clicked target through redirects; never retarget by focus."""
         with self._lock:
             tab = self._tabs.get(owner["browser_target"])
         if tab is None:
@@ -145,8 +145,7 @@ class Companion:
             if isinstance(capture, dict):
                 if capture.get("foreground") is False:
                     raise ConnectionError("Clicked tab lost foreground")
-                if (capture.get("page_url") == url and capture.get("snapshot_id")
-                        and document == tab._context_unique_id and route == tab._route_id):
+                if (capture.get("snapshot_id") and document == tab._context_unique_id and route == tab._route_id):
                     capture.update(browser_target=owner["browser_target"], browser_document=document, browser_route=route)
                     return capture
             if self._stop.wait(.05):
@@ -156,7 +155,7 @@ class Companion:
 
     def action_key(self, key: str, **owner) -> None:
         codes = {"ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40,
-                 "Home": 36, "End": 35, "Escape": 27, "Tab": 9}
+                 "Home": 36, "End": 35, "Tab": 9}
         if key not in codes:
             raise ValueError("Unsupported nonactivation key")
         tab = self._owned_tab(owner)
