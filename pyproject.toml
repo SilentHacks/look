@@ -15,6 +15,9 @@ dependencies = [
     "huggingface_hub>=0.23.0,<2.0.0",
 ]
 
+[project.optional-dependencies]
+gaze-eval = ["scipy>=1.11,<2.0"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

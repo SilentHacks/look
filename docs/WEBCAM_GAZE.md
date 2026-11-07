@@ -15,9 +15,11 @@ on CPU in a **separate Chrome process and private temporary profile**. This host
 currently supports macOS's standard Google Chrome installation. No new Python
 runtime or Python dependency is installed.
 
-Only `/gaze mode webcam` or `/gaze calibrate` starts the camera. Registration,
-model tools, status and changing configuration do not. The owned window requests
-video only, never audio. It captures and infers locally; images never leave it.
+During ordinary plugin use, only `/gaze mode webcam` or `/gaze calibrate` starts
+the camera. Registration, model tools, status and changing configuration do not.
+The owned window requests video only, never audio. It captures and infers locally;
+images never leave it in ordinary tracking mode. The separate, explicit
+[personal evaluation recorder](GAZE_EVAL.md) saves camera video locally.
 Eight bounded iris/head features cross an exact-context, nonce-checked
 `__hermesGazeIntent` CDP binding. There is no HTTP sample endpoint. The camera
 profile has extensions disabled and HTTP(S) requests blocked after startup.
@@ -75,6 +77,11 @@ simulated target requires both the saved resolution and the live mode to be simu
 boundary. `WebcamHost` accepts an estimator and an observation-runtime source;
 the shipped source extracts MediaPipe iris/head features. A replacement model
 needs its own audited/pinned assets and observation script, not another resolver.
+
+Offline evaluation, the public-data survey and the 15-minute personal recording
+checklist are in [GAZE_EVAL.md](GAZE_EVAL.md). The shared feature extractor and
+default estimator are unchanged numerically; evaluation does not tune shipped
+defaults or install fitted profiles into the live tracker.
 
 ## Hands-on checklist (real hardware: user only)
 

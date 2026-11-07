@@ -117,9 +117,41 @@ def _point_in_rect(x: float, y: float, rect: Tuple[float, float, float, float]) 
     rx, ry, rw, rh = rect
     return rx <= x <= (rx + rw) and ry <= y <= (ry + rh)
 
+def _recorded_fixations(samples: list[dict], index: int, cx: float, cy: float) -> list[FixationSample]:
+    """Translate held-out measured residuals to the dashboard; no generated noise."""
+    last = samples[index % len(samples)]
+    if last["prediction"] is None:
+        return []  # A missing current observation must remain a miss.
+    window = [last]
+    if last["temporal"]:
+        for offset in (1, 2):
+            at = index % len(samples) - offset
+            if at < 0:
+                break
+            row = samples[at]
+            if row["person"] != last["person"] or row["session"] != last["session"] or not 0 < last["t"] - row["t"] <= .4:
+                break
+            window.insert(0, row)
+    fixations = []
+    for row in window:
+        if row["prediction"] is None:
+            continue
+        width, height = row["screen"]
+        dx = (row["prediction"][0] - row["target"][0]) / width * 1280
+        dy = (row["prediction"][1] - row["target"][1]) / height * 900
+        t = 9.81 + (row["t"] - last["t"] if last["temporal"] else 0)
+        fixations.append(FixationSample(x_doc=cx + dx, y_doc=cy + dy, x_vp=cx + dx, y_vp=cy + dy,
+                                       t_start=t - .1, t_end=t, duration_ms=100., sigma_x=120., sigma_y=120.,
+                                       source="webcam"))
+    return fixations
 
-def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str, Dict[int, float]]:
-    """Run reproducible accuracy evaluation across sigma in {80, 130, 180} px."""
+
+
+def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42, *,
+                        gaze_trace: list[dict] | None = None) -> Dict[str, Dict]:
+    """Synthetic noise by default; optional held-out gaze residuals on a 1280×900 dashboard."""
+    if trials_per_sigma < 1 or gaze_trace == []:
+        raise ValueError("Need positive trials and a non-empty trace")
     rng = random.Random(seed)
     candidates = build_synthetic_dashboard_candidates()
     scenarios = [
@@ -129,8 +161,8 @@ def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str,
         ("btn-run-query", "Press this to run query"),
         ("campaigns-table", "Export these results and make me a chart"),
     ]
-    sigmas = [80, 130, 180]
-    results: Dict[str, Dict[int, float]] = {
+    sigmas = [80, 130, 180] if gaze_trace is None else ["recorded"]
+    results: Dict[str, Dict] = {
         "raw_hit_test": {},
         "spatial_box_only": {},
         "fusion_top1": {},
@@ -139,6 +171,7 @@ def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str,
     }
 
     for sigma in sigmas:
+        sigma_px = float(sigma) if gaze_trace is None else 120.
         hits_raw = 0
         hits_spatial = 0
         hits_fusion = 0
@@ -152,47 +185,52 @@ def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str,
             # Generate 3 noisy fixations around the deictic anchor (t = 9.75s) plus 1 distractor glance at t = 10.2s
             t_arm = 10.0
             fixations: List[FixationSample] = []
-            for k in range(3):
-                nx = cx + rng.gauss(0.0, sigma)
-                ny = cy + rng.gauss(0.0, sigma)
-                t_f = 9.65 + k * 0.08
+            if gaze_trace is not None:
+                fixations = _recorded_fixations(gaze_trace, i, cx, cy)
+                if not fixations:
+                    continue  # Missing/off-screen measured predictions count as misses.
+            else:
+                for k in range(3):
+                    nx = cx + rng.gauss(0.0, sigma)
+                    ny = cy + rng.gauss(0.0, sigma)
+                    t_f = 9.65 + k * 0.08
+                    fixations.append(
+                        FixationSample(
+                            x_doc=nx,
+                            y_doc=ny,
+                            x_vp=nx,
+                            y_vp=ny,
+                            t_start=t_f - 0.12,
+                            t_end=t_f,
+                            duration_ms=160.0,
+                            sigma_x=float(sigma),
+                            sigma_y=float(sigma),
+                        )
+                    )
+                # Synthetic distractor: never added to measured traces.
                 fixations.append(
                     FixationSample(
-                        x_doc=nx,
-                        y_doc=ny,
-                        x_vp=nx,
-                        y_vp=ny,
-                        t_start=t_f - 0.12,
-                        t_end=t_f,
-                        duration_ms=160.0,
+                        x_doc=cx + rng.gauss(180.0, sigma),
+                        y_doc=cy + rng.gauss(140.0, sigma),
+                        x_vp=cx,
+                        y_vp=cy,
+                        t_start=10.15,
+                        t_end=10.25,
+                        duration_ms=90.0,
                         sigma_x=float(sigma),
                         sigma_y=float(sigma),
                     )
                 )
-            # Distractor fixation at end of sentence
-            fixations.append(
-                FixationSample(
-                    x_doc=cx + rng.gauss(180.0, sigma),
-                    y_doc=cy + rng.gauss(140.0, sigma),
-                    x_vp=cx,
-                    y_vp=cy,
-                    t_start=10.15,
-                    t_end=10.25,
-                    duration_ms=90.0,
-                    sigma_x=float(sigma),
-                    sigma_y=float(sigma),
-                )
-            )
 
             # 1. Raw Gaze Point Hit-Test (last fixation at hotkey release)
-            last_f = fixations[-2]
+            last_f = fixations[-2] if gaze_trace is None else fixations[-1]
             if _point_in_rect(last_f.x_doc, last_f.y_doc, target.rect_doc):
                 hits_raw += 1
 
             # 2. Spatial Box-Integral only (no temporal alignment or verb-role semantics)
             best_spatial = max(
                 candidates,
-                key=lambda c: gaussian_box_integral(c.rect_doc, last_f.x_doc, last_f.y_doc, float(sigma), float(sigma)),
+                key=lambda c: gaussian_box_integral(c.rect_doc, last_f.x_doc, last_f.y_doc, sigma_px, sigma_px),
             )
             if best_spatial.id == target_id:
                 hits_spatial += 1
@@ -216,19 +254,32 @@ def run_benchmark_suite(trials_per_sigma: int = 60, seed: int = 42) -> Dict[str,
     return results
 
 
-def format_benchmark_markdown(results: Dict[str, Dict[int, float]]) -> str:
-    r = results
-    lines = [
-        "| Resolution Method | σ = 80 px (~2°) | σ = 130 px (~3°, typical webcam) | σ = 180 px (~4.2°, head drift) |",
-        "|---|---|---|---|",
-        f"| **1. Raw Gaze Point Hit-Test (`elementFromPoint`)** | {r['raw_hit_test'][80]}% | {r['raw_hit_test'][130]}% | {r['raw_hit_test'][180]}% |",
-        f"| **2. Spatial Box-Integral + DOM Prior** | {r['spatial_box_only'][80]}% | {r['spatial_box_only'][130]}% | {r['spatial_box_only'][180]}% |",
-        f"| **3. Temporal Alignment + Bayesian Semantic Fusion (top-1)** | {r['fusion_top1'][80]}% | {r['fusion_top1'][130]}% | {r['fusion_top1'][180]}% |",
-        f"| **4. Fusion Top-3 Coverage** | {r['top3_coverage'][80]}% | {r['top3_coverage'][130]}% | {r['top3_coverage'][180]}% |",
-        f"| **5. Full System (top-3 coverage × 0.97 modeled pick)** | **{r['full_with_lens'][80]}%** | **{r['full_with_lens'][130]}%** | **{r['full_with_lens'][180]}%** |",
-    ]
+def format_benchmark_markdown(results: Dict[str, Dict]) -> str:
+    columns = list(results["raw_hit_test"])
+    labels = {80: "σ = 80 px (~2°)", 130: "σ = 130 px (~3°, typical webcam)",
+              180: "σ = 180 px (~4.2°, head drift)", "recorded": "Recorded residuals (σ = 120 px)"}
+    names = {"raw_hit_test": "1. Raw Gaze Point Hit-Test (`elementFromPoint`)",
+             "spatial_box_only": "2. Spatial Box-Integral + DOM Prior",
+             "fusion_top1": "3. Temporal Alignment + Bayesian Semantic Fusion (top-1)",
+             "top3_coverage": "4. Fusion Top-3 Coverage",
+             "full_with_lens": "5. Full System (top-3 coverage × 0.97 modeled pick)"}
+    lines = ["| Resolution Method | " + " | ".join(labels[c] for c in columns) + " |",
+             "|---|" + "---|" * len(columns)]
+    for key, name in names.items():
+        lines.append("| " + name + " | " + " | ".join(f"{results[key][c]}%" for c in columns) + " |")
+    if columns == ["recorded"]:
+        lines += ["", "Measured held-out residuals are rescaled by screen dimensions to 1280×900 and translated to synthetic dashboard targets.",
+                  "This measures the existing resolver, not real spoken-question accuracy or a paid/hosted model. The Lens row remains a modeled assumption."]
     return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    print(format_benchmark_markdown(run_benchmark_suite()))
+    import argparse
+    import json
+    from pathlib import Path
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gaze-trace", type=Path, help="held-out *-trace.json from gaze_eval score")
+    parser.add_argument("--trials", type=int, default=60)
+    args = parser.parse_args()
+    trace = json.loads(args.gaze_trace.read_text())["samples"] if args.gaze_trace else None
+    print(format_benchmark_markdown(run_benchmark_suite(args.trials, gaze_trace=trace)))

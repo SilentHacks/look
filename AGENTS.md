@@ -23,6 +23,9 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
 | `browser/webcam_host.js` | Camera/inference and plain nine-point UI in that separate process's isolated world. No website camera, audio, HTTP sample endpoint or image serialization. |
+| `browser/webcam_features.js` | Shared, version-ordered iris/head feature extraction for live and offline frames. |
+| `benchmark/gaze_eval.py`, `browser/gaze_eval.js` | Offline frame stepping through the same pinned WASM/features and `GazeEstimator`; no capture devices. |
+| `benchmark/gaze_record.py`, `browser/gaze_record.js` | Explicit private recorder in the owned tracker window; camera-only video and target timestamps cross its exact-context nonce binding into local 0700/0600 files. Never run real devices as an agent. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
 | `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer; evidence, actions and non-inbox replies retain captured ownership. Opens validated links and brings a source tab forward. |
 | `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |

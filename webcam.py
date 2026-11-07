@@ -65,13 +65,15 @@ def prepare_assets(directory: Path | None = None) -> Path:
 class WebcamHost:
     def __init__(self, on_point, *, estimator: GazeEstimator | None = None,
                  profile_path: Path | None = None, assets: Path | None = None,
-                 fake_video: Path | None = None, runtime_source: Path | None = None) -> None:
+                 fake_video: Path | None = None, runtime_source: Path | None = None,
+                 runtime_options: dict | None = None) -> None:
         self.estimator = estimator or LandmarkEstimator()
         self.on_point = on_point
         self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hermes-gaze" / "webcam-calibration.json"
         self.assets = assets
         self.fake_video = fake_video
         self.runtime_source = runtime_source or Path(__file__).parent / "browser" / "webcam_host.js"
+        self.runtime_options = runtime_options or {}
         self.profile = None
         self.error = ""
         self.state = "stopped"
@@ -303,9 +305,11 @@ class WebcamHost:
                     result = self._command("Runtime.evaluate", {"expression": loader, "contextId": self._context})
                     if result.get("exceptionDetails"):
                         raise RuntimeError("Tracker WASM loader failed")
+                    features = Path(__file__).with_name("browser") / "webcam_features.js"
+                    self._command("Runtime.evaluate", {"expression": features.read_text(), "contextId": self._context})
                     options = {"nonce": self._nonce, "module": (self.assets / "package/vision_bundle.mjs").as_uri(),
                                "wasm": (self.assets / "package/wasm").as_uri(), "model": (self.assets / "face_landmarker.task").as_uri(),
-                               "calibrated": self.profile is not None}
+                               "calibrated": self.profile is not None, **self.runtime_options}
                     result = self._command("Runtime.evaluate", {"expression": self.runtime_source.read_text() + "(" + json.dumps(options) + ")",
                                            "contextId": self._context, "awaitPromise": True})
                     if result.get("exceptionDetails"):
