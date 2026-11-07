@@ -364,7 +364,13 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             # A fresh document, without that hostile listener.
             old = a._context_unique_id
             command(a, 'Page.navigate', {'url': 'about:blank?next'})
-            until(lambda: a._context_unique_id != old and a._ui_frames and a.is_connected)
+            try:
+                until(lambda: a._context_unique_id != old and a._ui_frames and a.is_connected)
+            except AssertionError:
+                print('navigation rearm failed:', {'old': old, 'context': a._context_unique_id,
+                      'frames': a._ui_frames, 'ready': a._ready, 'contexts': a._contexts,
+                      'arm_locked': a._arm_lock.locked()}, flush=True)
+                raise
             time.sleep(.3)
             foreground(a)
             page(a, 'window.project="B"')
