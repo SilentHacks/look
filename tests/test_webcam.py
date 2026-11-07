@@ -132,6 +132,57 @@ class WebcamContracts(unittest.TestCase):
         self.assertTrue(late["ok"])
         self.assertEqual(session.tracker.mode, "hover")
 
+    def test_delayed_simulated_asr_cannot_restore_choose_in_webcam_mode(self):
+        from tests.test_service_intents import _pushed
+        session = GazeSession("http://127.0.0.1:1")
+        self.addCleanup(session.close)
+        session.configure(mode="simulated")
+        captured = _pushed(time.time())
+        session.configure(mode="webcam")
+        epoch = session.resolution_id
+        with patch.object(service, "_LLM", None):
+            frozen = service.resolve_now(session, mode="simulated", utterance="Export this",
+                                         pushed=captured, activate=False)
+            with self.subTest("frozen resolution cannot reactivate actions"):
+                self.assertTrue(frozen["ok"])
+                self.assertIsNone(session.last_resolution)
+                self.assertEqual(session.resolution_id, epoch)
+            active = service.resolve_now(session, mode="simulated", utterance="Export this", pushed=captured)
+            with self.subTest("choose also requires the live simulated mode"):
+                self.assertFalse(session.choose(resolution_id=active["resolution_id"], execute=False)["ok"])
+                self.assertEqual(session.tracker.mode, "webcam")
+                self.assertTrue(all(s.source != "webcam" for s in session.ring_buffer.snapshot()))
+
+    def test_restarting_after_interrupted_calibration_predicts_with_saved_profile(self):
+        received = []
+        with tempfile.TemporaryDirectory() as directory:
+            host = WebcamHost(lambda point, screen: received.append(point) or True,
+                              profile_path=Path(directory) / "calibration.json")
+            self.addCleanup(host.stop)
+            profile = LandmarkEstimator().calibrate(observations(), SCREEN)
+            host._save(profile)
+            def camera():
+                host._context, host._nonce = 8, "owned"
+                host.state = "running"
+                host._ready.set()
+                host._stop.wait(5)
+            def event(kind, **data):
+                host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+                    "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", **data})}})
+            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch.object(host, "_run", side_effect=camera):
+                host.start()
+                event("calibration_start", screen=SCREEN, viewport={"left": 0, "top": 0, "width": 1440, "height": 900})
+                event("sample", t=time.time(), features=[.3, .7, .06, .21, 1., -.4, .3, .1], calibration=0)
+                host.stop()
+                host.start()
+                event("sample", t=time.time(), features=[.3, .7, .06, .21, 1., -.4, .3, .1], calibration=-1)
+                self.assertEqual(len(received), 1)
+                self.assertAlmostEqual(received[0].x, 432, delta=12)
+                self.assertAlmostEqual(received[0].y, 630, delta=12)
+                self.assertEqual(json.loads(host.profile_path.read_text()), profile)
+                host.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

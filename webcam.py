@@ -105,6 +105,8 @@ class WebcamHost:
             return self.status()
         self._stop.clear(); self._ready.clear(); self.error = ""; self.state = "starting"
         self.last_sample = 0.
+        self._calibration = None
+        self._observations = []; self._point_samples = []; self._point_index = 0
         try:
             self.assets = prepare_assets(self.assets)
         except (OSError, ValueError) as exc:
@@ -138,6 +140,8 @@ class WebcamHost:
             self._process.terminate()
         if self._thread and self._thread is not threading.current_thread():
             self._thread.join(12)
+        self._calibration = None
+        self._observations = []; self._point_samples = []; self._point_index = 0
         self.state = "stopped"
 
     def calibrate(self) -> dict:

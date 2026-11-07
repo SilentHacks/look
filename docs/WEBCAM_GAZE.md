@@ -47,6 +47,8 @@ in a `0700` directory. No images, audio, raw calibration samples or profile valu
 are logged or committed. Delete that file to forget calibration. The profile is
 versioned to the estimator and one display; recalibrate after camera/posture or
 display changes. A training-fit check is not a human accuracy measurement.
+Stopping during calibration discards that unfinished collection, not the saved
+profile. Restarting immediately resumes predictions from the saved profile.
 
 On each new companion tab, move the pointer once **in the page** to measure the
 viewport origin from a trusted mouse event. Repeat after resizing, zooming or
@@ -65,6 +67,9 @@ Question release freezes that document's camera fixations/candidates before ASR.
 The existing Bayesian fusion and temporal alignment resolve the question; the
 answering model gets its bounded evidence. Webcam research is read-only. Cursor
 mode is permanent and retains its exact-identity path.
+Frozen ASR results cannot change the live mode or restore action authority,
+including a simulated question completed after switching to webcam. Choosing a
+simulated target requires both the saved resolution and the live mode to be simulated.
 
 `tracker.webcam_gaze.GazeEstimator` is the swappable prediction/calibration
 boundary. `WebcamHost` accepts an estimator and an observation-runtime source;
@@ -101,10 +106,11 @@ The probe uses `--use-fake-device-for-media-stream` and
 `--use-file-for-fake-video-capture`, a hash-pinned NASA public-domain portrait
 translated to nine positions, a stub microphone, and scripted answers. It uses
 only private Chrome profiles on allocated ports, never port 9222 or a live
-Hermes. It checks actual nine-point calibration/persistence, hidden-tab samples,
-wall-clock ingestion, held-Space fusion/inbox delivery, foreground ownership and
-return to cursor. Screenshots and a small results JSON go to the output directory;
-calibration and fake video are temporary and removed.
+Hermes. It checks actual nine-point calibration/persistence, interruption and
+restart with the saved profile, hidden-tab samples, wall-clock ingestion,
+held-Space fusion/inbox delivery, foreground ownership and return to cursor.
+Screenshots and a small results JSON go to the output directory; calibration and
+fake video are temporary and removed.
 
 **Human gaze accuracy, real-camera latency/heat and posture robustness are not
 measured by a fake camera.** The 3×3–4×4 target is a design goal, not a result.

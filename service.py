@@ -228,7 +228,8 @@ def resolve_now(
                                          if isinstance(s, dict) and s.get("source") == "webcam"]
     fixations = session.ingest(resolution_input.get("fixations") or [])
     pointer = resolution_input.get("pointer")
-    if mode != "webcam" and isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
+    if (mode != "webcam" and session.tracker.mode == mode and isinstance(pointer, dict)
+            and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None):
         fixations.append(session.tracker.record_point(
             float(pointer["x_vp"]), float(pointer["y_vp"]),
             scroll_x=float(pointer.get("scroll_x", 0.0)), scroll_y=float(pointer.get("scroll_y", 0.0)),
@@ -248,7 +249,7 @@ def resolve_now(
     owner = {key: resolution_input.get(key)
              for key in ("browser_target", "browser_document", "browser_route")}
     payload.update(owner)
-    if mode == "webcam" and not activate:
+    if not activate:
         payload.update(mode=mode, page_url=page_url, actions_allowed=False, resolution_id=0,
                        context=_compact_context(payload.get("top") or {}, payload["ranked"], utterance=utterance,
                                                 resolution_id=0, intent=res.intent_class, decision=res.decision, mode=mode))
@@ -548,6 +549,8 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 if mode == "hover" and not isinstance(pushed["cursor_context"], dict):
                     reply({"ok": False, "error": "Recording has no cursor capture"})
                     return
+                if mode in ("simulated", "webcam"):
+                    session.clear_hover_snapshot()  # Revoke at capture, never when a late ASR result arrives.
                 # Reserve capture order before ASR, including a visible transcription state.
                 reservation = None
                 turns = _VOICE_TURNS

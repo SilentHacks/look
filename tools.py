@@ -28,7 +28,7 @@ GAZE_RESOLVE_SCHEMA = _schema(
     "Resolve what DOM element(s) the user is pointing or looking at in Chrome when saying a deictic phrase "
     "like 'what happens if I press this?', 'download this', 'export these results', or 'compare this one with this one'. "
     "Hover returns exact pointer evidence, surrounding structure and snapshot handles; the model chooses scope. "
-    "Simulated mode retains ranked candidates and Semantic Lens decisions.",
+    "Simulated and webcam modes retain ranked candidates and Semantic Lens decisions. Webcam must be started by the user via /gaze.",
     {
         "utterance": {
             "type": "string",
@@ -36,8 +36,8 @@ GAZE_RESOLVE_SCHEMA = _schema(
         },
         "mode": {
             "type": "string",
-            "enum": ["hover", "simulated"],
-            "description": "Optional pointing mode override ('hover' for exact cursor, 'simulated' for noisy gaze).",
+            "enum": ["hover", "simulated", "webcam"],
+            "description": "Optional pointing mode override; webcam uses the user's already-running calibrated tracker.",
         },
         "target_hint_x": {
             "type": "number",
@@ -113,12 +113,12 @@ GAZE_CLICK_SCHEMA = _schema(
 
 GAZE_CALIBRATE_SCHEMA = _schema(
     "gaze_calibrate",
-    "Configure or reset the pointing/gaze tracker mode ('hover', 'simulated'), spatial uncertainty sigma, "
-    "and online drift recalibrator.",
+    "Configure or reset the pointing mode ('hover', 'simulated', 'webcam'), spatial uncertainty sigma, "
+    "and online drift recalibrator. This tool cannot start a camera; the user runs /gaze mode webcam and /gaze calibrate.",
     {
         "mode": {
             "type": "string",
-            "enum": ["hover", "simulated"],
+            "enum": ["hover", "simulated", "webcam"],
             "description": "Pointing mode to activate.",
         },
         "sigma_px": {
@@ -161,8 +161,8 @@ def handle_gaze_resolve(args: Dict[str, Any], **kwargs: Any) -> str:
     session = get_shared_session()
     hint_x = args.get("target_hint_x")
     hint_y = args.get("target_hint_y")
-    if (hint_x is not None or hint_y is not None) and str(args.get("mode") or session.tracker.mode) == "hover":
-        return json.dumps({"ok": False, "error": "target hints are unsupported in hover mode; move the actual Chrome cursor"})
+    if (hint_x is not None or hint_y is not None) and str(args.get("mode") or session.tracker.mode) != "simulated":
+        return json.dumps({"ok": False, "error": "target hints are unsupported outside simulated mode; use the actual pointing source"})
     if hint_x is not None and hint_y is not None:
         # Record the hint BEFORE the pull so the resolver has at least one fixation.
         session.tracker.record_point(float(hint_x), float(hint_y), timestamp=time.time())
@@ -203,6 +203,8 @@ def handle_gaze_click(args: dict[str, Any], **kwargs: Any) -> str:
 def handle_gaze_calibrate(args: Dict[str, Any], **kwargs: Any) -> str:
     session = get_shared_session()
     mode = str(args.get("mode") or session.tracker.mode or "hover")
+    if mode not in ("hover", "simulated", "webcam"):
+        return json.dumps({"ok": False, "error": "Unsupported pointing mode"})
     sigma_px = float(args.get("sigma_px", session.tracker.sigma_px))
     if args.get("reset_drift"):
         session.recalibrator.reset()

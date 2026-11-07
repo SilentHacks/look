@@ -884,10 +884,11 @@ class GazeSession:
     def choose(self, resolution_id: Optional[int] = None, candidate_index: int = 1,
                modality: str = "semantic_lens", execute: bool = True) -> Dict[str, Any]:
         """Validate the epoch + index, recalibrate from the latest fixation, click, and re-pin."""
-        if self.last_resolution_input.get("mode", self.tracker.mode) != "simulated":
-            return {"ok": False, "error": "Choose is simulated-only; webcam research is read-only"}
         with self.actions._lock:
             with self._lock:
+                if (self.tracker.mode != "simulated" or
+                        self.last_resolution_input.get("mode", self.tracker.mode) != "simulated"):
+                    return {"ok": False, "error": "Choose is simulated-only; webcam research is read-only"}
                 res = self.last_resolution
                 if res is None or not res.ranked:
                     return {"ok": False, "error": "No active resolution to choose from. Call gaze_resolve first."}

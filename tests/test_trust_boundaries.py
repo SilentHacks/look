@@ -38,6 +38,7 @@ class TrustBoundaries(unittest.TestCase):
 
     def test_simulated_resolution_keeps_evidence_owner_after_scoring_focus_change(self):
         session = GazeSession('http://127.0.0.1:1')
+        session.configure(mode='simulated')
         self.addCleanup(session.close)
         pushed = {'browser_target': 'A', 'browser_document': 'doc-A', 'browser_route': 4,
                   'pointer': {'x_vp': 20, 'y_vp': 20},
@@ -91,6 +92,7 @@ class TrustBoundaries(unittest.TestCase):
 
     def test_simulated_voice_resolves_release_candidates_not_cursor_context(self):
         session = GazeSession('http://127.0.0.1:1')
+        session.configure(mode='simulated')
         self.addCleanup(session.close)
         inputs = []
 

@@ -97,6 +97,25 @@ def run(out):
             assert camera.main("typeof __HERMES_WEBCAM__") == "undefined"
             assert camera.main("typeof __hermesGazeIntent") == "undefined"
             report["isolated_camera_context"] = True
+            # Stop midway through a second calibration, then reuse the saved profile.
+            until(lambda: camera.main("!document.body.classList.contains('calibrating')"))
+            saved_profile = host.profile_path.read_bytes()
+            bounds = camera.main("(()=>{const r=document.querySelector('button').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+            for kind in ("mousePressed", "mouseReleased"):
+                camera.send("Input.dispatchMouseEvent", {"type": kind, "button": "left", "clickCount": 1, **bounds})
+            until(lambda: camera_state()["index"] == 0)
+            for kind in ("keyDown", "keyUp"):
+                camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
+            until(lambda: bool(host._point_samples))
+            rig.session.configure(mode="hover")
+            camera.ws.close()
+            rig.session.configure(mode="webcam")
+            before_predictions = host.predictions
+            assert host.start()["state"] == "running"
+            camera = tracker_tab(host); ctx = host._context
+            until(lambda: host.predictions > before_predictions)
+            assert host.profile_path.read_bytes() == saved_profile
+            report["interrupted_calibration_restart"] = True
             # A genuine background tab in the owned tracker process.
             until(lambda: camera.main("!document.fullscreenElement"))
             request = urllib.request.Request(host.http_url + "/json/new?about:blank", method="PUT")

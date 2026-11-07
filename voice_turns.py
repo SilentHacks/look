@@ -572,7 +572,8 @@ class VoiceTurns:
                 # Normal typed turns still attach fresh deictic evidence, but never steal inbox ownership.
                 if has_deictic_pronoun(user_message):
                     from .service import resolve_now
-                    snapshot = resolve_now(self.session, utterance=user_message, activate=False)
+                    snapshot = resolve_now(self.session, utterance=user_message,
+                                           activate=self.session.tracker.mode == "simulated")
                     if snapshot.get("context"):
                         if snapshot.get("mode") != "simulated":
                             self.session.store_hover_snapshot(snapshot)
