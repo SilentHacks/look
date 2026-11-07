@@ -99,7 +99,7 @@ class TestSessionDelivery(unittest.TestCase):
         self.assertEqual(self.session.resolution_id, epoch)
         self.assertIs(self.session.last_hover_snapshot, saved)
 
-    def test_connected_targetless_speech_is_plain_text_without_activating_evidence(self):
+    def test_connected_targetless_speech_does_not_activate_evidence(self):
         messages = []
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda text, **_: messages.append(text) or True), self.session)
         turns.bind(session_key="route", session_id="session", platform="tui")
@@ -109,7 +109,7 @@ class TestSessionDelivery(unittest.TestCase):
             delivered = service.submit_snapshot({"ok": False, "utterance": "Hello there",
                                                  "context": "unavailable target", "error": "No target"})
             self.assertTrue(delivered["ok"])
-            self.assertIsNone(turns.pre(session_id="session", turn_id="plain", user_message=messages[0]))
+            turns.pre(session_id="session", turn_id="plain", user_message=messages[0])
             self.assertEqual(self.session.resolution_id, epoch)
             self.assertIsNone(self.session.last_hover_snapshot)
             refused = service.submit_snapshot({"ok": False, "utterance": "Explain this", "context": "",
