@@ -84,11 +84,14 @@ class Companion:
         while not self._stop.is_set():
             try:
                 with urllib.request.urlopen(self.http_url + "/json/list", timeout=2) as response:
-                    pages = {str(t["id"]): t for t in json.load(response)
+                    targets = json.load(response)
+                    pages = {str(t["id"]): t for t in targets
                              if t.get("type") == "page" and t.get("webSocketDebuggerUrl")
                              and str(t.get("url", "")).startswith(("http://", "https://", "file://", "about:blank"))}
+                # Navigation can temporarily clear a listed target's URL. It is not a closed tab.
+                # Keep the pinned transport; only eligible URLs admit new attachments below.
                 with self._lock:
-                    removed = [self._tabs.pop(key) for key in set(self._tabs) - pages.keys()]
+                    removed = [self._tabs.pop(key) for key in set(self._tabs) - {str(t["id"]) for t in targets}]
                 for tab in removed:
                     tab.close()
                 for key, page in pages.items():
