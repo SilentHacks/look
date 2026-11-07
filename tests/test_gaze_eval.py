@@ -8,6 +8,7 @@ import unittest
 import numpy as np
 
 from hermes_gaze.benchmark.gaze_eval import EvalRidge, evaluate, private_directory, screen, split_frames
+from hermes_gaze.benchmark.gaze_tuning import Regression, jitter_score
 from hermes_gaze.benchmark.gaze_record import RecordingHost
 from hermes_gaze.benchmark.run_benchmark import run_benchmark_suite
 from hermes_gaze.tracker.webcam_gaze import LandmarkEstimator
@@ -42,10 +43,10 @@ class GazeEvaluationTests(unittest.TestCase):
         features = [.3, .7, .06, .21, 1., -.4, .3, .1]
         frames += [dict(t=10 + i * .1, phase="fixed", features=features if i % 2 else None, target=[30., 70.]) for i in range(10)]
         session = dict(person="a", session="video", screen=screen(100, 100), temporal=True, frames=frames)
-        rows, traces = evaluate(dict(dataset="check", sessions=[session]), EvalRidge, "baseline", 9)
+        rows, traces = evaluate(dict(dataset="check", sessions=[session]), EvalRidge, "baseline", 9, "same-session")
         self.assertEqual(rows[0]["test_frames"], 10)
         self.assertEqual(rows[0]["predicted"], 5)
-        self.assertEqual(rows[0]["region_hit"], {"3": 50., "4": 50., "5": 50.})
+        self.assertEqual(rows[0]["region_hit"], {"2": 50., "3": 50., "4": 50., "5": 50.})
         self.assertEqual(sum(t["prediction"] is None for t in traces), 5)
         self.assertIsNone(rows[0]["jitter_px"])
 
@@ -56,9 +57,64 @@ class GazeEvaluationTests(unittest.TestCase):
         first = dict(person="a", session="first", screen=screen(100, 100), temporal=True, frames=early + [test])
         later = dict(person="a", session="later", screen=screen(100, 100), temporal=True,
                      frames=[{**f, "t": f["t"] + 100.} for f in early])
-        calibration, held_out, _ = split_frames([first, later], 9)
-        self.assertTrue(all(s is first for s, _ in calibration))
+        calibration, held_out, _ = split_frames([first, later], 9, "same-session")
+        self.assertTrue(all(s is first for s, _ in calibration + held_out))
         self.assertIn((first, test), held_out)
+        later["frames"].append({**test, "t": 110.})
+        _, cross_day, _ = split_frames([first, later], 9, "cross-day")
+        self.assertEqual(cross_day, [(later, later["frames"][-1])])
+
+    def test_same_day_freezes_early_cutoff_and_refits_each_day(self):
+        frames = [dict(t=day, order=i, target=[10. + i * 4, 20. + (i % 3) * 20],
+                       features=[float(i)] * 8, phase="unassigned")
+                  for day in (1., 2.) for i in range(20)]
+        session = dict(person="a", session="days", screen=screen(100, 100), temporal=False, frames=frames)
+        seen = []
+        class Capture(EvalRidge):
+            def calibrate(self, observations, geometry):
+                seen.append([r[0][0] for r in observations])
+                return super().calibrate(observations, geometry)
+        rows, trace = evaluate(dict(dataset="check", sessions=[session]), Capture, "capture", 3, "same-session")
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[0], seen[1])
+        self.assertTrue(all(i < 8 for fit in seen for i in fit))
+        self.assertEqual([r["test_frames"] for r in rows], [12, 12])
+        self.assertTrue(all(t["target"][0] >= 42 for t in trace))
+        first = {**session, "frames": frames[:20]}
+        calibration, test, cutoff = split_frames([first], 3, "same-session")
+        self.assertEqual(cutoff, 8)
+        self.assertTrue({tuple(f["target"]) for _, f in calibration}.isdisjoint(
+                        {tuple(f["target"]) for _, f in test}))
+        for f in first["frames"][:8]:
+            f["features"] = None
+        with self.assertRaises(ValueError):
+            split_frames([first], 3, "same-session")
+
+    def test_candidate_models_fit_only_calibration_and_abstain_offscreen(self):
+        data = observations()
+        for kind in ("linear", "poly2", "rbf", "axes"):
+            model = Regression(.001, kind)
+            profile = model.calibrate(data, SCREEN)
+            restored = Regression(.001, kind); restored.load(profile)
+            f, x, y = data[0]
+            prediction = restored.predict(f, 1.)
+            self.assertIsNotNone(prediction)
+            self.assertAlmostEqual(prediction.x / SCREEN["width"], x, delta=.02)
+            self.assertAlmostEqual(prediction.y / SCREEN["height"], y, delta=.02)
+            self.assertIsNone(restored.predict([float("nan")] * 8, 2.))
+
+    def test_temporal_filters_reject_spikes_without_filling_missing_frames(self):
+        samples = [dict(session="s", temporal=True, t=i * .1, target=[10., 10.], prediction=[10., 10.])
+                   for i in range(10)]
+        samples[4]["prediction"] = [100., 100.]
+        samples[7]["prediction"] = None
+        raw, filtered = jitter_score(samples, "raw"), jitter_score(samples, "median3-ema")
+        self.assertGreater(raw["jitter_px"], 50.)
+        self.assertEqual(filtered["jitter_px"], 0.)
+        self.assertEqual(filtered["predictions"], 9)
+        # A new session at the same timestamp resets, rather than inheriting a previous person's filter.
+        samples += [dict(session="other", temporal=True, t=0., target=[80., 80.], prediction=[80., 80.])]
+        self.assertEqual(jitter_score(samples, "median3-ema")["jitter_px"], 0.)
 
     def test_recorded_benchmark_preserves_abstentions(self):
         sample = dict(person="a", session="a", t=1., temporal=False, screen=[1280., 900.],

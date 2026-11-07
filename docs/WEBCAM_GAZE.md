@@ -79,9 +79,12 @@ the shipped source extracts MediaPipe iris/head features. A replacement model
 needs its own audited/pinned assets and observation script, not another resolver.
 
 Offline evaluation, the public-data survey and the 15-minute personal recording
-checklist are in [GAZE_EVAL.md](GAZE_EVAL.md). The shared feature extractor and
-default estimator are unchanged numerically; evaluation does not tune shipped
-defaults or install fitted profiles into the live tracker.
+checklist are in [GAZE_EVAL.md](GAZE_EVAL.md). The [scoreboard](GAZE_SCOREBOARD.md)
+now compares same-day/session and cross-day protocols over six people, including
+personal eye-pixel regression. No candidate reaches 60% at 3×3 on the same-day
+proxy; improvements also regress individual people. The production choice remains
+the existing nine-point λ=1 estimator: no new defaults, smoothing or fitted profiles
+are installed. Public-data scores do not establish this user's laptop accuracy.
 
 ## Hands-on checklist (real hardware: user only)
 

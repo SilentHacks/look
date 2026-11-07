@@ -35,3 +35,33 @@ or non-commercial data, or present these scores as this user's laptop accuracy.
 - Not adding speculative loaders for inaccessible or unsuitable data. Authorized
   future data can enter the documented common frame manifest; implement native
   EVE/EOTT decoding only against an actual authorized sample and its time bases.
+
+## Appearance model provenance
+
+Checked upstream [RedForestAI/WebEyeTrack](https://github.com/RedForestAI/WebEyeTrack/tree/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c),
+commit `75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c`, without installing its package
+or downloading/executing weights. Its [code licence](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/LICENSE)
+is MIT. BlazeGaze takes a 128×512 RGB eye patch, head vector and face origin.
+
+The [Python guide](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/python/README.md)
+describes separate MPIIFaceGaze, GazeCapture and EYEDIAP training. **GazeCapture's
+[research-only terms](https://github.com/CSAILVision/GazeCapture/blob/master/LICENSE.md)
+explicitly restrict commercial use of models trained on it**; MIT code does not
+remove training-data restrictions. No sign-up or licence acceptance was performed.
+
+Importantly, the [browser conversion script](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/python/scripts/ml_routines/tfjs_convert.py)
+points to an **MPIIFaceGaze** run, not proof that the browser checkpoint is
+GazeCapture-trained. The [MPII training recipe](https://github.com/RedForestAI/WebEyeTrack/blob/75fbd2f5f784f2eb3a39675a8dcbf1b01c697f1c/python/scripts/ml_routines/configs/train/maml_mpiifacegaze_config.yml)
+lists p00–p09 as training people, overlapping all six people in this sweep.
+The correspondence between each distributed checkpoint and its training run is
+not independently established. Thus a score on these people could leak
+pretraining, and unrestricted production-weight rights are **not established**.
+No upstream weights are shipped, enabled, or silently treated as MIT-cleared.
+
+The scored `appearance` alternative is our own personal ridge on normalized
+16×8 grayscale patches from **both eyes**, plus the existing eight landmarks.
+The face localizer is the already-audited Apache-2.0 MediaPipe model. No external
+gaze checkpoint or reusable public-data weights exist in this path; ephemeral
+calibration fits remain evaluation-only. It is an appearance baseline, **not an
+evaluation of BlazeGaze or evidence against pretrained appearance models**.
+

@@ -16,6 +16,7 @@ From the repository root, with its virtualenv and macOS Chrome installed:
 # Helpers load the existing test package shell, not the plugin's registration hooks.
 gaze_eval() { .venv/bin/python -c 'import tests; from hermes_gaze.benchmark.gaze_eval import main; main()' "$@"; }
 gaze_record() { .venv/bin/python -c 'import tests; from hermes_gaze.benchmark.gaze_record import main; main()' "$@"; }
+gaze_tuning() { .venv/bin/python -c 'import tests; from hermes_gaze.benchmark.gaze_tuning import main; main()' "$@"; }
 CACHE="$HOME/.cache/hermes-gaze-eval"
 
 # Official, anonymous, non-commercial-scientific-use original archive, <1 GB.
@@ -25,9 +26,14 @@ curl --fail --location --max-filesize 10000000000 \
   --output "$CACHE/MPIIFaceGaze.zip" \
   https://datasets.d2.mpi-inf.mpg.de/MPIIGaze/MPIIFaceGaze.zip
 
-gaze_eval mpiiface "$CACHE/MPIIFaceGaze.zip" --people p00 p01 p02 --limit 300 --out "$CACHE/mpiiface-300"
-gaze_eval extract "$CACHE/mpiiface-300/manifest.json" --out "$CACHE/public-features"
-gaze_eval score "$CACHE/public-features/features.json" --points 5 9 16 --out "$CACHE/scores"
+# Reuse the cached ZIP. Dense, label-blind days allow same-day 25-point calibration.
+gaze_eval mpiiface "$CACHE/MPIIFaceGaze.zip" --people p00 p01 p02 p03 p04 p05 \
+  --days 3 --per-day 100 --out "$CACHE/tuning-frames"
+gaze_eval extract "$CACHE/tuning-frames/manifest.json" --out "$CACHE/tuning-features"
+gaze_tuning "$CACHE/tuning-features/features.json" --points 9 16 25 --out "$CACHE/tuning-scores"
+# Baseline-only comparison or a trusted local GazeEstimator factory:
+gaze_eval score "$CACHE/tuning-features/features.json" --points 9 16 25 \
+  --protocols same-session cross-day --out "$CACHE/baseline-scores"
 ```
 
 Outputs: `SCOREBOARD.md`, numeric `results.json`, and held-out `*-trace.json` files.
@@ -89,12 +95,12 @@ Load and evaluate an actual session, using its printed path:
 SESSION="$CACHE/recordings/<actual-session-directory>"
 gaze_eval recording "$SESSION" --stride 3 --out "$CACHE/personal-frames"
 gaze_eval extract "$CACHE/personal-frames/manifest.json" --out "$CACHE/personal-features"
-gaze_eval score "$CACHE/personal-features/features.json" --points 5 9 --out "$CACHE/personal-scores"
+gaze_eval score "$CACHE/personal-features/features.json" --points 5 9 --protocols same-session --out "$CACHE/personal-scores"
 ```
 
-A recording contains nine calibration locations: requesting 16 reports
-`unscorable`, never invented extra points. The public still dataset supports
-5/9/16-point experiments. Use distinct output directories for each session.
+A recording contains nine calibration locations: requesting 16 or 25 reports
+`unscorable`, never invented extra points. Dense public stills support 9/16/25-point
+experiments. Use distinct output directories for each session.
 
 ## Why frame stepping instead of fake-camera playback for scoring?
 
@@ -103,8 +109,11 @@ path**, including fake-file camera flags in automation. Evaluation decodes retai
 video with FFmpeg, obtains frame PTS from ffprobe, matches the last target at each
 PTS, and steps selected frames through the **same pinned MediaPipe WASM, model,
 CPU delegate, confidence settings, eight-feature function and VIDEO mode**.
-Video timestamps retain their real cadence. Independent public stills reset the
-face track; otherwise one person's previous image could influence the next.
+The offline runtime additionally requests blendshapes and computes head-local
+features and normalized 16×8 grayscale patches of each eye. These additions do
+not change live extraction. Video timestamps retain their real cadence.
+Independent public stills reset the face track; otherwise one person's previous
+image could influence the next.
 No real camera or microphone is opened for offline feature extraction.
 
 This avoids dropped/repeated frames and wall-clock races from playing sparse
@@ -135,17 +144,36 @@ Common JSON manifest (`version: 1`):
   `reading`. Public day-ordered stills use `unassigned`; their `t` is an acquisition
   **day**, not fabricated seconds. `temporal: false` disables video jitter.
 - Extracted frame: `features` or explicit `null` for missing face/blink,
-  `inference_ms`, `extract_cpu_ms`. Extracted manifests identify the shared feature
-  source hash. Frames remain available for a future extractor/model.
+  `inference_ms`, `extract_cpu_ms`, plus eval-only `pose_features`, `openness`,
+  `blink`, `appearance` (256 eye pixels + the original eight features), and
+  `appearance_inference_ms`. Manifests identify both feature and offline-runtime
+  source hashes. Frames remain available for future extractors.
 
-Per person: MPIIFaceGaze uses the earliest 40% of **whole acquisition days** as
-calibration candidates; every test frame is from a later day. Personal video uses
-only its first contiguous calibration block; later recordings cannot leak their
-calibration back into earlier test periods. Deterministic farthest-target sampling
-uses early labels only. All later exact repeats of held-in target locations are
-excluded, so the score is on **both unseen targets and later time**. Missing early
-faces do not move the chronological cutoff. Calibration never uses test features,
-targets, smoothing state or pooled people. Each configuration gets a fresh model.
+Both protocols split **before face filtering**, choose farthest calibration
+targets using early labels only, and exclude all exact calibration-target repeats
+from test. Missing early faces never move the cutoff. Every fit is personal;
+scaling, weights and temporal state never cross people or test boundaries.
+
+- **Same-session:** public stills refit independently on each acquisition day's
+  earliest 40% of frames (original image order), then test its later 60%, on
+  held-out targets. MPII has no within-day timestamps/session IDs: this is a
+  **same-day proxy**, not proof of one uninterrupted sitting. Real video instead
+  uses each recording's first contiguous `calibration` block and later held-out
+  targets from that recording, with a fresh fit for every recording.
+- **Cross-day:** public stills calibrate on the earliest 40% of whole selected
+  acquisition days and test later days. Multiple personal recordings calibrate
+  only on the first recording's initial block and test non-calibration frames of
+  later recordings; a lone recording is unscorable, not silently same-session.
+- `mpiiface --days 3 --per-day 100` chooses first/middle/last acquisition days
+  containing at least 80 images, using counts/order only. At most 100 images/day
+  are evenly sampled in acquisition order. This supports 25 early targets without
+  downloading more data. Without `--days`, `--limit` retains sparse whole-history
+  sampling for the original cross-day reproduction.
+- Configurations use identical selected calibration targets and test rows at each
+  point budget. Gating drops observations from that fixed selection, never replaces
+  them with easier targets; `calibration_targets_used` records the retained count.
+  Calibration sizes have nested target sets, so excluding later repeats can change
+  their test denominators slightly. Protocols have different test populations.
 
 The baseline is `LandmarkEstimator`'s predictor and standardized λ=1 ridge solver.
 Its eval-only subclass relaxes live UI validity rules (exactly nine targets, at least
@@ -160,9 +188,32 @@ factories implementing `tracker.webcam_gaze.GazeEstimator` can be passed with
 Models with a different observation representation need a corresponding offline
 extractor/runtime and manifest; do not pretend eight landmarks fit every model.
 
+`gaze_tuning` runs eleven explicit configurations, not a hyperparameter grid:
+ridge λ=1/10/100; eyes-only and one-eye ablations; aspect-corrected 3D head-local
+iris coordinates plus yaw/pitch proxies; openness ≥.18 and blink ≤.4 gating;
+degree-two polynomial ridge λ=10; RBF kernel ridge α=.1 with standardized
+dimension-based bandwidth; separate horizontal/vertical iris models λ=10; and
+personal pixel-appearance ridge λ=10. Both eyes and eye-corner-relative positions
+are **already in the baseline**. The pixel model is not WebEyeTrack or a pretrained
+CNN; it learns only that evaluation calibration, retains no reusable weights,
+and introduces no external checkpoint. See [checkpoint provenance](GAZE_DATASETS.md#appearance-model-provenance).
+
+For **jitter only**, pass an existing fake-recording trace:
+```bash
+gaze_tuning "$CACHE/tuning-features/features.json" --out "$CACHE/tuning-with-jitter" \
+  --jitter-trace "$CACHE/scores/recording-features-baseline-ridge1-9-trace.json"
+```
+`jitter.json` compares raw samples, causal EMA (120 ms time constant), and trailing
+three-sample coordinate median + EMA (single-spike rejection). Filters reset on
+missing predictions, gaps >250 ms or session changes; they never fill abstentions.
+Target labels enter only the stationary-jitter metric, never filtering. Added lag
+is reported; the fake portrait cannot establish human saccade accuracy or comfort.
+
+
 - Headline: 3×3, 4×4, 5×5 exact cell hits; missing/off-screen predictions are **misses**.
+  JSON also includes 2×2 as a coarser-region diagnostic, not another tuning run.
 - Pixel and available angular mean/median/p95: conditional on a returned prediction;
-  coverage is stored separately in results JSON. MPII degrees use calibrated 3D
+  coverage is displayed and stored separately. MPII degrees use calibrated 3D
   screen-plane rays from the dataset's per-image face center (an eye-origin proxy).
 - Jitter: RMS successive residual displacement on a stationary target, adjacent
   samples at most 250 ms apart. Never computed from unrelated still images.
@@ -174,7 +225,7 @@ extractor/runtime and manifest; do not pretend eight landmarks fit every model.
 
 ```bash
 .venv/bin/python -c 'import tests, runpy; runpy.run_module("hermes_gaze.benchmark.run_benchmark", run_name="__main__")' \
-  --gaze-trace "$CACHE/scores/public-features-baseline-ridge1-9-trace.json" --trials 554
+  --gaze-trace "$CACHE/tuning-scores/ridge10-25-same-session-trace.json" --trials 1007
 ```
 
 This replaces Gaussian pointing noise with held-out measured prediction-minus-target
@@ -192,7 +243,7 @@ Omit `--gaze-trace` for the existing seeded synthetic benchmark.
 .venv/bin/python tests/gaze_eval_chrome.py --out "$CACHE/fake-proof-new"
 gaze_eval recording "$CACHE/fake-proof-new/recording" --out "$CACHE/fake-frames-new"
 gaze_eval extract "$CACHE/fake-frames-new/manifest.json" --out "$CACHE/fake-features-new"
-gaze_eval score "$CACHE/fake-features-new/features.json" --points 5 9 --out "$CACHE/fake-scores-new"
+gaze_eval score "$CACHE/fake-features-new/features.json" --points 5 9 --protocols same-session --out "$CACHE/fake-scores-new"
 ```
 
 The probe uses a checksum-pinned public-domain NASA portrait, translated in a Y4M

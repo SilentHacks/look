@@ -61,7 +61,7 @@ def screen(width, height, **extra):
                 screen_width=float(width), screen_height=float(height), screen_left=0, screen_top=0, **extra)
 
 
-def load_mpiiface(archive: Path, out: Path, people: list[str], limit: int) -> dict:
+def load_mpiiface(archive: Path, out: Path, people: list[str], limit: int, days: int = 0, per_day: int = 100) -> dict:
     """Preserve original pixels, day ordering, true targets and calibrated screen plane."""
     from scipy.io import loadmat
     from scipy.spatial.transform import Rotation
@@ -80,6 +80,17 @@ def load_mpiiface(archive: Path, out: Path, people: list[str], limit: int) -> di
             rows.sort(key=lambda r: (int(r[0].split("/")[0][3:]), int(Path(r[0]).stem)))
             # Sample by acquisition order, not gaze/appearance; no test-dependent selection.
             chosen = np.linspace(0, len(rows) - 1, min(limit, len(rows)), dtype=int)
+            if days:
+                by_day = defaultdict(list)
+                for i, r in enumerate(rows):
+                    by_day[r[0].split("/")[0]].append(i)
+                # Label/face-blind first/middle/last eligible days; enough early frames for 25 points.
+                eligible = [indices for indices in by_day.values() if len(indices) >= 80]
+                if len(eligible) < days:
+                    raise ValueError(f"{person}: fewer than {days} days with at least 80 images")
+                chosen = [i for j in np.linspace(0, len(eligible) - 1, days, dtype=int)
+                          for i in np.asarray(eligible[j])[np.linspace(0, len(eligible[j]) - 1,
+                                                                     min(per_day, len(eligible[j])), dtype=int)]]
             frames = []
             for index in chosen:
                 r = rows[index]
@@ -96,7 +107,7 @@ def load_mpiiface(archive: Path, out: Path, people: list[str], limit: int) -> di
     with archive.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
     result = dict(version=1, dataset="MPIIFaceGaze", licence="CC BY-NC-SA 4.0; internal research evaluation only",
-                  source_sha256=digest, sessions=sessions)
+                  source_sha256=digest, sampling=dict(days=days, per_day=per_day, limit=limit), sessions=sessions)
     save_json(out / "manifest.json", result)
     return result
 
@@ -202,7 +213,8 @@ def extract_manifest(data: dict) -> dict:
                 timestamp = (frame["t"] - session["frames"][0]["t"]) * 1000 + 1 if session["temporal"] else (i + 1) * 100.
                 frame.update(runtime.extract(Path(frame["path"]), timestamp, not session["temporal"] or i == 0))
     data["extractor"] = dict(model="mediapipe-face-v2-iris-ridge-1",
-                             feature_sha256=hashlib.sha256((BROWSER / "webcam_features.js").read_bytes()).hexdigest())
+                             feature_sha256=hashlib.sha256((BROWSER / "webcam_features.js").read_bytes()).hexdigest(),
+                             offline_sha256=hashlib.sha256((BROWSER / "gaze_eval.js").read_bytes()).hexdigest())
     return data
 
 
@@ -231,22 +243,31 @@ class EvalRidge(LandmarkEstimator):
         return profile
 
 
-def split_frames(sessions: list[dict], points: int):
-    """Split before face filtering; choose diverse calibration targets using early labels only."""
+def split_frames(sessions: list[dict], points: int, protocol: str = "cross-day"):
+    """Freeze chronology before face filtering; never select calibration from test labels."""
     ordered = [(s, f) for s in sessions for f in s["frames"]]
     if all(f["phase"] == "unassigned" for _, f in ordered):
-        # Whole days are held out; never turn an arbitrary file index into elapsed seconds.
-        days = sorted({f["t"] for _, f in ordered})
-        if len(days) < 2:
-            raise ValueError("Need at least two acquisition days")
-        cutoff = days[max(1, int(len(days) * .4)) - 1]
-        early = [(s, f) for s, f in ordered if f["t"] <= cutoff]
-        later = [(s, f) for s, f in ordered if f["t"] > cutoff]
+        ordered.sort(key=lambda row: (row[1]["t"], row[1].get("order", 0)))
+        if protocol == "same-session":
+            if len(sessions) != 1 or len({f["t"] for _, f in ordered}) != 1:
+                raise ValueError("Same-session stills require one acquisition day")
+            cutoff = max(1, int(len(ordered) * .4))
+            early, later = ordered[:cutoff], ordered[cutoff:]
+        else:
+            days = sorted({f["t"] for _, f in ordered})
+            if len(days) < 2:
+                raise ValueError("Need at least two acquisition days")
+            cutoff = days[max(1, int(len(days) * .4)) - 1]
+            early = [(s, f) for s, f in ordered if f["t"] <= cutoff]
+            later = [(s, f) for s, f in ordered if f["t"] > cutoff]
     else:
         first = sessions[0]
         boundary = next((i for i, f in enumerate(first["frames"]) if f["phase"] != "calibration"), len(first["frames"]))
         early = [(first, f) for f in first["frames"][:boundary]]
-        later = [(first, f) for f in first["frames"][boundary:]] + [(s, f) for s in sessions[1:] for f in s["frames"]]
+        if protocol == "same-session":
+            later = [(first, f) for f in first["frames"][boundary:]]
+        else:
+            later = [(s, f) for s in sessions[1:] for f in s["frames"] if f["phase"] != "calibration"]
     available = [(s, f) for s, f in early if f.get("features") is not None]
     groups = defaultdict(list)
     for s, f in available:
@@ -263,7 +284,7 @@ def split_frames(sessions: list[dict], points: int):
         distance[chosen] = -1
         chosen.append(int(np.argmax(distance)))
     held_in = {keys[i] for i in chosen}
-    calibration = [row for key in held_in for row in groups[key]]
+    calibration = [row for i in chosen for row in groups[keys[i]]]
     # Later repeats of calibration locations are explicitly not counted as unseen targets.
     test = [(s, f) for s, f in later if tuple(f["target"]) not in held_in]
     if not test:
@@ -292,34 +313,47 @@ def summarize(values):
     return {"mean": float(np.mean(values)), "median": float(np.median(values)), "p95": float(np.percentile(values, 95))} if values else None
 
 
-def evaluate(data: dict, factory, name: str, points: int) -> tuple[list[dict], list[dict]]:
+def evaluate(data: dict, factory, name: str, points: int, protocol: str = "cross-day",
+             feature_key: str = "features") -> tuple[list[dict], list[dict]]:
+    if protocol not in ("same-session", "cross-day"):
+        raise ValueError("Unknown evaluation protocol")
     people = defaultdict(list)
     for session in data["sessions"]:
-        people[session["person"]].append(session)
+        if protocol == "same-session" and all(f["phase"] == "unassigned" for f in session["frames"]):
+            for day in sorted({f["t"] for f in session["frames"]}):
+                window = {**session, "session": f"{session['session']}-day{day:g}",
+                          "frames": [f for f in session["frames"] if f["t"] == day]}
+                people[(session["person"], window["session"])].append(window)
+        else:
+            people[(session["person"], session["session"] if protocol == "same-session" else "all")].append(session)
     results, traces = [], []
-    for person, sessions in people.items():
+    for (person, window), sessions in people.items():
         sessions.sort(key=lambda s: s.get("start_epoch", 0))
-        row = dict(dataset=data["dataset"], person=person, config=name, calibration_points=points)
+        row = dict(dataset=data["dataset"], person=person, session=window, protocol=protocol,
+                   config=name, calibration_points=points)
         try:
-            calibration, test, early_count = split_frames(sessions, points)
+            calibration, test, early_count = split_frames(sessions, points, protocol)
             model: GazeEstimator = factory()
             geometry = calibration[0][0]["screen"]
             if any(s["screen"] != geometry for s in sessions):
                 raise ValueError("Screen changed within a person; evaluate geometry sessions separately")
-            observations = [(f["features"], (f["target"][0] - geometry["left"]) / geometry["width"],
-                             (f["target"][1] - geometry["top"]) / geometry["height"]) for _, f in calibration]
+            observations = [(f[feature_key], (f["target"][0] - geometry["left"]) / geometry["width"],
+                             (f["target"][1] - geometry["top"]) / geometry["height"])
+                            for _, f in calibration if f.get(feature_key) is not None]
             model.calibrate(observations, geometry)
             errors, angles, residuals, jitter, latency, cpu, extract_cpu = [], [], [], [], [], [], []
-            hits = {3: 0, 4: 0, 5: 0}
+            hits = {2: 0, 3: 0, 4: 0, 5: 0}
             previous = None
             for s, frame in test:
                 start, cpu_start = time.perf_counter(), time.thread_time()
-                prediction = model.predict(frame["features"], frame["t"]) if frame.get("features") is not None else None
+                prediction = model.predict(frame[feature_key], frame["t"]) if frame.get(feature_key) is not None else None
                 cpu.append((time.thread_time() - cpu_start) * 1000)
-                latency.append((time.perf_counter() - start) * 1000 + frame.get("inference_ms", 0))
+                inference = frame.get("appearance_inference_ms", frame.get("inference_ms", 0)) if feature_key == "appearance" else frame.get("inference_ms", 0)
+                latency.append((time.perf_counter() - start) * 1000 + inference)
                 extract_cpu.append(frame.get("extract_cpu_ms", 0))
                 trace = dict(person=person, session=s["session"], t=frame["t"], temporal=s["temporal"],
-                             target=frame["target"], screen=[geometry["width"], geometry["height"]], prediction=None)
+                             target=frame["target"], screen=[geometry["width"], geometry["height"]], prediction=None,
+                             protocol=protocol)
                 if prediction is None:
                     traces.append(trace); previous = None; continue
                 xy = [prediction.x, prediction.y]
@@ -349,7 +383,8 @@ def evaluate(data: dict, factory, name: str, points: int) -> tuple[list[dict], l
                                                                 np.mean([r[1] for r in residuals[:third]], axis=0))),
                              elapsed=residuals[-1][0] - residuals[0][0],
                              unit="seconds" if sessions[0]["temporal"] else "acquisition days")
-            row.update(status="ok", calibration_frames=len(calibration), early_frames=early_count,
+            row.update(status="ok", calibration_frames=len(observations), early_frames=early_count,
+                       calibration_targets_used=len({(r[1], r[2]) for r in observations}),
                        test_frames=len(test), predicted=len(errors), coverage=100 * len(errors) / len(test),
                        region_hit={str(n): 100 * hit / len(test) for n, hit in hits.items()},
                        error_px=summarize(errors), error_deg=summarize(angles), jitter_px=math.sqrt(np.mean(jitter)) if jitter else None,
@@ -364,19 +399,19 @@ def evaluate(data: dict, factory, name: str, points: int) -> tuple[list[dict], l
 def scoreboard(rows):
     lines = ["# Offline gaze scoreboard", "", "Region hits include missing/off-screen predictions as misses. Errors are conditional on a prediction.",
              "Public results describe those participants and setups, not the user's laptop. Fake-camera results test plumbing only.", "",
-             "| Dataset/person | Configuration | Cal points/frames | Test/predicted | 3×3 | 4×4 | 5×5 | px mean/median/p95 | degrees mean/median/p95 | jitter px | latency mean ms | CPU extract/predict ms | Drift first→last px |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| Dataset/person/session | Protocol | Configuration | Cal points/frames | Test/predicted | Coverage | 3×3 | 4×4 | 5×5 | px mean/median/p95 | degrees mean/median/p95 | jitter px | latency mean ms | CPU extract/predict ms | Drift first→last px |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     def stats(v):
         return "/".join(f"{v[k]:.2f}" for k in ("mean", "median", "p95")) if v else "N/A"
     for r in rows:
         if r["status"] != "ok":
-            lines.append(f"| {r['dataset']}/{r['person']} | {r['config']} | {r['calibration_points']} | unscorable: {r['reason']} | — | — | — | — | — | — | — | — | — |")
+            lines.append(f"| {r['dataset']}/{r['person']}/{r['session']} | {r['protocol']} | {r['config']} | {r['calibration_points']} | unscorable: {r['reason']} | — | — | — | — | — | — | — | — | — | — |")
             continue
         drift = r["drift"]
         drift_text = f"{drift['first_third_mean_px']:.1f}→{drift['last_third_mean_px']:.1f} ({drift['elapsed']:.1f} {drift['unit']})" if drift else "N/A"
         jitter = f"{r['jitter_px']:.2f}" if r['jitter_px'] is not None else "N/A"
         hits = " | ".join(f"{r['region_hit'][str(n)]:.1f}%" for n in (3, 4, 5))
-        lines.append(f"| {r['dataset']}/{r['person']} | {r['config']} | {r['calibration_points']}/{r['calibration_frames']} | {r['test_frames']}/{r['predicted']} | {hits} | {stats(r['error_px'])} | {stats(r['error_deg'])} | {jitter} | {r['latency_ms']['mean']:.2f} | {r['extract_cpu_ms']['mean']:.2f}/{r['predict_cpu_ms']['mean']:.3f} | {drift_text} |")
+        lines.append(f"| {r['dataset']}/{r['person']}/{r['session']} | {r['protocol']} | {r['config']} | {r['calibration_points']}/{r['calibration_frames']} | {r['test_frames']}/{r['predicted']} | {r['coverage']:.1f}% | {hits} | {stats(r['error_px'])} | {stats(r['error_deg'])} | {jitter} | {r['latency_ms']['mean']:.2f} | {r['extract_cpu_ms']['mean']:.2f}/{r['predict_cpu_ms']['mean']:.3f} | {drift_text} |")
     lines += ["", "Latency = WASM inference + Python predict wall time, excludes decoding, CDP and camera exposure.",
               "CPU = Chrome renderer thread CPU (includes image decode/model reset/CDP work) / Python prediction thread CPU.",
               "Jitter = RMS successive residual displacement on stationary targets ≤250 ms apart; still images: N/A.",
@@ -393,6 +428,8 @@ def main():
     mpii.add_argument("archive", type=Path)
     mpii.add_argument("--people", nargs="+", default=["p00", "p01", "p02"])
     mpii.add_argument("--limit", type=int, default=300)
+    mpii.add_argument("--days", type=int, default=0, help="sample this many dense acquisition days instead of sparse whole-history sampling")
+    mpii.add_argument("--per-day", type=int, default=100)
     mpii.add_argument("--out", type=Path, required=True)
     rec = subs.add_parser("recording")
     rec.add_argument("directory", type=Path)
@@ -403,14 +440,17 @@ def main():
     extract.add_argument("--out", type=Path, required=True)
     score = subs.add_parser("score")
     score.add_argument("manifests", type=Path, nargs="+")
-    score.add_argument("--points", type=int, nargs="+", default=[5, 9, 16])
+    score.add_argument("--points", type=int, nargs="+", default=[9, 16, 25])
+    score.add_argument("--protocols", nargs="+", choices=["same-session", "cross-day"], default=["same-session", "cross-day"])
     score.add_argument("--estimator", help="optional trusted local module:factory implementing GazeEstimator")
     score.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "mpiiface":
         if args.limit < 10:
             parser.error("--limit must be at least 10")
-        load_mpiiface(args.archive, args.out, args.people, args.limit)
+        if args.days < 0 or args.per_day < 80:
+            parser.error("--days must be nonnegative and --per-day at least 80")
+        load_mpiiface(args.archive, args.out, args.people, args.limit, args.days, args.per_day)
     elif args.command == "recording":
         if args.stride < 1:
             parser.error("--stride must be positive")
@@ -432,9 +472,10 @@ def main():
             data = json.loads(manifest.read_text())
             for name, factory in configs:
                 for points in args.points:
-                    scored, traces = evaluate(data, factory, name, points)
-                    rows.extend(scored)
-                    save_json(out / f"{manifest.parent.name}-{name.replace(':', '-')}-{points}-trace.json", dict(version=1, samples=traces))
+                    for protocol in args.protocols:
+                        scored, traces = evaluate(data, factory, name, points, protocol)
+                        rows.extend(scored)
+                        save_json(out / f"{manifest.parent.name}-{name.replace(':', '-')}-{points}-{protocol}-trace.json", dict(version=1, samples=traces))
         save_json(out / "results.json", rows)
         (out / "SCOREBOARD.md").write_text(scoreboard(rows)); (out / "SCOREBOARD.md").chmod(0o600)
         print(scoreboard(rows))
