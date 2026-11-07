@@ -157,7 +157,8 @@ def run():
                 until(lambda: reasons)
                 assert 'document' in reasons[0].lower(), reasons
                 print('PASS: full navigation cancels: ' + reasons[0])
-                until(lambda: a._context_unique_id and a._context_unique_id != document)
+                until(lambda: a._context_unique_id and a._context_unique_id != document and a._ui_frames
+                      and a.eval_js("(() => {const t=window.__HERMES_GAZE_OVERLAY__?.debug().talk;return t?.ready && t.nonce})()"))
                 document = a._context_unique_id
                 # Real native deadline, warning transport and visible private renderer.
                 events.clear()

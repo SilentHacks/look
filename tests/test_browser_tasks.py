@@ -96,6 +96,22 @@ class BrowserTaskTests(unittest.TestCase):
                 patch.dict('os.environ', HERMES_HOME='/unused-trial-home'):
             with self.assertRaises(SystemExit):
                 run_turn(SimpleNamespace(), trial_tools, 'Fill this out', 'unused', 'http://fixture.test')
+            def limited_after_action(*_):
+                trial_tools.calls.append({'tool': 'gaze_read'})
+                return {'completed': False, 'failure_reason': 'rate_limit'}
+            agent.run_conversation.side_effect = limited_after_action
+            with self.assertRaises(SystemExit):
+                run_turn(SimpleNamespace(), trial_tools, 'Fill this out', 'unused', 'http://fixture.test')
+
+    def test_trial_auth_failure_stops_without_disclosing_credentials(self):
+        from hermes_gaze.benchmark.browser_actions_production import runtime_credentials
+        auth = Mock()
+        auth.resolve_nous_runtime_credentials.side_effect = RuntimeError('secret-token-in-provider-error')
+        with patch.dict('sys.modules', hermes_cli=SimpleNamespace(auth=auth)):
+            with self.assertRaises(SystemExit) as stopped:
+                runtime_credentials('nous')
+        self.assertIn('hermes auth add nous', str(stopped.exception))
+        self.assertNotIn('secret-token', str(stopped.exception))
 
     def test_navigation_cannot_open_its_own_debugger_even_through_a_loopback_alias(self):
         self.tasks._current = lambda epoch: None

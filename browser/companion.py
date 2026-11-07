@@ -111,7 +111,7 @@ class Companion:
         while time.monotonic() < deadline:
             with self._lock:
                 destination = self._tabs.get(target)
-            if destination and destination.is_connected and destination._ui_frames:
+            if destination and destination.is_connected and destination._ui_frames and not destination._main_frame_loading:
                 document, route = destination._context_unique_id, destination._route_id
                 # Same-document navigation may retain the exact document.
                 if (new_tab or document != old_document or destination._route_id != owner["browser_route"]
@@ -134,7 +134,7 @@ class Companion:
         while time.monotonic() < deadline:
             document, route = tab._context_unique_id, tab._route_id
             capture = None
-            if document and tab.is_connected and (same_document or document != owner["browser_document"] or route != owner["browser_route"]):
+            if document and tab.is_connected and not tab._main_frame_loading and (same_document or document != owner["browser_document"] or route != owner["browser_route"]):
                 try:
                     capture = tab.eval_js_once(
                         "document.visibilityState === 'visible' && document.hasFocus() ? "
@@ -145,7 +145,8 @@ class Companion:
             if isinstance(capture, dict):
                 if capture.get("foreground") is False:
                     raise ConnectionError("Clicked tab lost foreground")
-                if (capture.get("snapshot_id") and document == tab._context_unique_id and route == tab._route_id):
+                if (capture.get("snapshot_id") and not tab._main_frame_loading
+                        and document == tab._context_unique_id and route == tab._route_id):
                     capture.update(browser_target=owner["browser_target"], browser_document=document, browser_route=route)
                     return capture
             if self._stop.wait(.05):

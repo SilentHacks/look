@@ -124,6 +124,7 @@ class CdpSession:
         self._msg_id = 0
         self._target_id: Optional[str] = None
         self._main_frame_id: Optional[str] = None
+        self._main_frame_loading = False
         self._context_id: Optional[int] = None
         self._context_unique_id: Optional[str] = None
         self._ui_context_id: Optional[int] = None
@@ -371,6 +372,7 @@ class CdpSession:
 
     async def _drop_ws(self) -> None:
         self._ready = False
+        self._main_frame_loading = False
         self._context_id = None
         self._context_unique_id = None
         self._ui_context_id = None
@@ -445,6 +447,9 @@ class CdpSession:
             self._ui_context_id = None
             self._ui_context_unique_id = None
             self._ui_frames = {}
+        elif method in ("Page.frameStartedLoading", "Page.frameStoppedLoading"):
+            if params.get("frameId") == self._main_frame_id:
+                self._main_frame_loading = method == "Page.frameStartedLoading"
         elif method == "Page.loadEventFired" or (
                 method == "Page.frameNavigated" and params.get("type") == "BackForwardCacheRestore"):
             asyncio.ensure_future(self._on_new_context())

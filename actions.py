@@ -61,7 +61,8 @@ class SnapshotActions:
     def _current(self, resolution_id: int, handles: list[str], *, highlighting: bool = False) -> tuple[dict[str, Any] | None, str]:
         with self.session._lock:
             snapshot = self.session.last_hover_snapshot
-            if type(resolution_id) is not int or resolution_id != self.session.resolution_id:
+            # JSON Schema integers include 12.0; reject bools and require exact epoch equality.
+            if type(resolution_id) not in (int, float) or resolution_id != self.session.resolution_id:
                 return None, "stale resolution"
             if not snapshot or snapshot.get("ok") is not True or not snapshot.get("snapshot_id"):
                 return None, "No successful cursor snapshot"

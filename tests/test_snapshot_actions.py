@@ -109,6 +109,18 @@ class TestSnapshotActions(unittest.TestCase):
         self.assertFalse(self.actions.highlight(["@missing"], self.rid)["ok"])
         self.assertFalse(self.actions.click("@export", self.rid - 1)["ok"])
 
+    def test_json_integer_epoch_accepts_decimal_not_bool_fraction_or_nonfinite(self):
+        for epoch in (True, False, str(self.rid), self.rid + .5, float('nan'), float('inf'), self.rid - 1.0):
+            with self.subTest(epoch=epoch):
+                self.assertFalse(self.actions.click("@export", epoch)["ok"])
+        self.assertEqual(self.browser.executed, [])
+        self.assertTrue(self.actions.click("@export", float(self.rid))["executed"])
+        pending = self.actions.request_commit("@purge", float(self.rid))
+        self.assertTrue(pending["confirmation_required"])
+        self.assertEqual(self.browser.executed, ["@export"])
+        self.assertTrue(self.actions.confirm(self.browser.pending["action_id"], self.rid, True)["executed"])
+        self.assertEqual(self.browser.executed, ["@export", "@purge"])
+
     def test_live_policy_ignores_utterance_and_protects_ambiguous_controls(self):
         for field, value in [("label", "Delete data"), ("label", "Do it"), ("label", "Close account"),
                              ("label", "Cancel membership"), ("class_name", "btn-danger"), ("form_submit", True)]:

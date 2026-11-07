@@ -1,7 +1,8 @@
 """Production-tool trial: private Chrome, owned HTTP fixtures, serial free Hermes calls.
 
 Run with Hermes Python; --offline runs the deterministic probe only. No production
-source injection, device capture, installed Hermes writes or paid-model fallback.
+source injection, device capture or paid fallback. Only native token refresh may
+write to the installed Hermes auth stores; all other state uses a temporary home.
 """
 from __future__ import annotations
 
@@ -25,7 +26,9 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 HERMES = Path.home() / '.hermes' / 'hermes-agent'
-MODEL = 'nvidia/nemotron-3-ultra-550b-a55b:free'
+MODELS = {'nous': 'reflection/beam-1.0-501b-a23b:free',
+          'openrouter': 'nvidia/nemotron-3-ultra-550b-a55b:free'}
+MODEL = MODELS['nous']
 KINDS = ('form', 'mail', 'layout', 'wizard', 'unseen')
 PROFILE = {'Full name': 'Alex Morgan', 'Email address': 'alex@example.test',
            'Phone number': '202-555-0147', 'Street address': '42 Example Lane',
@@ -242,7 +245,7 @@ def oracle(rig, kind, source):
     return actual, bool(ok)
 
 
-def setup_home(home):
+def setup_home(home, provider='nous', model=MODEL):
     os.environ.update(HERMES_HOME=home, HERMES_SHARED_AUTH_DIR=home + '/shared', HERMES_IGNORE_RULES='1',
                       HERMES_DISABLE_LAZY_INSTALLS='1', BH_RUNTIME_DIR=home + '/bh', BH_TMP_DIR=home + '/bh-tmp',
                       BU_AUTOSPAWN='0', HERMES_RUNTIME_DIR=home + '/runtime')
@@ -253,7 +256,7 @@ def setup_home(home):
     import hermes_bootstrap  # noqa: F401
     import tools  # noqa: F401; pin Hermes's package before the plugin's tools.py is on sys.path.
     import yaml
-    Path(home, 'config.yaml').write_text(yaml.safe_dump({'model': {'provider': 'openrouter', 'default': MODEL},
+    Path(home, 'config.yaml').write_text(yaml.safe_dump({'model': {'provider': provider, 'default': model},
         'plugins': {'enabled': []}, 'mcp_servers': {}, 'fallback_model': None, 'fallback_models': [],
         'memory': {'memory_enabled': True, 'user_profile_enabled': True},
         'browser': {'cloud_provider': 'local', 'engine': 'auto', 'use_real_profile': False,
@@ -267,15 +270,16 @@ def seed_memory(home, missing_phone=False):
     Path(home, 'memories', 'USER.md').write_text('\n§\n'.join(f'{k}: {v}' for k, v in PROFILE.items() if k not in omitted))
 
 
-def run_turn(rig, tools, ask, key, origin, ingress='terminal'):
+def run_turn(rig, tools, ask, key, origin, ingress='terminal', *,
+             provider='nous', model=MODEL, base_url='https://inference-api.nousresearch.com/v1'):
     from run_agent import AIAgent
     started = time.monotonic()
     tools.calls.clear()
     agent = None
     original_inject = tools.plugin_turns.ctx.inject_message
     try:
-        agent = AIAgent(model=MODEL, provider='openrouter', api_mode='chat_completions', api_key=key,
-            base_url='https://openrouter.ai/api/v1', enabled_toolsets=['hermes_gaze'],
+        agent = AIAgent(model=model, provider=provider, api_mode='chat_completions', api_key=key,
+            base_url=base_url, enabled_toolsets=['hermes_gaze'],
             max_iterations=14, max_tokens=10000, reasoning_config={'enabled': True}, fallback_model=None,
             quiet_mode=True, skip_context_files=True, skip_memory=False, skip_background_review=True,
             load_soul_identity=False, cwd=os.environ['HERMES_HOME'],
@@ -315,9 +319,10 @@ def run_turn(rig, tools, ask, key, origin, ingress='terminal'):
                 raise outcome['error']
             result = outcome['result']
             until(lambda: tools.plugin_turns.active is None)
-        if result.get('completed') is False and not tools.calls:
-            raise SystemExit('Free provider unavailable before tool execution; stopping without fallback.\n'
-                             + str(result.get('final_response') or 'No provider result'))
+        limited = result.get('failure_reason') in ('rate_limit', 'upstream_rate_limit', 'billing')
+        if limited or (result.get('completed') is False and not tools.calls):
+            raise SystemExit('Free provider unavailable; stopping without fallback.\n'
+                             + str(result.get('final_response') or 'No provider result').replace(key, '[redacted]'))
         assert rig.session.tasks.grant['session_id'] == agent.session_id, 'Production turn hook did not own the task'
         return {'completed': result.get('completed'), 'api_calls': result.get('api_calls'),
                 'answer': result.get('final_response'), 'normal_memory_loaded': True, 'ingress': ingress,
@@ -367,9 +372,29 @@ def runtime_key():
     return dotenv_values(env_path)['OPENROUTER_API_KEY']
 
 
+def runtime_credentials(provider):
+    if provider == 'openrouter':
+        return {'api_key': runtime_key(), 'base_url': 'https://openrouter.ai/api/v1'}
+    from hermes_cli import auth
+    # Route only credential storage to the real install. Hermes retains its own
+    # locked refresh, single-use grant handling and shared-auth-store mirroring.
+    # Neither credentials nor the user's config enter the isolated test home.
+    with patch.object(auth, '_auth_file_path', return_value=Path.home() / '.hermes' / 'auth.json'), \
+            patch.dict(os.environ, {'HERMES_SHARED_AUTH_DIR': str(Path.home() / '.hermes' / 'shared'),
+                                    'HERMES_OAUTH_TRACE': '0'}):
+        try:
+            return auth.resolve_nous_runtime_credentials()
+        except Exception as exc:
+            code = getattr(exc, 'code', type(exc).__name__)
+            raise SystemExit(f'Nous credential resolution failed ({code}). '
+                             'Run: hermes auth add nous') from None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--offline', action='store_true')
+    parser.add_argument('--provider', choices=MODELS, default='nous')
+    parser.add_argument('--model', choices=tuple(MODELS.values()))
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--fixtures', nargs='+', choices=KINDS, default=list(KINDS))
@@ -377,6 +402,9 @@ def main():
     args = parser.parse_args()
     if args.runs < 1:
         parser.error('--runs must be positive')
+    args.model = args.model or MODELS[args.provider]
+    if args.model != MODELS[args.provider]:
+        parser.error('--model must match the selected free provider')
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
     home = tempfile.mkdtemp(prefix='gaze-production-')
@@ -385,7 +413,10 @@ def main():
     atexit.register(shutil.rmtree, home, ignore_errors=True)
     rig = tools = None
     try:
-        setup_home(home)
+        setup_home(home, args.provider, args.model)
+        credentials = runtime_credentials(args.provider) if not args.offline else None
+        route = {'provider': args.provider, 'model': args.model,
+                 'base_url': credentials['base_url']} if credentials else {}
         os.environ['SHOTS'] = str(args.out)
         sys.path.insert(0, str(ROOT))
         sys.path.insert(0, str(ROOT / 'tests' / 'ui_review'))
@@ -402,7 +433,7 @@ def main():
             args.out.joinpath('security.json').write_text(json.dumps(security, indent=2))
             if args.offline:
                 return
-            key = runtime_key()  # Runtime only: never copied into environment/home/results.
+            key = credentials['api_key']  # Memory only, never environment/home/results.
             tools.install_host_plugin()
             rows = json.loads(args.resume.read_text())['rows'] if args.resume else []
             source = rig.tab
@@ -417,7 +448,7 @@ def main():
                     row = {'scenario': kind, 'run': index}
                     started = time.monotonic()
                     try:
-                        row.update(run_turn(rig, tools, MAIL_ASK if kind == 'mail' else FORM_ASK, key, fixtures.origin))
+                        row.update(run_turn(rig, tools, MAIL_ASK if kind == 'mail' else FORM_ASK, key, fixtures.origin, **route))
                         sync_tab(rig)
                         actual, ok = oracle(rig, kind, source._target_id)
                         row.update(actual_fake_fields=actual, content_ok=ok, no_commit_before_click=count(rig) == 0,
@@ -433,7 +464,7 @@ def main():
                         row.update(success=False, error=str(exc), calls=copy.deepcopy(tools.calls))
                     row.setdefault('latency_s', round(time.monotonic() - started, 3))
                     rows.append(row)
-                    args.out.joinpath('results.json').write_text(json.dumps({'model': MODEL, 'reasoning_enabled': True, 'rows': rows}, indent=2))
+                    args.out.joinpath('results.json').write_text(json.dumps({'provider': args.provider, 'model': args.model, 'reasoning_enabled': True, 'production_default': True, 'rows': rows}, indent=2))
                     print(json.dumps({k: row.get(k) for k in ('scenario', 'run', 'success', 'latency_s', 'api_calls', 'error')}), flush=True)
                     rig.session.tasks.stop()
                     for tab in tuple(rig.session.cdp._tabs.values()):
@@ -442,7 +473,7 @@ def main():
                     rig.front(source)
             seed_memory(home, missing_phone=True)
             rig.goto(fixtures.url('form'))
-            missing = run_turn(rig, tools, FORM_ASK + ' The organiser requires my phone number; ask me if you do not know it.', key, fixtures.origin)
+            missing = run_turn(rig, tools, FORM_ASK + ' The organiser requires my phone number; ask me if you do not know it.', key, fixtures.origin, **route)
             missing['phone_blank'] = rig.page("document.querySelector('#phone').value") == ''
             missing['asks_for_phone'] = 'phone' in (missing.get('answer') or '').lower() and '?' in (missing.get('answer') or '')
             missing['no_commit'] = count(rig) == 0
@@ -452,7 +483,7 @@ def main():
             inbox = []
             for ingress in ('typed', 'voice'):
                 rig.goto(fixtures.url('form'))
-                row = run_turn(rig, tools, FORM_ASK, key, fixtures.origin, ingress=ingress)
+                row = run_turn(rig, tools, FORM_ASK, key, fixtures.origin, ingress=ingress, **route)
                 row['details'], row['draft_correct'] = oracle(rig, 'form', rig.tab._target_id)
                 row['pre_approval_count'] = count(rig)
                 row['approval'] = approve(rig) if row['draft_correct'] else {}

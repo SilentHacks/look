@@ -1,10 +1,13 @@
 # Browser actions
 
-**Acceptance is not complete.** The last complete free-model harness scored
-23/25, including new-tab email 3/5. Review found that its manually promoted tool
-surface masked Hermes's default deferral behavior; those overrides are removed.
-The final production surface needs a fresh five-per-fixture run after the
-OpenRouter daily HTTP 429 quota resets. The ≥4/5 release gate is not passed.
+**Production-default acceptance passed: 25/25**, five per fixture, serially.
+Acceptance used **Nous Portal (`nous`), `reflection/beam-1.0-501b-a23b:free`**.
+Form, alternate form, wizard, new-tab email and unseen layout each scored **5/5**.
+Final gates: 183 unit tests, 27 DOM tests, seven JS syntax checks, 33 action checks,
+14 trust checks, seven recording checks, fake webcam and three dispatch ingresses passed.
+No-send-without-click and independent `browser_exec` isolation passed; paid spend **$0**.
+Per-run transcripts, superseded 23/25 Beam trial and fixes:
+[`browser_actions_production_results.json`](../benchmark/browser_actions_production_results.json), `beam_acceptance`.
 
 ## Production policy and tools
 
@@ -59,6 +62,10 @@ query/fragment parts and new tabs, without returning those parts to the model.
 Confirmation destinations use the browser-resolved form/link properties and bind
 base-URL changes too. Secret-label filtering covers title and root-scoped ARIA
 references without reading descendant field values.
+
+Click continuation waits for browser-owned main-frame loading to finish before
+accepting destination evidence; it never replays a click. JSON integer epochs
+such as `165.0` match the same exact epoch; booleans, fractions and stale epochs do not.
 
 
 ### Approval and its boundary
@@ -134,7 +141,7 @@ All automated verification uses owned local fixtures, fake personal details and
 fake devices. Gmail and real account behavior require this user check; agents
 must not perform it.
 
-## Production measurements
+## Historical production measurements before Beam acceptance
 
 The pre-review harness used real Hermes registration, lifecycle hooks, execution
 middleware and handlers, but manually replaced its advertised and authorized
@@ -169,13 +176,17 @@ instead of consuming every remaining fixture attempt.
 The provider announced reset at **2026-11-08 00:00 UTC** (Nov 7, 7 PM EST);
 the last clock check was 2026-11-07 20:23 UTC, before that reset.
 
-Resume the full five-per-fixture trial after the free quota resets, using the
-Hermes Python with `HERMES_DISABLE_LAZY_INSTALLS=1`:
-`python benchmark/browser_actions_production.py --runs 5 --out /absolute/new/output`.
-Do not resume from pre-schema results or the quota-rejected dataset.
+To repeat the full five-per-fixture trial, use the Hermes Python with
+`HERMES_DISABLE_LAZY_INSTALLS=1`:
+`python benchmark/browser_actions_production.py --provider nous --runs 5 --out /absolute/new/output`.
+The default is Nous Beam; `--provider openrouter` explicitly selects free Nemotron.
+`--model` accepts only the matching free model. Neither route has a paid fallback.
+All config, memory and runtime state remain in a temporary Hermes home; only
+Hermes's native credential resolver/refresh uses the installed auth stores.
+Do not resume from a different provider/model or from pre-fix results.
 
 
-Local gates: **181 Python tests, 27 DOM tests, all seven browser JS syntax
+Historical pre-Beam local gates: **181 Python tests, 27 DOM tests, all seven browser JS syntax
 checks, and 33 deterministic action checks passed**. The trust-boundary (14
 checks), recording-hold (7), fake-webcam and all eight UI-review probes passed.
 The latter used `GAZE_REVIEW_LOCAL_ONLY=1`; external news/media visits were omitted.
@@ -213,7 +224,7 @@ default tool search, lifecycle and dispatcher, scripting only provider I/O.
 Each ingress rejects a deliberately attempted raw browser call, discovers the
 actual operation schemas, fills the form, offers review and accepts one trusted
 approval. This proves dispatch and policy, **not free-model performance**.
-No second review pass or production-default free-model acceptance is claimed.
+No second independent review pass is claimed. Beam production-default acceptance is recorded above.
 
 ## Historical feasibility experiment
 
