@@ -1576,6 +1576,10 @@
   }
   function holdStart() {
     S.keyArmed = false;
+    if (state.mode === "webcam" && !freshWebcam()) {
+      coachLine("No fresh gaze. Check /gaze tracker; move the pointer once in this page.", 4000);
+      return;
+    }
     clearTimeout(S.retreatTimer); S.retreatAt = 0;
     if (S.coachTimer) { clearTimeout(S.coachTimer); S.coachTimer = 0; }
     raise();
@@ -1593,7 +1597,7 @@
     p.o.to(1);
     if (!startListening()) { S.hold = null; hidePill(); updateCapsule(); armRetreat(); return; }
     refreshWave();
-    if (state.mode === "simulated") S.gaze = {x: new Spring(state.pointerX ?? innerWidth / 2, GAZE), y: new Spring(state.pointerY ?? innerHeight / 2, GAZE), stillAt: performance.now(), lockX: null, lockY: null};
+    if (state.mode !== "hover") S.gaze = {x: new Spring(state.pointerX ?? innerWidth / 2, GAZE), y: new Spring(state.pointerY ?? innerHeight / 2, GAZE), stillAt: performance.now(), lockX: null, lockY: null};
     updatePointing(performance.now(), true);
     wake();
   }
@@ -1605,7 +1609,7 @@
       const dockY = Math.min(vh - PILL_H - 10, front.y.t + front.h.t - PILL_H / 2 + 2);
       return {x: S.pos.x + (front.w.t - w) / 2, y: dockY};
     }
-    const soft = state.mode === "simulated" && S.gaze;
+    const soft = state.mode !== "hover" && S.gaze;
     const anchorX = soft ? S.gaze.x.x : state.pointerX ?? vw / 2, anchorY = soft ? S.gaze.y.x : state.pointerY ?? vh / 2;
     let x = anchorX + 18, y = anchorY + 22;
     if (soft) { x = anchorX - w / 2; y = anchorY + REGION_H / 2 - 10; }
@@ -1630,7 +1634,8 @@
     const H = S.hold;
     if (!H || typeof state.pointerX !== "number") return;
     if (H.follow && !pointedElsewhere()) return; // still on the card
-    if (state.mode === "simulated") { updateSoft(now); return; }
+    if (state.mode === "webcam" && !freshWebcam()) { dropTentative(H); return; }
+    if (state.mode !== "hover") { updateSoft(now); return; }
     const n = pickElement(state.pointerX, state.pointerY);
     const already = n && H.targets.find(t => t.el === n);
     if (!n || already) { dropTentative(H); return; }
@@ -1655,6 +1660,7 @@
     const H = S.hold, G = S.gaze;
     if (!G) return;
     const feed = S.softPoint && now - S.softPoint.at < 800 ? S.softPoint : null;
+    if (state.mode === "webcam" && !feed) return;
     const sx = feed ? feed.x : state.pointerX, sy = feed ? feed.y : state.pointerY;
     const t = now / 1000;
     // Without a feed, simulated mode adds the slow wander of a smoothed gaze estimate.
@@ -1744,15 +1750,9 @@
     isListening = false;
     resetMic();
     // Freeze evidence at release, before transcription and before routing can change it.
-    const locked = state.armed && state.lockedX !== null;
-    const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
     litIds = rec ? rec.targets.map(t => t.hit ? cursorId(t.hit) : null).filter(Boolean) : [];
     const intent = { type: "record_stop", mode: state.mode, item_id: follow?.id || "", subject: rec?.subject,
-      ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : {
-        page_url: location.origin + location.pathname,
-        pointer: { x_vp: x, y_vp: y, scroll_x: scrollX, scroll_y: scrollY },
-        fixations: state.ringBuffer.slice(-25),
-        candidates: extractCandidatesNear(x, y, state.candidateRadiusPx || 380) }) };
+      ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : captureNoisyContext()) };
     litIds = [];
     if (rec) bindRequest(intent, rec);
     _emit(intent);
@@ -1760,6 +1760,7 @@
   }
   function bindRequest(intent, rec) {
     rec.pointerAnchor = {x: state.pointerX, y: state.pointerY, hit: hitNode(state.pointerX, state.pointerY)};
+    if (state.mode === "webcam") webcamAskedAt = {x: state.pointerX, y: state.pointerY};
     if (intent.cursor_context?.snapshot_id) snapshotOwner.set(intent.cursor_context.snapshot_id, rec);
     S.localPending.push(rec);
   }
@@ -1981,7 +1982,7 @@
   }
   window.addEventListener("pagehide", onNavigation);
   function onCursorScroll() {
-    if (!state.armed && !cursorOverHud && typeof state.pointerX === "number")
+    if (state.mode !== "webcam" && !state.armed && !cursorOverHud && typeof state.pointerX === "number")
       rememberHit(hitNode(state.pointerX, state.pointerY));
     positionNote();
   }
@@ -1993,6 +1994,7 @@
   }
 
   function recordPoint(x, y) {
+    if (state.mode === "webcam") return; // Mouse movement is geometry only, never gaze evidence.
     const now = performance.now() / 1000;
     state.pointerX = x;
     state.pointerY = y;
@@ -2043,8 +2045,45 @@
       }
     }
   }
+  let webcamAnchor = null, webcamAskedAt = null, lastWebcamAt = 0;
+  function freshWebcam() { return performance.now() - lastWebcamAt < 800 && lastWebcamAt > 0; }
+  function webcamViewport(screenDpr) {
+    const a = webcamAnchor;
+    if (!a || a.dpr !== devicePixelRatio || a.width !== innerWidth || a.height !== innerHeight ||
+        a.outerWidth !== outerWidth || a.outerHeight !== outerHeight || visualViewport?.scale !== 1) return {};
+    const zoom = devicePixelRatio / screenDpr;
+    return {origin_x: a.sx - a.x * zoom + screenX - a.windowX,
+      origin_y: a.sy - a.y * zoom + screenY - a.windowY,
+      dpr: devicePixelRatio, width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY,
+      screen_left: screen.availLeft, screen_top: screen.availTop, screen_width: screen.width, screen_height: screen.height};
+  }
+  function acceptWebcamSample(s) {
+    if (state.mode !== "webcam" || !s || s.source !== "webcam" ||
+        ![s.x_vp, s.y_vp, s.t].every(Number.isFinite) || Math.abs(Date.now() / 1000 - s.t) > 1) return false;
+    lastWebcamAt = performance.now();
+    state.pointerX = s.x_vp; state.pointerY = s.y_vp;
+    if (webcamAskedAt) S.pointer.moved = Math.hypot(s.x_vp - webcamAskedAt.x, s.y_vp - webcamAskedAt.y);
+    state.ringBuffer.push(s);
+    while (state.ringBuffer.length > 100 || state.ringBuffer[0]?.t < s.t - 10) state.ringBuffer.shift();
+    api.pointSoft(s.x_vp, s.y_vp);
+    return true;
+  }
+  function captureNoisyContext(radius = state.candidateRadiusPx || 380) {
+    const usable = state.mode !== "webcam" || freshWebcam();
+    const locked = state.mode !== "webcam" && state.armed && state.lockedX !== null;
+    const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
+    return {page_url: location.origin + location.pathname,
+      pointer: {x_vp: x, y_vp: y, scroll_x: scrollX, scroll_y: scrollY},
+      fixations: usable ? state.ringBuffer.slice(-25) : [],
+      candidates: usable ? extractCandidatesNear(x, y, radius) : []};
+  }
   function onWindowMouseMove(e) {
     if (!e.isTrusted) return;
+    if (state.mode === "webcam") {
+      webcamAnchor = {sx: e.screenX, sy: e.screenY, x: e.clientX, y: e.clientY, windowX: screenX, windowY: screenY,
+        dpr: devicePixelRatio, width: innerWidth, height: innerHeight, outerWidth, outerHeight};
+      return;
+    }
     if (typeof state.pointerX === "number") S.pointer.moved += Math.hypot(e.clientX - state.pointerX, e.clientY - state.pointerY);
     S.hoverCard = false;
     cursorOverHud = false;
@@ -2084,6 +2123,10 @@
   function emitResolve(utterance, words, captured, rec) {
     const text = (utterance || "").trim();
     if (!text) return false;
+    if (state.mode === "webcam" && !freshWebcam()) {
+      coachLine("No fresh gaze. Check /gaze tracker; move the pointer once in this page.", 4000);
+      return false;
+    }
     state.scopePending = false;
     state.scopes = [];
     const locked = state.armed && state.lockedX !== null && state.lockedY !== null;
@@ -2102,8 +2145,7 @@
       page_url: location.origin + location.pathname,
       pointer: { x_vp: px, y_vp: py, scroll_x: window.scrollX, scroll_y: window.scrollY },
       fixations: state.ringBuffer.slice(-25),
-      ...(state.mode === "hover" ? { cursor_context: evidence } :
-        { candidates: extractCandidatesNear(px, py, state.candidateRadiusPx || 380) }),
+      ...(state.mode === "hover" ? { cursor_context: evidence } : captureNoisyContext()),
     };
     if (words) {
       intent.words = words;
@@ -2810,6 +2852,15 @@
         talk: {micReady: S.micReady, spaceHeld, armed: S.keyArmed, listening: isListening, focused: document.hasFocus(), nonce: !!_intentNonce, ready: S.ready}};
     },
     Configure(opts) {
+      if (opts?.mode && opts.mode !== state.mode) {
+        if (S.hold) holdEnd(true, "Recording cancelled: pointing mode changed.");
+        state.ringBuffer = []; lastWebcamAt = 0; S.softPoint = null; webcamAskedAt = null;
+        if (state.mode === "webcam" || opts.mode === "webcam") {
+          state.pointerX = state.pointerY = null; state.armed = false;
+          state.lockedX = state.lockedY = null; lockedNode = null;
+          cursorHistory.length = 0; webcamAnchor = null;
+        }
+      }
       Object.assign(state, opts || {});
       updateLiveInspector(state.pointerX, state.pointerY);
     },
@@ -2829,6 +2880,9 @@
     clearActionConfirmation,
     onSessionEvent,
     recordPoint,
+    webcamViewport,
+    acceptWebcamSample,
+    captureNoisyContext,
     extractTableData,
     renderScopeContext(info) {
       _pendingUtterance = info.utterance || "";

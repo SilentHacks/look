@@ -38,12 +38,14 @@ Inbox research and recalled evidence are read-only. Never refresh the current cu
 
 Without a connected/authorized Hermes session, Chrome can answer read-only one-shot questions, clearly labeled as having no conversation followups or actions. Use `/gaze disconnect` to detach. Gateway sessions require `plugins.entries.hermes-gaze.allow_gateway_injection: true` and in-process plugin isolation.
 
-## Simulated mode
+## Noisy modes
 
-`simulated` keeps Bayesian noisy-gaze resolution for experiments. `gaze_choose(candidate_index=...)` selects an existing Semantic Lens candidate only in that mode; it is not the cursor action or confirmation tool. Read-only results pin immediately. Reversible actions execute only at probability >=0.76 and margin >=0.26; ambiguous targets open the Lens. Destructive actions require confirmation. Camera-based eye tracking is not implemented.
+`simulated` keeps Bayesian noisy-gaze resolution for experiments. `gaze_choose(candidate_index=...)` selects an existing Semantic Lens candidate only in that mode; it is not the cursor action or confirmation tool. Read-only results pin immediately. Reversible actions execute only at probability >=0.76 and margin >=0.26; ambiguous targets open the Lens. Destructive actions require confirmation.
+
+`webcam` shares that fusion path with personally calibrated iris/head estimates, not cursor noise. Only the user can start its separate camera window with `/gaze mode webcam` and complete `/gaze calibrate`. The model's tools cannot open a camera. Move the pointer once in each page, and after zoom/resize, to measure its viewport origin. Gaze supplies a region, not button authority; webcam answers are read-only. `/gaze tracker` reports samples/calibration, `/gaze tracker stop` returns to cursor. Missing/stale/off-display gaze fails honestly. Human gaze accuracy has not been measured.
 
 ## Development
 
 Scope-ladder/up/down/save-trial controls are removed. Local replay recording is off by default; enable the `record_trials` development setting to write evidence, never audio. Treat replay files as sensitive browsing data. The demo action-risk policy is deliberately lexical plus form-submit checks; it is not a general website safety guarantee.
 
-Commands: `/gaze demo`, `/gaze mode hover|simulated`, `/gaze resolve <question>`, `/gaze listen`, `/gaze benchmark`. The shell `hermes gaze` commands control Chrome but do not connect an interactive Hermes conversation.
+Commands: `/gaze demo`, `/gaze mode hover|simulated|webcam`, `/gaze calibrate`, `/gaze tracker [stop]`, `/gaze resolve <question>`, `/gaze listen`, `/gaze benchmark`. The shell `hermes gaze` commands control Chrome but do not connect an interactive Hermes conversation.

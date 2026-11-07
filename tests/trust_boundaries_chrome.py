@@ -221,9 +221,11 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             service.handle_intent(intent, lambda result: (replies.append({'type': intent['type'], **result}), reply(result)))
         session.cdp.set_intent_handler(handle)
         turn_serial = [0]
-        def answered(tab, question, answer, name='PRIVATE_ITEM_LABEL'):
-            aim(tab, '#danger')
-            snapshot = cursor_result(capture(tab), question)
+        def answered(tab, question, answer, name='PRIVATE_ITEM_LABEL', frozen=None):
+            if frozen is None:
+                aim(tab, '#danger')
+                frozen = capture(tab)
+            snapshot = cursor_result(frozen, question)
             snapshot.update(browser_target=tab._target_id, browser_document=tab._context_unique_id,
                             utterance=question, subject={'name': name, 'count': 1})
             assert turns.submit(question, snapshot)['ok']
@@ -273,8 +275,11 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             until(lambda: view(a)['view'] is None)
             key(a, "KeyQ", "q")
             until(lambda: 'PRIVATE_A_PAYROLL_7391' in reply_text(a))
+            # Freeze the question while A is foreground, then finish it on B.
+            # Chrome can wait indefinitely for synthetic mouse input in a background tab.
+            queued_a = capture(a)
             foreground(b, [a])
-            answered(a, 'PRIVATE_QUESTION_TWO', 'PRIVATE_UNREAD_ANSWER', 'PRIVATE_SECOND_LABEL')
+            answered(a, 'PRIVATE_QUESTION_TWO', 'PRIVATE_UNREAD_ANSWER', 'PRIVATE_SECOND_LABEL', frozen=queued_a)
             until(lambda: 'PRIVATE_UNREAD_ANSWER' in reply_text(b) or 'PRIVATE_A_PAYROLL_7391' in reply_text(b))
             assert 'PRIVATE_UNREAD_ANSWER' not in reply_text(a)
             for tab in (a, b):

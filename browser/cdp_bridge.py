@@ -624,6 +624,7 @@ class GazeSession:
         self._answer_turn_seconds = 12.0
         self._candidate_radius_px = 380.0
         self._ingested_keys: set = set()
+        self.webcam = None  # Explicit user command only; registration never opens a camera.
         # Intents must carry this nonce; pushed into the overlay via setIntentNonce so a
         # hostile in-page script cannot forge resolves/transcribes/explains on the binding.
         self._intent_nonce = secrets.token_hex(8)
@@ -692,9 +693,20 @@ class GazeSession:
         """Store overlay config (None keeps stored). Pushes to the overlay ONLY when a
         websocket is already live — never connects or injects, so callers inside plugin
         registration cannot block on CDP I/O. Stored opts are pushed post-inject anyway."""
+        if mode is not None and mode not in ("hover", "simulated", "webcam"):
+            raise ValueError("Unsupported pointing mode")
+        changed = mode is not None and mode != self.tracker.mode
+        if changed:
+            self.clear_hover_snapshot()
+            if mode != "webcam":
+                self.stop_webcam()
         with self._lock:
             if mode is not None:
                 self.tracker.mode = str(mode)
+                if changed:
+                    self.ring_buffer.clear()
+                    self._ingested_keys.clear()
+                    self.scope_selection.clear()
             if sigma_px is not None:
                 self.tracker.sigma_px = float(sigma_px)
             if dwell_ms is not None:
@@ -716,6 +728,38 @@ class GazeSession:
         except Exception as exc:
             logger.debug("overlay Configure failed: %s", exc)
             return False
+
+    def start_webcam(self) -> dict:
+        from ..webcam import WebcamHost
+        with self._lock:
+            if self.webcam is None:
+                self.webcam = WebcamHost(self._accept_webcam_point)
+        return self.webcam.start()
+
+    def stop_webcam(self) -> None:
+        if self.webcam is not None:
+            self.webcam.stop()
+
+    def webcam_status(self) -> dict:
+        return self.webcam.status() if self.webcam is not None else {"state": "stopped", "calibrated": False}
+
+    def _accept_webcam_point(self, point, screen: dict) -> bool:
+        from ..tracker.webcam_gaze import screen_to_viewport
+        if self.tracker.mode != "webcam":
+            return False
+        geometry = self._cdp.capture(
+            f"window.__HERMES_GAZE_OVERLAY__?.webcamViewport({float(screen['dpr'])})")
+        sample = screen_to_viewport(point, geometry, screen, self.tracker.sigma_px)
+        if sample is None or self.tracker.mode != "webcam":
+            return False
+        delivered = self._cdp.eval_js_once(
+            f"window.__HERMES_GAZE_OVERLAY__?.acceptWebcamSample({json.dumps(sample)})",
+            target=geometry.get("browser_target"), document=geometry.get("browser_document"),
+            route=geometry.get("browser_route"))
+        if delivered is True:
+            self.ingest([sample])
+            return True
+        return False
 
     def inject_overlay(self, mode: Optional[str] = None, sigma_px: Optional[float] = None) -> bool:
         """Thin back-compat wrapper: configure() with stored defaults."""
@@ -799,15 +843,7 @@ class GazeSession:
             with self._lock:
                 self.last_candidates = []
             return [], {}
-        js = (
-            "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (!api || !api.state) return null;"
-            " const s = api.state; const locked = s.armed && s.lockedX !== null; return {"
-            " page_url: location.origin + location.pathname,"
-            " pointer: { x_vp: locked ? s.lockedX : s.pointerX, y_vp: locked ? s.lockedY : s.pointerY, scroll_x: window.scrollX, scroll_y: window.scrollY },"
-            " fixations: s.ringBuffer.slice(-25),"
-            f" candidates: api.extractCandidatesNear(locked ? s.lockedX : s.pointerX, locked ? s.lockedY : s.pointerY, {float(radius_px)})"
-            " }; })()"
-        )
+        js = f"window.__HERMES_GAZE_OVERLAY__?.captureNoisyContext({float(radius_px)})"
         data = self._cdp.capture(js)
         cands = [_candidate_from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
         return cands, data
@@ -848,6 +884,8 @@ class GazeSession:
     def choose(self, resolution_id: Optional[int] = None, candidate_index: int = 1,
                modality: str = "semantic_lens", execute: bool = True) -> Dict[str, Any]:
         """Validate the epoch + index, recalibrate from the latest fixation, click, and re-pin."""
+        if self.last_resolution_input.get("mode", self.tracker.mode) != "simulated":
+            return {"ok": False, "error": "Choose is simulated-only; webcam research is read-only"}
         with self.actions._lock:
             with self._lock:
                 res = self.last_resolution
@@ -895,6 +933,7 @@ class GazeSession:
 
     def close(self) -> None:
         self.microphone.cancel()
+        self.stop_webcam()
         self.actions.invalidate()
         self._cdp.close()
 

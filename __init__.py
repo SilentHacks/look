@@ -142,6 +142,7 @@ def register(ctx: Any) -> None:
                     + "\nFresh Hermes sessions still need one normal Hermes message before Chrome turns.")
         if raw_args.strip() == "disconnect":
             session.microphone.cancel()
+            session.stop_webcam()
             return turns.bind("disconnect", **kwargs)
         bound = turns.bind("", **kwargs)
         result = _handle_slash_command(raw_args)
@@ -155,7 +156,7 @@ def register(ctx: Any) -> None:
         "gaze",
         handler=gaze_command,
         description="Connect this Hermes session to Chrome voice, control pointing, or launch the demo.",
-        args_hint="[connect|start|disconnect|status|demo|mode|resolve|listen|benchmark]",
+        args_hint="[connect|start|disconnect|status|demo|mode|calibrate|tracker|resolve|listen|benchmark]",
     )
     ctx.register_cli_command(
         name="gaze",

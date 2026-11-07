@@ -21,6 +21,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
+| `webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
+| `browser/webcam_host.js` | Camera/inference and plain nine-point UI in that separate process's isolated world. No website camera, audio, HTTP sample endpoint or image serialization. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
 | `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer; evidence, actions and non-inbox replies retain captured ownership. Opens validated links and brings a source tab forward. |
 | `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |
@@ -30,7 +32,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `microphone.py` | Single-owner native capture; closes on release, cancellation, definite focus/document loss, device error, disconnect or the native 30-second deadline. Chrome checks cannot block the native deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
-| `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`. Same purity rule. |
+| `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`, `webcam_gaze.py` (swappable estimator, personal ridge calibration and measured screen→viewport mapping). Same purity rule. |
 | `benchmark/` | `benchmark_page.html` (self-contained demo dashboard) + `run_benchmark.py` (accuracy suite). |
 | `tests/` | stdlib `unittest` only. `tests/__init__.py` registers a `hermes_gaze` package *shell* (no `__init__.py` exec) so tests can `from hermes_gaze.service import ...` exactly like Hermes's plugin loader. |
 | `docs/` | PLAN (original design — see its header note), prior art & pitch, demo playbook. |
@@ -303,9 +305,12 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
 - `get_shared_session()`'s `GazeSession` is deliberately machine-scoped: Chrome
   :9222 and the microphone are OS resources shared across Hermes profiles. Do not
   try to make it per-profile.
-- Camera-based (true eye) tracking is intentionally unimplemented in this revision;
-  modes are `hover` and `simulated`. `simulated` exists to exercise the resolver
-  under realistic pointing noise.
+- Webcam mode uses Apache-2.0 MediaPipe iris landmarks and a local personal regressor
+  in a separate owned macOS Chrome process. No real-camera accuracy is established.
+  One calibrated display; each page needs a trusted pointer movement to measure its
+  viewport origin, repeated after zoom/resize/chrome changes. Wrong-display, stale
+  or absent gaze yields no fixation. No cursor fallback or gaze click authority.
+  See `docs/WEBCAM_GAZE.md`; `tests/webcam_chrome.py` uses fake camera/microphone only.
 - Binding replies are callback-style — `handle_intent(intent, reply)` returns
   `None`; assertions about results inspect the `reply` payload, not a return value.
 - `transcribe` intents reject base64 audio over ~16 MB before decoding — keep the

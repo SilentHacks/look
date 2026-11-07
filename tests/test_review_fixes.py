@@ -139,7 +139,7 @@ class TestHonestNoPointer(unittest.TestCase):
             self.assertGreater(fix.y_doc, 1.0)
 
     def test_bad_mode_and_empty_utterance_fail_honestly(self) -> None:
-        res = service.resolve_now(self.session, utterance="x", mode="webcam", pushed=_pushed(time.time()))
+        res = service.resolve_now(self.session, utterance="x", mode="unknown", pushed=_pushed(time.time()))
         self.assertIs(res.get("ok"), False)
         res = service.resolve_now(self.session, utterance="   ", pushed=_pushed(time.time()))
         self.assertIs(res.get("ok"), False)

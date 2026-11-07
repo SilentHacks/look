@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from urllib.parse import urlparse
 
@@ -75,10 +76,25 @@ def _handle_slash_command(raw_args: str) -> str:
 
     if sub == "mode" and len(argv) >= 2:
         mode = argv[1].lower()
-        if mode not in ("hover", "simulated"):
-            return "Usage: /gaze mode {hover|simulated}"
+        if mode not in ("hover", "simulated", "webcam"):
+            return "Usage: /gaze mode {hover|simulated|webcam}"
         session.configure(mode=mode)
+        if mode == "webcam":
+            status = session.start_webcam()
+            return json.dumps(status) + "\nUse /gaze calibrate in the owned webcam window before asking."
         return f"Hermes Gaze mode set to '{mode}' (sigma={session.tracker.sigma_px}px)."
+
+    if sub == "calibrate":
+        session.configure(mode="webcam")
+        status = session.start_webcam()
+        if status["state"] == "running":
+            session.webcam.calibrate()
+        return json.dumps(status) + "\nIn the webcam window, click Calibrate nine points. Look at each dot, then press Space."
+
+    if sub == "tracker":
+        if len(argv) > 1 and argv[1] == "stop":
+            session.configure(mode="hover")
+        return json.dumps(session.webcam_status())
 
     if sub == "benchmark":
         return format_benchmark_markdown(run_benchmark_suite(trials_per_sigma=60))
@@ -95,10 +111,13 @@ def _handle_slash_command(raw_args: str) -> str:
         f"  Chrome CDP (:9222) Connected : {session.is_chrome_reachable()}\n"
         f"  Active Pointing Mode         : {session.tracker.mode} (sigma={session.tracker.sigma_px}px)\n"
         f"  Online Drift Bias Offset     : {session.recalibrator.offset}\n\n"
+        f"  Webcam Tracker               : {json.dumps(session.webcam_status())}\n"
         "Subcommands:\n"
         "  /gaze demo                   Launch Chrome on the interactive Analytics Dashboard demo page\n"
         "  /gaze listen                 Listen from microphone, transcribe speech, and resolve in Chrome\n"
-        "  /gaze mode <hover|simulated> Switch between Magic Pointer hover and noisy gaze simulation\n"
+        "  /gaze mode <hover|simulated|webcam> Choose cursor, simulated noise or real webcam\n"
+        "  /gaze calibrate              Open the owned nine-point webcam calibration window\n"
+        "  /gaze tracker [stop]         Show tracker status, or stop camera and return to cursor\n"
         "  /gaze resolve <utterance>    Resolve a deictic phrase against the live Chrome tab\n"
         "  /gaze benchmark              Run quantitative accuracy benchmark across noise levels"
     )

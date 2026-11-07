@@ -18,10 +18,10 @@ Raw gaze/pointer tracking suffers from ~80â€“180 px of spatial jitter and driftâ
 
 ## Architecture
 
-- **Python owns policy.** Noisy simulated gaze uses Bayesian resolution. Hover sends exact cursor evidence to the model, which chooses scope; Python enforces snapshot ownership and action confirmation. The overlay only collects DOM facts and renders results.
+- **Python owns policy.** Simulated and webcam gaze share Bayesian resolution. Hover sends exact cursor evidence to the model, which chooses scope; Python enforces snapshot ownership and action confirmation. The overlay only collects DOM facts and renders results.
 - **Persistent CDP sessions.** One isolated-world websocket per supported tab; reads follow focus, while actions retain their captured tab/document. Ordered nonce-bearing binding intents carry questions and native talk controls. No HTTP resolution/action endpoints.
 - **Honest failures.** Missing/detached/expired evidence and uncertain click outcomes are reported, never replaced with synthetic targets or silently retried mutations.
-- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. Camera tracking is not implemented.
+- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. `webcam` uses local, personally calibrated iris/head landmarks from a separate owned camera window; it is read-only.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
 
 ### Cursor context and actions
@@ -262,9 +262,15 @@ The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
 # inside Hermes (slash command)
 /gaze demo                 # launch Chrome (:9222) on the benchmark dashboard + inject the HUD
 /gaze mode simulated       # noisy-gaze mode ('/gaze mode hover' for the exact Magic Pointer)
+/gaze mode webcam          # start the separate camera window (explicit user command only)
+/gaze calibrate            # local nine-point calibration; then move the pointer once per page
+/gaze tracker              # camera/sample/calibration status; '/gaze tracker stop' returns to cursor
 /gaze resolve what does this do
 /gaze benchmark            # reproducible accuracy table across noise levels
 ```
+
+Webcam setup, privacy, coordinate-mapping limits and the real-camera checklist:
+[Webcam gaze](docs/WEBCAM_GAZE.md). Fake-camera plumbing is verified; human accuracy is not measured.
 
 ```bash
 # from the shell

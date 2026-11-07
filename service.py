@@ -72,7 +72,7 @@ def _append_record(session: GazeSession, event: Dict[str, Any]) -> str | None:
 
 
 def _compact_context(selected: Dict[str, Any], scopes: Sequence[Dict[str, Any]], *,
-                     utterance: str, resolution_id: int, intent=None, decision=None) -> str:
+                     utterance: str, resolution_id: int, intent=None, decision=None, mode="simulated") -> str:
     def description(scope: Dict[str, Any]) -> str:
         return f"{scope.get('scope') or scope.get('role') or 'element'} {str(scope.get('label') or scope.get('id'))[:65]}"
 
@@ -90,7 +90,7 @@ def _compact_context(selected: Dict[str, Any], scopes: Sequence[Dict[str, Any]],
             f"{str(a.get('label', 'action'))[:35]} {str(a.get('selector') or '')[:65]}: {str(a.get('consequence') or '')[:75]}"
             for a in list(actions.values())[:3]
         ))
-    return build_context(lines, utterance, "Simulated gaze estimate: " + description(selected)
+    return build_context(lines, utterance, ("Webcam" if mode == "webcam" else "Simulated") + " gaze estimate: " + description(selected)
                          + ". No hover identity or automatic highlight is claimed.",
                          resolution_id=resolution_id, intent=intent, decision=decision)
 
@@ -117,7 +117,7 @@ def _scope_payload(session: GazeSession, ranked: Sequence[Dict[str, Any]]) -> Di
             "context": _compact_context(selected, scopes,
                 utterance=str(session.last_resolution_input.get("utterance") or ""),
                 resolution_id=session.resolution_id, intent=resolution.get("intent_class"),
-                decision=resolution.get("decision")),
+                decision=resolution.get("decision"), mode=session.last_resolution_input.get("mode")),
             "top": selected, "scope_anchor_id": anchor_id}
 
 
@@ -142,15 +142,16 @@ def resolve_now(
     duration_s: float = 2.8,
     activate: bool = True,
 ) -> Dict[str, Any]:
-    """Collect and render exact cursor evidence, or resolve simulated noisy gaze.
+    """Collect exact cursor evidence or resolve noisy simulated/webcam gaze.
 
-    ``pushed`` supplies cursor context in hover, fixation/candidate state in
-    simulated mode. Otherwise pull from the pinned tab. Hover never scores scope.
+    ``pushed`` freezes document-owned fixation/candidate evidence before ASR.
+    Hover never scores scope; both noisy sources share the Bayesian resolver.
     """
-    if mode is not None and str(mode) not in ("hover", "simulated"):
-        return {"ok": False, "error": f"unsupported tracking mode: {mode!r} (supported: hover, simulated)"}
     mode = str(mode or session.tracker.mode or "hover")
-    session.configure(mode=mode)  # stores; pushes to the overlay only when a ws is live
+    if mode not in ("hover", "simulated", "webcam"):
+        return {"ok": False, "error": f"unsupported tracking mode: {mode!r}"}
+    if pushed is None:
+        session.configure(mode=mode)
 
     raw_utterance = str(utterance or "").strip()
     word_timestamps = words
@@ -221,10 +222,13 @@ def resolve_now(
         resolution_input = dict(pushed)
         candidates = [CandidateElement.from_wire(raw) for raw in pushed.get("candidates") or []
                       if isinstance(raw, dict)]
-    resolution_input.update(words=word_timestamps or [], utterance=utterance)
+    resolution_input.update(words=word_timestamps or [], utterance=utterance, mode=mode)
+    if mode == "webcam":
+        resolution_input["fixations"] = [s for s in resolution_input.get("fixations") or []
+                                         if isinstance(s, dict) and s.get("source") == "webcam"]
     fixations = session.ingest(resolution_input.get("fixations") or [])
     pointer = resolution_input.get("pointer")
-    if isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
+    if mode != "webcam" and isinstance(pointer, dict) and pointer.get("x_vp") is not None and pointer.get("y_vp") is not None:
         fixations.append(session.tracker.record_point(
             float(pointer["x_vp"]), float(pointer["y_vp"]),
             scroll_x=float(pointer.get("scroll_x", 0.0)), scroll_y=float(pointer.get("scroll_y", 0.0)),
@@ -244,6 +248,11 @@ def resolve_now(
     owner = {key: resolution_input.get(key)
              for key in ("browser_target", "browser_document", "browser_route")}
     payload.update(owner)
+    if mode == "webcam" and not activate:
+        payload.update(mode=mode, page_url=page_url, actions_allowed=False, resolution_id=0,
+                       context=_compact_context(payload.get("top") or {}, payload["ranked"], utterance=utterance,
+                                                resolution_id=0, intent=res.intent_class, decision=res.decision, mode=mode))
+        return payload
 
     if res.top and (res.top.candidate.is_container or res.top.candidate.role == "table"):
         table_payload = None
