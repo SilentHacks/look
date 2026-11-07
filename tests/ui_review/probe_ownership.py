@@ -37,7 +37,22 @@ try:
  if out['real_news']['headlines']:
   r.aim('.titleline a');c=r.session.cdp.capture();p=service.cursor_result(c,'Explain the link')
   out['real_news'].update(capture_ok=p['ok'],packet_chars=len(p['context']),owner_matches=c['browser_document']==a._context_unique_id)
+ # Reads during navigation must not tear down a healthy socket and race the load rearm.
+ out['rapid_navigation']=[]
+ r.front(a)
+ for n in range(40):
+  socket=a._ws;start=time.monotonic()
+  r.goto('about:blank?navigation='+str(n),a,settle=.01)
+  out['rapid_navigation'].append({'seconds':round(time.monotonic()-start,3),
+      'same_socket':a._ws is socket,'ready':r.dbg()['talk']['ready']})
 except Exception:out['error']=traceback.format_exc();print(out['error'])
 finally:
  (OUT/'ownership-results.json').write_text(json.dumps(out,indent=2));r.close()
 print(json.dumps(out,indent=2))
+assert 'error' not in out, out.get('error')
+assert out['recording_after_route'] and out['navigation_cancel']['discarded']
+assert out['saved_snapshot_owner_unchanged']==out['source_owner']
+assert not out['other_tab_recall']['page_leak'] and not out['sensitive_wire']['value_or_label_leak']
+assert len(out['rapid_navigation'])==40
+assert all(x['same_socket'] and x['ready'] and x['seconds']<10 for x in out['rapid_navigation'])
+print('PASS ownership and 40 document rearms without socket replacement')

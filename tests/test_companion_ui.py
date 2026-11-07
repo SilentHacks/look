@@ -182,7 +182,10 @@ class LitEvidence(unittest.TestCase):
                    "targets": [target("@1", "First"), target("@2", "Second")], "blocks": [], "controls": [],
                    "handles": {"@1": {}, "@2": {}}, "lit": ["@1", "@2", "@999"]}
         result = cursor_result(capture, "Compare these", None, 10.)
-        self.assertEqual([p["id"] for p in result["pointed"]], ["@2", "@1"])
+        self.assertEqual([p["id"] for p in result["pointed"] if p["available"]], ["@2", "@1"])
+        self.assertEqual(result["pointed"][-1]["id"], "@999")
+        self.assertFalse(result["pointed"][-1]["available"])
+        self.assertIn("lit target evidence unavailable", result["context"])
         self.assertIn("First", result["context"])
         self.assertIn("Second", result["context"])
 

@@ -99,7 +99,7 @@ const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1,
     dispatchEvent(event) { for (const handler of this.listeners[event.type] || []) handler(event); } },
   getComputedStyle: node => ({ display: node.style.display || 'block', position: node.style.position || 'static' }),
   location: { href: 'https://demo.invalid/' },
-  scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, console,
+  scrollX: 0, scrollY: 0, buildSelector: el => el.tagName.toLowerCase(), state: { armed: false }, S: {hold: null}, console,
   renderPins: candidates => rendered.push(candidates), stopTrackingPins() {},
   trustedUi: event => event.isTrusted,
   _emit: intent => intents.push(intent), cancelListening() {} });

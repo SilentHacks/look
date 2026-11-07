@@ -578,6 +578,10 @@ class CdpSession:
 
         last_exc: Optional[Exception] = None
         for _attempt in range(2):
+            # A live socket with no document is normal navigation, not transport failure.
+            # Reconnecting here races the load-event rearm and can strand its context.
+            if self._ws is not None and self._context_unique_id is None:
+                raise ConnectionError("Chrome document is navigating")
             try:
                 if self._ws is None and not await self._connect_async():
                     raise ConnectionError(f"No debuggable Chrome page found at {self.http_url}")

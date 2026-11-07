@@ -240,6 +240,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   No answer content or unread text enters the page DOM or background renderers.
   During a navigation frames can be missing: `_on_new_context` is serialized and retried,
   because a half-armed page would swallow keys with nowhere to send them.
+  A missing document on a live CDP socket is normal navigation, not a reconnect trigger;
+  reconnecting there races the load-event rearm. The ownership probe covers 40 rapid rearms.
   Non-inbox replies still wait for their captured source document to be foreground.
   Inbox events (`type: inbox`, `version: 1`) replace UI state by increasing `revision`:
   connection/capture state/paused/selected item plus items with capture order, target/source,
