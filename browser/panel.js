@@ -376,6 +376,7 @@
       body = h('div', 'body');
       body.addEventListener('scroll', () => {
         stick = body.scrollHeight - body.scrollTop - body.clientHeight < 12;
+        if (!stick) send({t: 'engaged'});
         clip();
       });
       body.id = 'hg-reply';
@@ -649,6 +650,17 @@
       send({t: 'key', type, code: c, key: e.key, repeat: e.repeat, shift: e.shiftKey, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey});
     }
   }, true);
+  // Report only interaction, never selection text or scroll position.
+  document.addEventListener('wheel', e => {
+    if (e.isTrusted && view === 'answer') send({t: 'engaged'});
+  }, {passive: true});
+  document.addEventListener('selectionchange', () => {
+    if (view === 'answer' && !getSelection().isCollapsed) send({t: 'engaged'});
+  });
+  document.addEventListener('keydown', e => {
+    if (e.isTrusted && view === 'answer' && ['PageUp', 'PageDown', 'Home', 'End'].includes(e.code))
+      send({t: 'engaged'});
+  });
   // Hover changes the footer, and only we can see that happen.
   document.documentElement.addEventListener('mouseenter', e => { if (e.isTrusted) { send({t: 'hover', on: true}); report(); } });
   document.documentElement.addEventListener('mouseleave', e => { if (e.isTrusted) { send({t: 'hover', on: false}); report(); } });

@@ -142,7 +142,7 @@ class VoiceTurns:
                         for r in self.runs if r["item_id"] == item["item_id"]]
             items.append({k: item[k] for k in
                           ("item_id", "capture_order", "target_label", "source_url", "unread",
-                           "presented", "archived", "target_count", "notice")}
+                           "presented", "archived", "target_count", "notice", "follows_question")}
                          | {"conversation": messages, "action_state": "expired: point again to act",
                             "subject": item.get("model_subject") or item["subject"]})
         event = {"type": "inbox", "version": 1, "revision": self.revision,
@@ -250,11 +250,18 @@ class VoiceTurns:
                 top = frozen.get("top") or {}
                 label = str(top.get("label") or top.get("text") or "Captured target")[:200]
                 name, count = subject_hint(frozen.get("subject"))
+                # Only a settled, already-presented answer may yield its reading turn.
+                follows_question = bool(self.selected) and all(
+                    entry["presented"] or entry["archived"] for entry in self.items
+                ) and not any(
+                    r["item_id"] == self.selected and
+                    r["status"] in ("transcribing", "queued", "thinking", "streaming")
+                    for r in self.runs)
                 item = dict(item_id=item_id, capture_order=len(self.items) + 1, target_label=label,
                             source_url=str(frozen.get("page_url") or ""), unread=False, snapshot=frozen,
                             evidence_ready=not transcribing, subject=name or clean_subject(label) or FALLBACK_SUBJECT,
                             model_subject="", target_count=count, presented=False, archived=False,
-                            notice=_notice(frozen))
+                            notice=_notice(frozen), follows_question=follows_question)
                 self.items.append(item)
             self.session.actions.invalidate()
             run = self._new_run(str(snapshot.get("utterance") or ""), frozen, item_id)

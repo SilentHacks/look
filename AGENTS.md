@@ -92,9 +92,17 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   at most 32 columns and 128 rows per block; extra columns are omitted and extra rows become text.
 - **Stack state is Python's.** `presented`, `archived`, names, hints and read-aloud state
   come in the inbox, so they follow navigation and tabs; springs and placement are local.
-  The first answer that has started and not been shown comes forward by itself. Each gets
-  its turn of `answer_turn_seconds` (12s default, longer by reading speed; hover holds),
-  then the next unseen one, then the stack retreats. Esc answers for everything settled.
+  Asking a new question elsewhere moves on from a settled card: keep its words while
+  thinking, then slide the new answer forward at its first words. Python freezes that
+  eligibility as `follows_question` at capture; a still-writing old answer or an earlier
+  unseen question keeps the normal reading turns, in capture order. Follow-ups stay put.
+  Hover holds the card; stack arrows, scrolling and text selection defer the move for
+  2.5 seconds after the last interaction. Answers never displace Stop or confirmation.
+  Each normal turn is `answer_turn_seconds` (12s default, longer by reading speed;
+  hover/read-aloud holds). Keep the old card if the next answer is still thinking.
+  Old cards remain above in the stack; skipped unseen answers stay unread.
+  Then the stack retreats. Esc answers for everything settled. All timers live in
+  the main isolated world, never the private frames.
 - **What Space asks.** On the card, or moved under 90px since asking, is a follow-up;
   pointed elsewhere is a new question. Re-hit-test the saved pointer anchor: scrolling or
   layout that puts another identity there starts a new question, without making ordinary

@@ -57,6 +57,7 @@
     pointer: {moved: 0},
     keyDown: false, keyArmed: false, armShift: false, armTimer: 0, hold: null,
     items: [], cur: "", view: null, pos: null, capSpot: null, hoverCard: false, retreatTimer: 0, retreatAt: 0,
+    advanceTimer: 0, engagedUntil: 0,
     ids: 0, sizes: {prevH: 0, cardH: 0, nextH: 0, contentH: 0, bodyH: 0}, maxBody: 420, dark: false, dir: null,
     coach: {greeted: false, heard: 0, answered: 0, retreated: false}, pillMode: "none", pillW: 96, pillLast: "",
     micReady: false, micWarning: "", micSlow: false, localPending: [], compose: null, note: null, frameY: 0, frameH: 0,
@@ -1386,13 +1387,15 @@
     const local = anchors.get(raw.item_id);
     return {id: raw.item_id, subject: raw.subject || raw.target_label || "This part of the page", turns,
       targets: local?.targets || [], pointerAnchor: local?.pointerAnchor, local: !!local, archived: !!raw.archived,
-      presented: !!raw.presented || S.shown.has(raw.item_id), unread: !!raw.unread, count: raw.target_count || 1,
+      presented: !!raw.presented || S.shown.has(raw.item_id), followsQuestion: !!raw.follows_question,
+      unread: !!raw.unread, count: raw.target_count || 1,
       notice: raw.notice || "", host: hostOf(raw.source_url), url: raw.source_url || ""};
   }
   const visible = () => S.items.filter(i => !i.archived && i.turns.length);
   const current = () => S.items.find(i => i.id === S.cur) || null;
   const isBusyItem = i => i.turns.some(t => WAITING.includes(t.status) || t.status === "streaming");
-  const started = i => i.turns.length && !WAITING.includes(i.turns[0].status);
+  const started = i => i.turns.length && !WAITING.includes(i.turns[0].status) &&
+    (i.turns[0].status !== "streaming" || !!i.turns[0].a.trim());
   const inProgress = () => S.items.filter(i => i.turns.some(t => WAITING.includes(t.status)) && !(S.view === "answer" && S.cur === i.id));
   function stateWord(i) {
     if (i.turns.some(t => t.error)) return "Didn’t finish";
@@ -1468,6 +1471,7 @@
     S.viewTargets = null;
     if (S.laterNote) { const words = S.laterNote; S.laterNote = ""; S.note = {id: ++S.ids, text: words}; openView("note", null); return; }
     if (item && visible().includes(item)) { S.view = null; openStack(item); }
+    if (S.view === "answer") refresh();
     else closeStack("cancel");
   }
   // Open any non-stack card on the same plate.
@@ -1651,6 +1655,29 @@
     }, Math.max(state.answerTurnMs, words / READING_WPS * 1000));
   }
   // Each unseen answer gets its own turn; long answers get reading time. Hover holds it.
+  // Reading/stack input gets a quiet 2.5 seconds. Timing stays outside the private frames.
+  function engageStack() {
+    S.engagedUntil = performance.now() + 2500;
+    followQuestion();
+  }
+  const nextUnseen = () => {
+    const list = visible();
+    return list.slice(list.indexOf(current()) + 1).find(i => !i.presented);
+  };
+  function followQuestion() {
+    clearTimeout(S.advanceTimer);
+    const next = nextUnseen(), item = current();
+    if (S.view !== "answer" || S.hold || confirmation || actionTask || !item ||
+        isBusyItem(item) || !next?.followsQuestion || !started(next)) return false;
+    if (S.hoverCard || inbox?.speaking_item_id === item.id) return false;
+    const wait = S.engagedUntil - performance.now();
+    if (wait > 0 || document.hidden) {
+      S.advanceTimer = setTimeout(refresh, Math.max(100, wait));
+      return false;
+    }
+    go(next, "next");
+    return true;
+  }
   function armRetreat() {
     clearTimeout(S.retreatTimer);
     S.retreatAt = 0;
@@ -1664,10 +1691,15 @@
   }
   function retreatStep() {
     if (document.hidden) { S.retreatTimer = setTimeout(retreatStep, 2000); return; }
-    // Anything you haven't seen comes forward first, one stage at a time, so nothing gets buried.
-    const list = visible(), i = list.indexOf(current());
-    const nextUnseen = list.slice(i + 1).find(x => !x.presented && started(x));
-    if (nextUnseen) { go(nextUnseen, "next"); return; }
+    if (S.view !== "answer" || S.hold || S.hoverCard || confirmation || actionTask) return;
+    const wait = S.engagedUntil - performance.now();
+    const next = nextUnseen();
+    // Keep the old words on screen while the next question is still thinking.
+    if (wait > 0 || next && !started(next)) {
+      S.retreatTimer = setTimeout(retreatStep, Math.max(100, wait));
+      return;
+    }
+    if (next) { go(next, "next"); return; }
     closeStack("retreat");
   }
   function go(item, dir) {
@@ -1675,6 +1707,7 @@
     if (dir && !reduced()) lift.kick(dir === "next" ? -420 : 420);
   }
   function step(delta) {
+    engageStack();
     const list = visible(), i = list.indexOf(current());
     const target = list[i + delta];
     if (!target) { lift.kick(delta * 260); return; } // gentle end-of-stack bump
@@ -2064,7 +2097,7 @@
     setTargetLocked(false);
     S.pointer.moved = 0;
     S.capSpot = null;
-    closeStack("cancel");
+    restoreAfterOverlay();
     if (compose.targets.length && !reduced()) {
       for (const t of compose.targets) dropRing(t.key);
     }
@@ -2123,10 +2156,12 @@
       if (frame !== "card") return;
       S.hoverCard = !!m.on;
       cursorOverHud = S.hoverCard;
-      if (m.on) { clearTimeout(S.retreatTimer); S.retreatAt = 0; } else if (S.view === "answer") armRetreat();
+      if (m.on) { clearTimeout(S.retreatTimer); S.retreatAt = 0; }
+      else if (S.view === "answer") { armRetreat(); refresh(); }
       return;
     }
     if (!surfaceIntact()) return;
+    if (m.t === "engaged" && frame === "card") { engageStack(); return; }
     if (m.t === "key") {
       onWindowKey({type: m.type, code: String(m.code), key: String(m.key), repeat: !!m.repeat, shiftKey: !!m.shift, metaKey: !!m.meta,
         ctrlKey: !!m.ctrl, altKey: !!m.alt, fromFrame: true, isTrusted: true, preventDefault() {}, stopImmediatePropagation() {}, stopPropagation() {}, composedPath: () => []});
@@ -2170,6 +2205,11 @@
       S.coach.greeted = S.coach.greeted || !!event.coach.greeted;
     }
     S.items = event.items.map(itemView);
+    if ((!previous || previous.selected_item_id !== event.selected_item_id) &&
+        (!S.view || S.view === "answer") && S.cur !== event.selected_item_id) {
+      const selected = S.items.find(i => i.id === event.selected_item_id && !i.archived && started(i));
+      if (selected) openStack(selected);
+    }
     if (event.session_connected === false && previous?.session_connected !== false) {
       if (S.hold) holdEnd(true, "Recording cancelled: disconnected from Hermes.");
       else {
@@ -2207,6 +2247,7 @@
       S.wasBusy = busy;
       S.wasReading = inbox?.speaking_item_id === item.id;
       if (S.wasReading) { clearTimeout(S.retreatTimer); S.retreatAt = 0; }
+      if (followQuestion()) { updateCapsule(); return; }
       pushCard();
       layout();
     }
@@ -2351,9 +2392,11 @@
       return;
     }
     if (typeof state.pointerX === "number") S.pointer.moved += Math.hypot(e.clientX - state.pointerX, e.clientY - state.pointerY);
+    const leftCard = S.hoverCard;
     S.hoverCard = false;
     cursorOverHud = false;
     recordPoint(e.clientX, e.clientY);
+    if (leftCard && S.view === "answer") { armRetreat(); refresh(); }
     if (S.hold) wake();
   }
   window.addEventListener("mousemove", onWindowMouseMove, {passive: true, capture: true});
@@ -3067,6 +3110,7 @@
     document.removeEventListener("fullscreenchange", onTopLayer, true);
     clearInterval(transportTimer);
     clearTimeout(S.retreatTimer); clearTimeout(S.coachTimer); clearTimeout(S.armTimer); clearTimeout(S.micTimer);
+    clearTimeout(S.advanceTimer);
     if (raf) cancelAnimationFrame(raf);
     window.removeEventListener("resize", onViewportResize);
     window.visualViewport?.removeEventListener("resize", onVisualViewport);
