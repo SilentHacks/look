@@ -10,7 +10,7 @@
 
 Hold Space, speak, and release: Hermes answers or uses guarded browser actions.
 Cursor (`hover`) mode remains a permanent option and uses exact captured DOM identities; webcam mode
-uses personally calibrated local iris/head landmarks in a separate owned window.
+uses personally calibrated local left-eye appearance and iris features in a separate owned window.
 Both freeze evidence at release and align spoken referents with the pointing history.
 The model chooses semantic scope from the question, not from cursor proximity alone.
 
@@ -23,7 +23,7 @@ No real-camera accuracy number is established.
 - **Python owns policy.** Simulated and webcam gaze share Bayesian resolution. Hover sends exact cursor evidence to the model, which chooses scope; Python enforces snapshot ownership and action confirmation. The overlay only collects DOM facts and renders results.
 - **Persistent CDP sessions.** One isolated-world websocket per supported tab; reads follow focus, while actions retain their captured tab/document. Ordered nonce-bearing binding intents carry questions and native talk controls. No HTTP resolution/action endpoints.
 - **Honest failures.** Missing/detached/expired evidence and uncertain click outcomes are reported, never replaced with synthetic targets or silently retried mutations.
-- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. `webcam` uses local, personally calibrated iris/head landmarks from a separate owned camera window; gaze is read-only evidence, while explicit user action tasks use the guarded DOM tools.
+- **Pointing modes:** `hover` supplies exact cursor identity and surrounding structure, with explicit snapshot tools for highlighting/actions. `simulated` retains Bayesian noisy-gaze resolution. `webcam` uses local, personally calibrated left-eye appearance and iris features from a separate owned camera window; gaze is read-only evidence, while explicit user action tasks use the guarded DOM tools.
 - **Demo page:** a GET-only static server on `127.0.0.1:9111` serves `benchmark/benchmark_page.html` plus `/api/status` (no POST, no CORS). The overlay itself is always injected over CDP, never fetched from a server.
 
 ### Cursor context and actions
@@ -346,7 +346,7 @@ regressions live in `tests/` and `tests/ui_review/`.
 ```
 
 Webcam setup, privacy, coordinate-mapping limits and the real-camera checklist:
-[Webcam gaze](docs/WEBCAM_GAZE.md). Fake-camera plumbing is verified; human accuracy is not measured.
+[Webcam gaze](docs/WEBCAM_GAZE.md). The nine-point appearance model requires recalibration after moving or changing glasses. Its Chrome/fake-camera proof is deferred; reserved offline research is not live accuracy.
 
 ```bash
 # from the shell

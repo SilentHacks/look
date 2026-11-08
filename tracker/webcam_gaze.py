@@ -33,6 +33,7 @@ class LandmarkEstimator:
     """
     model_id = "mediapipe-face-v2-iris-ridge-1"
     feature_count = 8
+    ridge = 1.
 
     def __init__(self) -> None:
         self.profile: dict | None = None
@@ -40,7 +41,8 @@ class LandmarkEstimator:
     def load(self, profile: dict) -> None:
         if profile.get("model_id") != self.model_id:
             raise ValueError("Calibration belongs to a different estimator")
-        for key, shape in (("mean", (8,)), ("scale", (8,)), ("weights", (9, 2))):
+        n = self.feature_count
+        for key, shape in (("mean", (n,)), ("scale", (n,)), ("weights", (n + 1, 2))):
             a = np.asarray(profile.get(key), dtype=float)
             if a.shape != shape or not np.isfinite(a).all():
                 raise ValueError("Invalid calibration profile")
@@ -61,7 +63,7 @@ class LandmarkEstimator:
     def calibrate(self, observations: list[tuple[list[float], float, float]], screen: dict) -> dict:
         x = np.asarray([r[0] for r in observations], dtype=float)
         y = np.asarray([[r[1], r[2]] for r in observations], dtype=float)
-        if x.shape != (len(observations), 8) or len(x) < 45 or not np.isfinite(x).all() or not np.isfinite(y).all():
+        if x.shape != (len(observations), self.feature_count) or len(x) < 45 or not np.isfinite(x).all() or not np.isfinite(y).all():
             raise ValueError("Not enough valid calibration samples; try again")
         if len(np.unique(y, axis=0)) != 9:
             raise ValueError("Calibration requires all nine targets")
@@ -70,7 +72,7 @@ class LandmarkEstimator:
             raise ValueError("Eyes did not move enough during calibration; try again")
         scale = np.maximum(scale, .001)
         a = np.column_stack((np.ones(len(x)), (x - mean) / scale))
-        penalty = np.eye(9); penalty[0, 0] = 0
+        penalty = np.eye(self.feature_count + 1) * self.ridge; penalty[0, 0] = 0
         weights = np.linalg.solve(a.T @ a + penalty, a.T @ y)
         error = float(np.sqrt(np.mean((a @ weights - y) ** 2)))
         if error > .20:
@@ -84,7 +86,7 @@ class LandmarkEstimator:
         if self.profile is None:
             return None
         x = np.asarray(features, dtype=float)
-        if x.shape != (8,) or not np.isfinite(x).all() or not math.isfinite(t):
+        if x.shape != (self.feature_count,) or not np.isfinite(x).all() or not math.isfinite(t):
             return None
         p = self.profile
         xy = self._weights[0] + ((x - self._mean) / self._scale) @ self._weights[1:]
@@ -93,6 +95,19 @@ class LandmarkEstimator:
             return None
         s = p["screen"]
         return ScreenPoint(s["left"] + xy[0] * s["width"], s["top"] + xy[1] * s["height"], t)
+
+
+class AppearanceEstimator(LandmarkEstimator):
+    """Left 16×8 normalized grayscale eye patch, then that eye's two iris coordinates.
+
+    Matches research appearance-left / linear / λ10; no smoothing or edge tolerance.
+    The original eight-value estimator remains the offline comparison baseline.
+    """
+    model_id = "mediapipe-face-v2-left-appearance-iris-ridge10-1"
+    feature_count = 130
+    ridge = 10.
+    # A standardized 128-pixel patch has |value| ≤ sqrt(127); iris keeps its old bound.
+    feature_limits = (math.sqrt(128),) * 128 + (4., 4.)
 
 
 def screen_to_viewport(point: ScreenPoint, geometry: dict, screen: dict, sigma_px: float = 120.) -> dict | str:

@@ -20,7 +20,7 @@ import threading
 import time
 import urllib.request
 
-from .tracker.webcam_gaze import GazeEstimator, LandmarkEstimator
+from .tracker.webcam_gaze import AppearanceEstimator, GazeEstimator, LandmarkEstimator
 
 _ASSETS = {
     "tasks.tgz": ("https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.32.tgz",
@@ -67,7 +67,8 @@ class WebcamHost:
                  profile_path: Path | None = None, assets: Path | None = None,
                  fake_video: Path | None = None, runtime_source: Path | None = None,
                  runtime_options: dict | None = None) -> None:
-        self.estimator = estimator or LandmarkEstimator()
+        self.estimator = estimator or AppearanceEstimator()
+        self._feature_limits = getattr(self.estimator, "feature_limits", (4.,) * self.estimator.feature_count)
         self.on_point = on_point
         self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hermes-gaze" / "webcam-calibration.json"
         self.assets = assets
@@ -75,6 +76,7 @@ class WebcamHost:
         self.runtime_source = runtime_source or Path(__file__).parent / "browser" / "webcam_host.js"
         self.runtime_options = runtime_options or {}
         self.profile = None
+        self._calibration_notice = ""
         self.error = ""
         self.state = "stopped"
         self.samples = self.predictions = self.delivered = self.hidden_samples = 0
@@ -103,7 +105,8 @@ class WebcamHost:
                 "predictions": self.predictions, "delivered": self.delivered, "hidden_samples": self.hidden_samples,
                 "drops": dict(self.drops),
                 "sample_age_seconds": round(time.time() - self.last_sample, 2) if self.last_sample else None,
-                "error": self.error, "model": self.estimator.model_id}
+                "error": self.error, "model": self.estimator.model_id,
+                "calibration_message": self._calibration_notice}
 
     def start(self) -> dict:
         with self._start_lock:
@@ -122,12 +125,19 @@ class WebcamHost:
             self.state = "failed"; self.error = str(exc)
             return self.status()
         self.profile = None
+        self._calibration_notice = ""
         try:
             if self.profile_path.exists():
                 if self.profile_path.stat().st_size > 65536:
                     raise ValueError("Calibration file too large")
                 profile = json.loads(self.profile_path.read_text())
-                self.estimator.load(profile); self.profile = profile
+                if not isinstance(profile, dict):
+                    raise ValueError("Invalid calibration profile")
+                if profile.get("model_id") != self.estimator.model_id:
+                    self._calibration_notice = "The gaze model changed. Please recalibrate with /gaze calibrate."
+                    profile = None
+                if profile is not None:
+                    self.estimator.load(profile); self.profile = profile
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.error = "Calibration could not be loaded; run /gaze calibrate"
         if self._stop.is_set():
@@ -244,8 +254,8 @@ class WebcamHost:
             if self._point_index == 9:
                 try:
                     profile = self.estimator.calibrate(self._observations, self._calibration)
-                    self._save(profile); self.profile = profile; self.error = ""
-                    self._ui("calibrationResult", "Calibration saved locally. Return to Chrome; move the pointer once in the page, then hold Space.")
+                    self._save(profile); self.profile = profile; self.error = ""; self._calibration_notice = ""
+                    self._ui("calibrationResult", "Calibration saved locally. Recalibrate after moving or changing glasses. Return to Chrome; move the pointer once in the page, then hold Space.")
                 except (OSError, ValueError) as exc:
                     if self.profile is not None:
                         self.estimator.load(self.profile)
@@ -258,7 +268,10 @@ class WebcamHost:
                 self.drops["stale_sample"] += 1
                 return
             self.samples += 1; self.last_sample = t; self.hidden_samples += data.get("hidden") is True
-            if not isinstance(f, list) or len(f) != self.estimator.feature_count or not all(isinstance(v, (int, float)) and math.isfinite(v) and abs(v) < 4 for v in f):
+            if not isinstance(f, list) or len(f) != self.estimator.feature_count or not all(
+                type(v) in (int, float) and -limit < v < limit
+                for v, limit in zip(f, self._feature_limits)
+            ):
                 self.drops["no_features"] += 1
                 return  # Missing face/blink: never synthesize a center fixation.
             if self._calibration is not None:
@@ -330,7 +343,8 @@ class WebcamHost:
                     self._command("Runtime.evaluate", {"expression": features.read_text(), "contextId": self._context})
                     options = {"nonce": self._nonce, "module": (self.assets / "package/vision_bundle.mjs").as_uri(),
                                "wasm": (self.assets / "package/wasm").as_uri(), "model": (self.assets / "face_landmarker.task").as_uri(),
-                               "calibrated": self.profile is not None, **self.runtime_options}
+                               "calibrated": self.profile is not None, "calibration_notice": self._calibration_notice,
+                               **self.runtime_options}
                     result = self._command("Runtime.evaluate", {"expression": self.runtime_source.read_text() + "(" + json.dumps(options) + ")",
                                            "contextId": self._context, "awaitPromise": True})
                     if result.get("exceptionDetails"):

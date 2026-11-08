@@ -6,11 +6,15 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import subprocess
 from unittest.mock import patch
 
+import numpy as np
+
+from hermes_gaze.benchmark.gaze_research import Candidate, Fit
 from hermes_gaze import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.tracker.webcam_gaze import LandmarkEstimator, ScreenPoint, screen_to_viewport
+from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, LandmarkEstimator, ScreenPoint, screen_to_viewport
 from hermes_gaze.webcam import WebcamHost
 
 SCREEN = {"left": 0, "top": 0, "width": 1440, "height": 900, "dpr": 2,
@@ -20,6 +24,14 @@ SCREEN = {"left": 0, "top": 0, "width": 1440, "height": 900, "dpr": 2,
 def observations():
     return [([x, y, x * .2, y * .3, x + y, x - y, .3, .1], x, y)
             for y in (.1, .5, .9) for x in (.1, .5, .9) for _ in range(6)]
+
+
+def appearance_features(x, y):
+    return [x if i % 2 == 0 else y for i in range(128)] + [.2 * x, .3 * y]
+
+
+def appearance_observations():
+    return [(appearance_features(x, y), x, y) for _, x, y in observations()]
 
 
 class WebcamContracts(unittest.TestCase):
@@ -55,6 +67,92 @@ class WebcamContracts(unittest.TestCase):
             model.load({**profile, "model_id": "other-runtime"})
         with self.assertRaises(ValueError):
             model.calibrate([([0.] * 8, x, y) for _, x, y in observations()], SCREEN)
+
+    def test_appearance_fit_matches_selected_research_and_profile_roundtrip(self):
+        data = appearance_observations()
+        model = AppearanceEstimator()
+        research = Fit(Candidate("appearance-left", 10.))
+        profile = model.calibrate(data, SCREEN)
+        research.calibrate(data, SCREEN)
+        loaded = AppearanceEstimator(); loaded.load(json.loads(json.dumps(profile)))
+        for x, y in ((.3, .7), (.8, .2), (.45, .55)):
+            features = appearance_features(x, y)
+            point = model.predict(features, 123.)
+            np.testing.assert_allclose([point.x / SCREEN["width"], point.y / SCREEN["height"]],
+                                       research.raw(np.asarray(features)), atol=1e-12)
+            self.assertAlmostEqual(point.x / SCREEN["width"], x, delta=.01)
+            self.assertAlmostEqual(point.y / SCREEN["height"], y, delta=.01)
+            self.assertEqual(loaded.predict(features, 123.), point)
+        for invalid in (observations(), data[:44], data[:-6],
+                        [([math.nan] * 130, x, y) for _, x, y in data]):
+            with self.subTest("invalid fit"), self.assertRaises(ValueError):
+                model.calibrate(invalid, SCREEN)
+        with self.assertRaises(ValueError):
+            model.load(LandmarkEstimator().calibrate(observations(), SCREEN))
+        with self.assertRaises(ValueError):
+            model.load({**profile, "weights": [[0., 0.]] * 9})
+
+    def test_appearance_rejects_strictly_outside_screen_without_smoothing(self):
+        model = AppearanceEstimator()
+        weights = np.zeros((131, 2)); weights[-2:] = np.eye(2)
+        model.load(dict(model_id=model.model_id, mean=[0.] * 130, scale=[1.] * 130,
+                        weights=weights.tolist(), screen=SCREEN))
+        for x, y in ((0., 0.), (1., 1.), (.2, .8), (.8, .2)):
+            self.assertEqual(model.predict([0.] * 128 + [x, y], 12.), ScreenPoint(x * 1440, y * 900, 12.))
+        for x, y in ((np.nextafter(0., -1.), .5), (np.nextafter(1., 2.), .5),
+                     (.5, np.nextafter(0., -1.)), (.5, np.nextafter(1., 2.))):
+            self.assertIsNone(model.predict([0.] * 128 + [x, y], 12.))
+        for features in ([0.] * 8, [0.] * 129, [math.nan] * 130, [math.inf] * 130):
+            self.assertIsNone(model.predict(features, 12.))
+        self.assertIsNone(model.predict([0.] * 130, math.nan))
+
+    def test_appearance_binding_accepts_bounded_features_but_not_malformed_vectors(self):
+        host = WebcamHost(lambda *_: False)
+        host._context, host._nonce = 8, "owned"
+        host._calibration = SCREEN
+        now = time.time()
+        def send(features):
+            nonlocal now
+            now += .001
+            host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+                "executionContextId": 8, "payload": json.dumps({"type": "sample", "nonce": "owned",
+                    "t": now, "features": features, "calibration": 0})}})
+        features = [10.] + [0.] * 127 + [.2, .3]
+        send(features)
+        self.assertEqual(host._point_samples, [features])
+        malformed = (None, {}, [0.] * 8, [0.] * 129, [0.] * 131, ["0"] * 130, [False] * 130,
+                     [math.nan] * 130, [math.inf] * 130, [math.sqrt(128)] + [0.] * 129,
+                     [0.] * 128 + [4., 0.], [0.] * 128 + [0., -4.])
+        for vector in malformed:
+            send(vector)
+        self.assertEqual(host._point_samples, [features])
+        self.assertEqual(host.drops["no_features"], len(malformed))
+
+    def test_old_profile_requests_recalibration_without_error_or_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "calibration.json"
+            old = LandmarkEstimator().calibrate(observations(), SCREEN)
+            path.write_text(json.dumps(old))
+            before = path.read_bytes()
+            host = WebcamHost(lambda *_: False, profile_path=path)
+            self.addCleanup(host.stop)
+            def camera():
+                host.state = "running"; host._ready.set(); host._stop.wait(5)
+            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch.object(host, "_run", side_effect=camera):
+                status = host.start()
+                self.assertEqual(status["state"], "running")
+                self.assertFalse(status["calibrated"])
+                self.assertEqual(status["error"], "")
+                self.assertIn("recalibrate", status["calibration_message"])
+                self.assertIsNone(host.estimator.profile)
+                self.assertEqual(path.read_bytes(), before)
+                host.stop()
+
+    def test_shared_appearance_extraction_preserves_saved_layout_in_node(self):
+        result = subprocess.run(["node", str(Path(__file__).with_name("webcam_features.cjs"))],
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_owned_context_nonce_epoch_validation_and_swappable_estimator(self):
         class OtherEstimator:
@@ -161,7 +259,7 @@ class WebcamContracts(unittest.TestCase):
             host = WebcamHost(lambda point, screen: received.append(point) or True,
                               profile_path=Path(directory) / "calibration.json")
             self.addCleanup(host.stop)
-            profile = LandmarkEstimator().calibrate(observations(), SCREEN)
+            profile = AppearanceEstimator().calibrate(appearance_observations(), SCREEN)
             host._save(profile)
             def camera():
                 host._context, host._nonce = 8, "owned"
@@ -175,10 +273,10 @@ class WebcamContracts(unittest.TestCase):
                  patch.object(host, "_run", side_effect=camera):
                 host.start()
                 event("calibration_start", screen=SCREEN, viewport={"left": 0, "top": 0, "width": 1440, "height": 900})
-                event("sample", t=time.time(), features=[.3, .7, .06, .21, 1., -.4, .3, .1], calibration=0)
+                event("sample", t=time.time(), features=appearance_features(.3, .7), calibration=0)
                 host.stop()
                 host.start()
-                event("sample", t=time.time(), features=[.3, .7, .06, .21, 1., -.4, .3, .1], calibration=-1)
+                event("sample", t=time.time(), features=appearance_features(.3, .7), calibration=-1)
                 self.assertEqual(len(received), 1)
                 self.assertAlmostEqual(received[0].x, 432, delta=12)
                 self.assertAlmostEqual(received[0].y, 630, delta=12)
@@ -195,7 +293,7 @@ class WebcamContracts(unittest.TestCase):
                     raise result
                 return result
             host = WebcamHost(deliver, profile_path=Path(directory) / "calibration.json")
-            profile = LandmarkEstimator().calibrate(observations(), SCREEN)
+            profile = AppearanceEstimator().calibrate(appearance_observations(), SCREEN)
             host.estimator.load(profile)
             host._context, host._nonce = 8, "owned"
             now = time.time()
@@ -205,11 +303,11 @@ class WebcamContracts(unittest.TestCase):
                 host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
                     "executionContextId": 8, "payload": json.dumps({"type": "sample", "nonce": "owned",
                     "t": now if t is None else t, "features": features})}})
-            features = [.3, .7, .06, .21, 1., -.4, .3, .1]
+            features = appearance_features(.3, .7)
             send(features)  # No profile is active yet.
             host.profile = profile
             send(None)
-            send([3.] * 8)  # Valid observations, but an off-screen estimate.
+            send([3.] * 130)  # Valid observations, but an off-screen estimate.
             send(features, t=1.)
             for _ in range(7):
                 send(features)

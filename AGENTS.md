@@ -24,7 +24,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
 | `browser/webcam_host.js` | Camera/inference and plain nine-point UI in that separate process's isolated world. No website camera, audio, HTTP sample endpoint or image serialization. |
-| `browser/webcam_features.js` | Shared, version-ordered iris/head feature extraction for live and offline frames. |
+| `browser/webcam_features.js` | Shared, version-ordered iris/head and normalized eye-appearance extraction for live and offline frames. Live uses the left eye only; saved offline layout remains both eyes then the original eight features. |
 | `benchmark/gaze_eval.py`, `browser/gaze_eval.js` | Offline frame stepping through the same pinned WASM/features and `GazeEstimator`; no capture devices. `gaze_dataset.py` preserves recordings/import/export; `gaze_tuning.py` and `scripts/gaze.py` run local evaluation and tuning. |
 | `benchmark/gaze_record.py`, `browser/gaze_record.js` | Explicit private recorder in the owned tracker window; camera-only video and target timestamps cross its exact-context nonce binding into local 0700/0600 files. Default sessions are 102.6 seconds (72.6 without recalibration), with a settling hold at each reading line start; legacy protocols remain loadable. Never run real devices as an agent. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
@@ -354,8 +354,17 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
 - `get_shared_session()`'s `GazeSession` is deliberately machine-scoped: the owned
   companion Chrome and microphone are OS resources shared across Hermes profiles. Do not
   try to make it per-profile.
-- Webcam mode uses Apache-2.0 MediaPipe iris landmarks and a local personal regressor
-  in a separate owned macOS Chrome process. No real-camera accuracy is established.
+- Webcam mode uses Apache-2.0 MediaPipe landmarks and the personal
+  `AppearanceEstimator` (`mediapipe-face-v2-left-appearance-iris-ridge10-1`) in a
+  separate owned macOS Chrome process: 128 row-major normalized left-eye grayscale
+  features plus that eye's two iris coordinates, standardized linear ridge λ10.
+  Keep nine points, strict off-screen rejection and no smoothing. Old model profiles
+  request recalibration without overwriting them. Recalibrate after posture, camera
+  or eyewear changes; five-point bias refresh is a follow-up, not live functionality.
+  These numeric appearance features are biometric: never log them or expose them in
+  status; no pixels, canvas patches or images cross the live binding.
+  Camera-window isolated `status()` exposes aggregate WASM+feature wall time,
+  feature wall time and sample rate only. No real-camera accuracy is established.
   One calibrated display; each page needs a trusted pointer movement to measure its
   viewport origin, repeated after zoom/resize/chrome changes. Wrong-display, stale
   or absent gaze yields no fixation. No cursor fallback or gaze click authority.

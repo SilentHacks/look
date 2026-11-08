@@ -20,8 +20,11 @@ the camera. Registration, model tools, status and changing configuration do not.
 The owned window requests video only, never audio. It captures and infers locally;
 images never leave it in ordinary tracking mode. The separate, explicit
 [guided dataset recorder](GAZE_RECORDING.md) saves camera video locally.
-Eight bounded iris/head features cross an exact-context, nonce-checked
-`__hermesGazeIntent` CDP binding. There is no HTTP sample endpoint. The camera
+Only 130 bounded numeric biometric features cross an exact-context, nonce-checked
+`__hermesGazeIntent` CDP binding: 128 normalized left-eye appearance values followed
+by that eye's two iris coordinates. No raw pixels, canvas patches or images cross
+the live binding. Features are never logged or included in `/gaze tracker`.
+There is no HTTP sample endpoint. The camera
 profile has extensions disabled and HTTP(S) requests blocked after startup.
 Downloads happen in Python, before the camera starts, from official sources;
 verified cached assets work offline.
@@ -47,8 +50,11 @@ The fitted profile is stored atomically at
 `${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`, mode `0600`
 in a `0700` directory. No images, audio, raw calibration samples or profile values
 are logged or committed. Delete that file to forget calibration. The profile is
-versioned to the estimator and one display; recalibrate after camera/posture or
-display changes. A training-fit check is not a human accuracy measurement.
+versioned to the estimator and one display. Old iris/head-only profiles are refused
+without overwriting them: “The gaze model changed. Please recalibrate with /gaze calibrate.”
+Recalibrate after moving, leaning back, changing head/lid/camera position, lighting
+or glasses, and if delivery drops. There is no automatic posture correction.
+A training-fit check is not a human accuracy measurement.
 Stopping during calibration discards that unfinished collection, not the saved
 profile. Restarting immediately resumes predictions from the saved profile.
 
@@ -75,16 +81,30 @@ simulated target requires both the saved resolution and the live mode to be simu
 
 `tracker.webcam_gaze.GazeEstimator` is the swappable prediction/calibration
 boundary. `WebcamHost` accepts an estimator and an observation-runtime source;
-the shipped source extracts MediaPipe iris/head features. A replacement model
-needs its own audited/pinned assets and observation script, not another resolver.
+the shipped `AppearanceEstimator` has model id
+`mediapipe-face-v2-left-appearance-iris-ridge10-1`. It uses **nine-point personal,
+standardized linear ridge λ10, strict off-screen rejection, no smoothing**.
+`browser/webcam_features.js` owns extraction for both live video and offline images:
+the 16×8 row-major grayscale eye region spans 1.5 eye widths, aligned to landmarks
+33→133. Luminance is (.299R + .587G + .114B)/255, centered by patch mean and divided
+by max(.02, population standard deviation). The same eye's two iris coordinates
+follow those 128 values. Calibration-only mean/scale standardization then precedes
+ridge fitting. The old `LandmarkEstimator` remains the offline λ1 baseline only.
+A replacement model needs its own audited/pinned assets and observation script,
+not another resolver.
 
 The [guided recording protocol](GAZE_RECORDING.md) collects our own consented,
 pseudonymous dataset with glasses/condition metadata and end validation.
 [Offline evaluation](GAZE_EVAL.md) compares personal calibration budgets and
 within-session, cross-condition and cross-glasses transfer, with per-person
-summaries. [Human accuracy](GAZE_SCOREBOARD.md) awaits these recordings; fake
-devices prove plumbing only. The production choice remains the existing nine-point
-λ=1 estimator: no new defaults, smoothing or fitted profiles are installed.
+summaries. [Reserved offline validation](GAZE_TUNING_RESEARCH.md) motivated this
+cutover; it is one person's recorded footage, not population or live accuracy.
+Fake devices prove plumbing only. Broad-region gaze remains experimental, not
+button precision or unattended posture reuse.
+
+**Follow-up:** a five-point labelled bias refresh needs a separate live interaction
+and validation, especially with glasses. This milestone deliberately requires full
+nine-point recalibration after moving instead.
 
 ## Hands-on checklist (real hardware: user only)
 
@@ -100,8 +120,8 @@ devices prove plumbing only. The production choice remains the existing nine-poi
    and `delivered` rise while a calibrated Chrome page has focus. Switch tabs,
    seed each once, and repeat. No old tab should acquire the new gaze highlight.
 6. Resize/zoom the page: move its pointer once again. Scroll and ask again.
-   Try a different posture; recalibrate if the region drifts. Record actual
-   successes/errors before making any accuracy or comfort claim.
+   After moving, leaning back or changing camera position/glasses, recalibrate.
+   Record actual successes/errors before making any accuracy or comfort claim.
 7. `/gaze mode hover`: confirm the camera indicator goes off and exact cursor
    questions still work. `/gaze tracker stop` and `/gaze disconnect` also stop it.
 
@@ -156,6 +176,16 @@ and return to cursor. Run it separately from other headed Chrome probes: those
 processes can steal native OS focus.
 Screenshots and a small results JSON go to the output directory; calibration and
 fake video are temporary and removed.
+
+The appearance-live milestone did **not** run this Chrome probe: another builder
+was using private test windows. Schedule it serially before claiming live proof.
+The camera window's isolated `__HERMES_WEBCAM__.status()` now exposes aggregate
+`frame_ms` (WASM + feature extraction wall time), `feature_ms` (iris + appearance
+extraction wall time) and `sample_hz` (processed frames over elapsed inference-start
+time). The probe saves those numeric aggregates in `camera_runtime`; none contain
+features, coordinates or images. Live per-frame cost and fake-camera sample rate
+remain unmeasured until that deferred run. These timers exclude exposure, binding
+serialization/delivery and Python prediction; they are not CPU or end-to-end latency.
 
 **Human gaze accuracy, real-camera latency/heat and posture robustness are not
 measured by a fake camera.** The 3×3–4×4 target is a design goal, not a result.

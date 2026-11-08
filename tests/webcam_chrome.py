@@ -101,6 +101,9 @@ def run(out):
             until(lambda: host.profile is not None)
             assert host.profile_path.stat().st_mode & 0o777 == 0o600
             report["calibration"] = {"points": 9, "stored_mode": "0600", "model": host.profile["model_id"]}
+            runtime = camera_state()
+            report["camera_runtime"] = {key: runtime[key] for key in ("frames", "frame_ms", "feature_ms", "sample_hz")}
+            assert runtime["frames"] > 1 and runtime["sample_hz"] > 0
             # Main-world code cannot see the isolated runtime or call its binding.
             assert camera.main("typeof __HERMES_WEBCAM__") == "undefined"
             assert camera.main("typeof __hermesGazeIntent") == "undefined"

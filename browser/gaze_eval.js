@@ -36,30 +36,6 @@
       Math.atan2(hx[1],hx[0]), Math.atan2(hx[2],hx[0]), Math.atan2(hy[2],hy[1])];
     return {pose_features: iris.concat(head), openness};
   }
-  function eyeAppearance(image, lm) {
-    if (!lm) return null;
-    // Personal pixel ridge, not a pretrained gaze CNN. No image leaves this owned offline document.
-    const patch = document.createElement("canvas"); patch.width = 16; patch.height = 8;
-    const ctx = patch.getContext("2d", {willReadFrequently: true}), values = [];
-    for (const [a,b] of [[33,133],[362,263]]) {
-      const ax = lm[a].x * image.naturalWidth, ay = lm[a].y * image.naturalHeight;
-      const bx = lm[b].x * image.naturalWidth, by = lm[b].y * image.naturalHeight;
-      const dx = bx-ax, dy = by-ay, length = Math.hypot(dx,dy);
-      if (length < 2) return null;
-      const scale = 16/(1.5*length), cos = dx/length, sin = dy/length;
-      const cx = (ax+bx)/2, cy = (ay+by)/2;
-      ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,16,8);
-      ctx.setTransform(scale*cos,-scale*sin,scale*sin,scale*cos,
-        8-scale*(cos*cx+sin*cy),4-scale*(-sin*cx+cos*cy));
-      ctx.drawImage(image,0,0);
-      const rgba = ctx.getImageData(0,0,16,8).data, gray = [];
-      for (let i=0;i<rgba.length;i+=4) gray.push((.299*rgba[i]+.587*rgba[i+1]+.114*rgba[i+2])/255);
-      const mean = gray.reduce((a,b)=>a+b,0)/gray.length;
-      const std = Math.max(.02,Math.sqrt(gray.reduce((a,b)=>a+(b-mean)**2,0)/gray.length));
-      values.push(...gray.map(v=>(v-mean)/std));
-    }
-    return values;
-  }
   globalThis.__HERMES_EVAL__ = {
     async extract(src, timestamp, discontinuous) {
       if (discontinuous) await reset(); // Independent stills must not inherit a previous face track.
@@ -71,9 +47,9 @@
       const extra = tuningFeatures(result.faceLandmarks[0], image.naturalWidth, image.naturalHeight);
       const blinks = result.faceBlendshapes[0]?.categories.filter(c => c.categoryName.startsWith("eyeBlink")) || [];
       const patchStart = performance.now();
-      const patch = features ? eyeAppearance(image, result.faceLandmarks[0]) : null;
+      const appearance = globalThis.__hermesGazeAppearance(image, result.faceLandmarks[0], features);
       return {features, inference_ms, ...extra, blink: Math.max(0, ...blinks.map(c => c.score)),
-        appearance: patch ? patch.concat(features) : null,
+        appearance,
         appearance_inference_ms: inference_ms + performance.now() - patchStart};
     }
   };

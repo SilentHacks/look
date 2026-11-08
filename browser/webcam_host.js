@@ -10,13 +10,14 @@
   const main = make("main"), title = make("h1", "Webcam gaze"), status = make("p", "Starting camera…");
   const video = make("video"); video.autoplay = true; video.muted = true; video.playsInline = true;
   const begin = make("button", "Calibrate nine points"), stop = make("button", "Stop camera");
-  const help = make("p", "Calibration stays on this computer. No images leave this window.");
+  const help = make("p", "Calibration stays on this computer. No images leave this window. Recalibrate after moving, leaning back, changing camera position or changing glasses.");
   main.append(title, video, status, begin, stop, help); document.body.append(main);
   const dot = make("div"); dot.id = "dot";
   const guide = make("p"); guide.id = "guide"; document.body.append(dot, guide);
   const points = [.1, .5, .9].flatMap(y => [.1, .5, .9].map(x => [x, y]));
   let model, stream, timer, active = true, index = -1, collecting = false, until = 0, lastVideoTime = -1;
   let calibrationWindow = null;
+  let frames = 0, firstFrame = 0, lastFrame = 0, frameMs = 0, featureMs = 0;
   const show = text => { status.textContent = text; };
   function place() {
     const p = points[index]; dot.style.left = `${p[0] * 100}%`; dot.style.top = `${p[1] * 100}%`;
@@ -52,7 +53,9 @@
   globalThis.__HERMES_WEBCAM__ = {
     show, stop: shutdown,
     calibrationResult(text) { finishUI(); show(text); },
-    status() { return {active, index, collecting, videoTime: video.currentTime, hidden: document.hidden}; }
+    status() { return {active, index, collecting, videoTime: video.currentTime, hidden: document.hidden,
+      frames, frame_ms: frames ? frameMs / frames : null, feature_ms: frames ? featureMs / frames : null,
+      sample_hz: frames > 1 ? (frames - 1) * 1000 / (lastFrame - firstFrame) : null}; }
   };
   try {
     const {FaceLandmarker} = await import(opts.module);
@@ -62,7 +65,7 @@
       runningMode: "VIDEO", numFaces: 1, minFaceDetectionConfidence: .5, minFacePresenceConfidence: .5});
     stream = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480}, audio: false});
     video.srcObject = stream; await video.play();
-    show(opts.calibrated ? "Tracking. You can return to Chrome." : "Calibrate before asking with your eyes.");
+    show(opts.calibrated ? "Tracking. You can return to Chrome." : (opts.calibration_notice || "Calibrate before asking with your eyes."));
     emit("ready");
     timer = setInterval(() => {
       if (!active || video.readyState < 2 || video.currentTime === lastVideoTime) return;
@@ -72,7 +75,13 @@
       }
       const now = performance.now(), t = (performance.timeOrigin + now) / 1000;
       try {
-        const f = globalThis.__hermesGazeFeatures(model.detectForVideo(video, now).faceLandmarks[0]);
+        const lm = model.detectForVideo(video, now).faceLandmarks[0];
+        const featureStart = performance.now();
+        const f = globalThis.__hermesGazeAppearance(video, lm, globalThis.__hermesGazeFeatures(lm), true);
+        const done = performance.now();
+        frameMs += done - now; featureMs += done - featureStart;
+        if (!frames) firstFrame = now;
+        frames++; lastFrame = now;
         emit("sample", {t, features: f, calibration: collecting ? index : -1, hidden: document.hidden});
         if (collecting && now >= until) {
           collecting = false; emit("calibration_point", {index}); index++;
