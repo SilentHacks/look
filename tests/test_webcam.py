@@ -15,7 +15,7 @@ from hermes_gaze.benchmark.gaze_research import Candidate, Fit
 from hermes_gaze import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.tracker.webcam_gaze import (CHECK_ENOUGH_TRIALS, CHECK_ORDERS, CHECK_PASS_TRIALS, CHECK_POINTS, AppearanceEstimator,
-                                             LandmarkEstimator, ScreenPoint, score_check_trial, screen_to_viewport, summarize_check)
+                                             LandmarkEstimator, ScreenPoint, check_map, score_check_trial, screen_to_viewport, summarize_check)
 from hermes_gaze.webcam import WebcamHost
 
 SCREEN = {"left": 0, "top": 0, "width": 1440, "height": 900, "dpr": 2,
@@ -414,12 +414,38 @@ class CalibrationCheckFlow(unittest.TestCase):
                 self.assertEqual(result["outcome"], outcome)
                 self.assertEqual([a for a, _ in result["actions"]], ["calibrate"])
                 self.assertEqual(result["actions"][0][1], "Try again")
-                words = (result["title"] + " ".join(result["body"])).lower()
-                self.assertNotIn("ready", words)
-                self.assertNotRegex(words, r"\d")
-                self.assertIn("earlier calibration has not changed", words)
+                self.assertNotIn("ready", result["note"].lower())
+                self.assertNotRegex(result["note"], r"\d")
+                self.assertTrue(result["kept"])
                 self.assertEqual(self.host.profile_path.read_bytes(), before)
                 self.assertEqual(self.host.estimator.profile, json.loads(before))
+
+    def test_result_map_is_coarse_and_keeps_misses_as_misses(self):
+        self.fit()
+        _, result = self.run_check(lambda t, trial: appearance_features(*t) if trial % 3 else None)
+        places = result["map"]
+        self.assertEqual([(p["x"], p["y"]) for p in places], list(CHECK_POINTS))
+        marks = [m for p in places for m in p["trials"]]
+        self.assertEqual(len(marks), 10)
+        self.assertTrue(all(len(p["trials"]) == 2 for p in places))
+        for mark in marks:
+            if mark["hit"]:
+                self.assertEqual(set(mark), {"hit", "dx", "dy"})
+                self.assertEqual(mark["dx"] * 4 % 1, 0)
+            else:
+                self.assertEqual(mark, {"hit": False})  # Missing trials have no position to draw.
+        self.assertEqual(sum(m["hit"] for m in marks), 6)
+        self.assertNotIn("map", json.dumps(self.host.status()))
+        self.assertIsNone(self.host._check)
+
+    def test_a_miss_draws_where_it_landed_in_the_window_and_nowhere_outside_it(self):
+        screen = {"left": 0, "top": 0, "width": 1000, "height": 500}
+        viewport = {"left": 100, "top": 50, "width": 800, "height": 400}
+        targets = [(.5, .5)] * 10
+        trials = [{"valid": True, "hit": False, "point": (.5, .5)}, {"valid": True, "hit": False, "point": (.01, .5)}] * 5
+        marks = [m for p in check_map(trials, targets, screen, viewport) for m in p["trials"]]
+        self.assertIn({"hit": False, "x": .5, "y": .5}, marks)
+        self.assertIn({"hit": False}, marks)  # Outside the window: a miss with no drawable place.
 
     def test_cancelling_after_the_fit_discards_the_candidate(self):
         self.host._save(self.saved()); before = self.host.profile_path.read_bytes()

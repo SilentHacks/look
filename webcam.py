@@ -22,7 +22,7 @@ import time
 import urllib.request
 
 from .tracker.webcam_gaze import (CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator,
-                                  GazeEstimator, LandmarkEstimator, score_check_trial, summarize_check)
+                                  GazeEstimator, LandmarkEstimator, check_map, score_check_trial, summarize_check)
 
 _ASSETS = {
     "tasks.tgz": ("https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.32.tgz",
@@ -33,16 +33,13 @@ _ASSETS = {
 _CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 _POINTS = [(x, y) for y in (.1, .5, .9) for x in (.1, .5, .9)]
 _SCREEN_KEYS = ("left", "top", "width", "height", "screen_width", "screen_height", "screen_left", "screen_top", "dpr")
-_WRONG_WINDOW = "Move this window fully onto one screen and try again."
-_WRONG_DISPLAY = "Your calibration was made on a different screen. Recalibrate on this one."
+_WRONG_WINDOW = "Move this window onto one screen"
+_WRONG_DISPLAY = "Different screen. Recalibrate here."
 _OLD_MODEL = "The gaze model changed. Please recalibrate with /gaze calibrate."
-_OLD_MODEL_WINDOW = "The eye tracker was updated, so your old calibration no longer fits. Please recalibrate."
-_BAD_PROFILE_WINDOW = "Your saved calibration could not be read. Please recalibrate."
-_RECALIBRATE_NOTE = "Moved, changed glasses or adjusted the camera? Recalibrate."
-_GOOD = "The estimate stayed in the same broad area most of the time. Small controls can still be wrong."
-_WEAK = "The estimate missed several areas. Adjust your position or lighting and try again."
-_INSUFFICIENT = "We could not collect enough gaze to check this. Make sure your face stays in view, then try again."
-_KEPT = "Your earlier calibration has not changed."
+_OLD_MODEL_WINDOW = "Eye tracker updated. Recalibrate."
+_BAD_PROFILE_WINDOW = "Saved setup unreadable. Recalibrate."
+_WEAK = "Adjust light or position"
+_INSUFFICIENT = "Couldn\u2019t see your eyes"
 
 
 def asset_directory() -> Path:
@@ -236,7 +233,7 @@ class WebcamHost:
             self._clear_flow(); self._ui("notice", _WRONG_WINDOW); return
         self._calibration = None; self._observations = []
         self._check = {"estimator": estimator, "screen": screen, "targets": targets, "candidate": candidate,
-                       "trial": 0, "estimates": [], "trials": []}
+                       "viewport": viewport, "trial": 0, "estimates": [], "trials": []}
         self._ui("checkReady", {"points": points, "settle_ms": CHECK_SETTLE_MS, "observe_ms": CHECK_OBSERVE_MS})
 
     def _check_observe(self, data: dict, features: list | None, t: float) -> None:
@@ -259,22 +256,21 @@ class WebcamHost:
                 self.error = ""; self._calibration_notice = ""; accepted = True
             except (OSError, ValueError) as exc:
                 self.error = str(exc)[:300]
-                self._ui("notice", "Your calibration could not be saved on this computer. Please try again."); return
-        self._ui("checkResult", self._result_words(outcome, candidate is not None, accepted))
+                self._ui("notice", "Couldn\u2019t save. Try again."); return
+        # Coarse and drawn once; only the page holds it, until the next state clears it.
+        marks = check_map(check["trials"], check["targets"], check["screen"], check["viewport"])
+        self._ui("checkResult", {**self._result_words(outcome, candidate is not None, accepted), "map": marks})
 
     def _result_words(self, outcome: str, new: bool, accepted: bool) -> dict:
         if outcome == "good":
-            return {"outcome": outcome, "title": "It found the right area", "body": [_GOOD, _RECALIBRATE_NOTE] if not new else [_GOOD],
-                    "calibrated": True, "actions": [["practise", "Practise"], ["done", "Done"]] if accepted
+            return {"outcome": outcome, "note": "", "kept": False, "calibrated": True,
+                    "actions": [["practise", "Practise"], ["done", "Done"]] if accepted
                     else [["done", "Done"], ["practise", "Practise"], ["calibrate", "Recalibrate"]]}
-        words = _WEAK if outcome == "weak" else _INSUFFICIENT
-        title = "This didn\u2019t work well enough" if outcome == "weak" else "We couldn\u2019t check this"
+        note = _WEAK if outcome == "weak" else _INSUFFICIENT
         if new:
-            body = [words] + ([_KEPT] if self.profile is not None else [])
-            return {"outcome": outcome, "title": title, "body": body, "calibrated": self.profile is not None,
-                    "actions": [["calibrate", "Try again"]]}
-        body = [words, "Your calibration may no longer fit how you are sitting."]
-        return {"outcome": outcome, "title": title, "body": body, "calibrated": True, "actions": [["calibrate", "Recalibrate"]]}
+            return {"outcome": outcome, "note": note, "kept": self.profile is not None,
+                    "calibrated": self.profile is not None, "actions": [["calibrate", "Try again"]]}
+        return {"outcome": outcome, "note": note, "kept": False, "calibrated": True, "actions": [["calibrate", "Recalibrate"]]}
 
     def _practice_observe(self, features: list | None, t: float) -> None:
         if features is None:

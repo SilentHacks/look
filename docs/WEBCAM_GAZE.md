@@ -59,14 +59,19 @@ constants in `tracker/webcam_gaze.py` are **provisional pending a real-camera
 trial**: a trial hits inside one cell of a 3×3 screen grid around its target; eight
 of ten pass; fewer than six valid trials cannot judge.
 
-The result is plain words only, never a score. A weak or unmeasurable new
-calibration offers Try again or Use cursor and keeps the earlier one. A cancelled or
-failed attempt saves nothing. **Check my gaze** tests the saved profile on the same
-display and never rewrites it. A passing check says the estimate stayed in the
-same broad area, which is not a claim about accuracy.
+The result is a map, never a score: five glass places where the check ran, each
+tried twice. Both landings inside closes the place; a miss opens the ring and draws
+a line to where that estimate landed in this window; a trial with no estimate shows
+nothing. Those coarse positions (a 40-cell window grid; hits as a quarter-step offset)
+exist only for this drawing, in memory, and are never logged or in status. The
+acceptance rule itself is unchanged. A weak or unmeasurable new calibration offers
+Try again or Use cursor and keeps the earlier one. A cancelled or failed attempt saves
+nothing, and moving, resizing or hiding the window during the dots or check ends the
+attempt and says so. **Check my gaze** tests the saved profile on the same display and
+never rewrites it.
 
 Practice runs only in the owned window and only while open: six broad cards and a
-soft area. Python maps each estimate to the window; the page snaps it to a coarse
+neutral lens. Python maps each estimate to the window; the page snaps it to a coarse
 8×6 cell for display only, with the same no-smoothing estimator underneath. Off-window
 estimates are removed, never clamped. Practice and checks deliver nothing to
 websites. Finish teaches the real companion gesture; its hold-Space rehearsal says

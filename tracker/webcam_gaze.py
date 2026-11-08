@@ -121,6 +121,7 @@ CHECK_MIN_VALID_FRACTION = .5  # Of the trial's samples.
 CHECK_MIN_VALID_SAMPLES = 3
 CHECK_PASS_TRIALS = 8  # Of ten: "most of the time" must be clearly more than a majority.
 CHECK_ENOUGH_TRIALS = 6  # Fewer valid trials than this cannot judge the calibration.
+_MAP_CELLS, _HIT_STEPS = 40, 4  # Result drawing only: deliberately coarse positions.
 
 
 def score_check_trial(estimates: list[tuple[float, float] | None], target: tuple[float, float]) -> dict:
@@ -129,7 +130,8 @@ def score_check_trial(estimates: list[tuple[float, float] | None], target: tuple
     if len(valid) < CHECK_MIN_VALID_SAMPLES or len(valid) < CHECK_MIN_VALID_FRACTION * len(estimates):
         return {"valid": False, "hit": False}
     x, y = np.median(np.asarray(valid, dtype=float), axis=0)
-    return {"valid": True, "hit": bool(abs(x - target[0]) <= CHECK_REGION_HALF and abs(y - target[1]) <= CHECK_REGION_HALF)}
+    return {"valid": True, "hit": bool(abs(x - target[0]) <= CHECK_REGION_HALF and abs(y - target[1]) <= CHECK_REGION_HALF),
+            "point": (float(x), float(y))}
 
 
 def summarize_check(trials: list[dict]) -> str:
@@ -137,6 +139,28 @@ def summarize_check(trials: list[dict]) -> str:
     if sum(t["hit"] for t in trials) >= CHECK_PASS_TRIALS:
         return "good"
     return "weak" if sum(t["valid"] for t in trials) >= CHECK_ENOUGH_TRIALS else "insufficient"
+
+
+def check_map(trials: list[dict], targets: list[tuple[float, float]], screen: dict, viewport: dict) -> list[dict]:
+    """Display-only result: coarse landings per check place, built once and never kept.
+
+    A hit is an offset inside the acceptance area; a miss is where it landed in this
+    window. Anything missing, or outside the window, has no position: it is still a miss.
+    """
+    places = [{"x": x, "y": y, "trials": []} for x, y in CHECK_POINTS]
+    order = [i for pass_order in CHECK_ORDERS for i in pass_order]
+    for place, trial, target in zip(order, trials, targets):
+        mark: dict = {"hit": trial["hit"]}
+        if trial["hit"]:
+            mark |= {"dx": round((trial["point"][0] - target[0]) / CHECK_REGION_HALF * _HIT_STEPS) / _HIT_STEPS,
+                     "dy": round((trial["point"][1] - target[1]) / CHECK_REGION_HALF * _HIT_STEPS) / _HIT_STEPS}
+        elif trial["valid"]:
+            x = (trial["point"][0] * screen["width"] + screen["left"] - viewport["left"]) / viewport["width"]
+            y = (trial["point"][1] * screen["height"] + screen["top"] - viewport["top"]) / viewport["height"]
+            if 0 <= x <= 1 and 0 <= y <= 1:
+                mark |= {"x": round(x * _MAP_CELLS) / _MAP_CELLS, "y": round(y * _MAP_CELLS) / _MAP_CELLS}
+        places[place]["trials"].append(mark)
+    return places
 
 
 def screen_to_viewport(point: ScreenPoint, geometry: dict, screen: dict, sigma_px: float = 120.) -> dict | str:

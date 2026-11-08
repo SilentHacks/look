@@ -29,7 +29,7 @@ function element(tag) {
   elements.push(node);
   return node;
 }
-globalThis.document = {createElement: element, head: element("head"), body: element("body"), hidden: false};
+globalThis.document = {createElement: element, createElementNS: (_ns, tag) => element(tag), head: element("head"), body: element("body"), hidden: false};
 globalThis.Image = class { constructor() { this.naturalWidth = width; this.naturalHeight = height; } async decode() {} };
 globalThis.addEventListener = () => {};
 Object.defineProperty(globalThis, "navigator", {value: {mediaDevices: {
