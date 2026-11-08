@@ -99,9 +99,13 @@ def _get_coreml_runner() -> Any:
         if _COREML_RUNNER is None:
             try:
                 from .asr.parakeet_coreml import ParakeetCoreML
+                import numpy as np
 
                 logger.info("Loading Parakeet TDT on CoreML/ANE...")
-                _COREML_RUNNER = ParakeetCoreML(variant="v2", compute_units="ane")
+                runner = ParakeetCoreML(variant="v2", compute_units="ane")
+                # Loading alone leaves the first encoder/decoder prediction cold.
+                runner.transcribe_array(np.zeros(16000, dtype=np.float32))
+                _COREML_RUNNER = runner
             except Exception as exc:
                 logger.warning("CoreML parakeet unavailable (%s); using parakeet-mlx", exc)
                 _COREML_RUNNER = False
@@ -109,13 +113,12 @@ def _get_coreml_runner() -> Any:
 
 
 def prewarm() -> None:
-    """Kick the CoreML/ANE runner load on a daemon thread.
+    """Load and warm the CoreML/ANE runner on a daemon thread.
 
-    The first ParakeetCoreML load pays a one-time ANE compile (~31s on a fresh
-    machine). Doing it at plugin register means the first utterance is already
-    warm; a failed load just marks the runner unavailable exactly as it would
-    lazily. Only the primary backend is warmed — parakeet-mlx's 2.4 GB model
-    stays lazy since it's a fallback.
+    The first load can pay a one-time ANE compile (~31s on a fresh machine).
+    Warm prediction under the same loader lock before publishing the runner,
+    so a first utterance cannot race it. Only the primary backend is warmed;
+    the 2.4 GB parakeet-mlx fallback stays lazy.
     """
     if sys.platform != "darwin":
         return

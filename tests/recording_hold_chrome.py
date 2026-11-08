@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -76,7 +77,11 @@ def run():
             reasons, warnings = [], []
             events = []
             stopped = []
+            hint_entered, hint_release = threading.Event(), threading.Event()
             def handle(intent, reply):
+                if intent.get('action') == 'coach' and 'heard' in intent.get('coach', {}):
+                    hint_entered.set()
+                    assert hint_release.wait(5), 'release hint was not unblocked'
                 if intent['type'] == 'record_stop':
                     stopped.append(intent)
                     session.microphone.stop(f"{intent['_browser_target']}:{intent['_browser_document']}")
@@ -131,6 +136,12 @@ def run():
                 time.sleep(.2)
                 assert session.microphone._stream is not None
                 command(a, 'Input.dispatchKeyEvent', {'type': 'keyUp', 'key': ' ', 'code': 'Space', 'windowsVirtualKeyCode': 32})
+                try:
+                    until(hint_entered.is_set)
+                    assert session.microphone._stream is None, 'Hint persistence delayed microphone close'
+                finally:
+                    hint_release.set()
+                print('PASS: release closes input before a blocked hint update')
                 until(lambda: stopped)
                 frozen = stopped[-1]
                 assert frozen['_browser_document'] == document

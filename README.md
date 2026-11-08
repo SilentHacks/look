@@ -167,6 +167,42 @@ as plain text. After compaction, resolving again captures the current cursor, no
 the historical target. `/gaze disconnect` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
 
+Release freezes browser evidence before transcription. The existing capsule immediately
+shows “Looking into …”; hint persistence runs after microphone stop/reservation, not
+ahead of them on the ordered intent worker. Capsule placement samples only its
+candidate strip, without changing placement scores. CoreML prewarm loads and runs
+one silent prediction before sharing the cached runner; models and fallbacks are unchanged.
+
+Private-Chrome measurements (five captures per build, synthetic speech into a fake
+native input, real offline CoreML, scripted host with 50 ms thinking and 10 ms words):
+
+| Stage, milliseconds | Before | After |
+|---|---:|---:|
+| Evidence freeze, median duration | 0.7 | 0.8 |
+| Binding/intent queue, median duration | 37.7 | 0.6 |
+| Release → microphone closed, median | 38.9 | 1.6 |
+| Release → processing words in private renderer, median | 36.9 | 12.2 |
+| Release → ASR started, median | 43.4 | 19.7 |
+| PCM decode, median duration (16 kHz; no resampling) | 0.6 | 1.5 |
+| Cached runner lookup, median duration | 0.03 | 0.04 |
+| ASR inference, median duration | 99.8 | 107.7 |
+| Scope activation, median duration | 0.9 | 1.0 |
+| Release → host injection, median | 149.0 | 137.1 |
+| Release → first host text delta, median | 201.9 | 190.3 |
+| Release → first answer words in private renderer, median | 265.9 | 263.1 |
+| First speech inference after load | 182.5 | 107.7 |
+| First capture → answer words after load | 363.1 | 271.3 |
+
+The steady-state answer-word difference is small; do not claim a large model-speed
+gain. First cached model initialization took 33,981 ms in a fresh process; subsequent
+process loads took 975 ms before and 706 ms after (including prediction warmup).
+Initialization stays on the registration daemon, but asking before it finishes still
+waits on its loader lock. ASR worker startup was 0.9/1.2 ms; native close used a fake
+stream (0.01/0.02 ms), not hardware. No end-to-end live Hermes/model TTFT is claimed.
+A blocked fake scope provider left injection at 113 ms and answer words observed at
+309 ms, before its deadline was observed at 1,642 ms; the 1.5-second decision is not
+an admission wait. FIFO, terminal-hook admission and source ownership are unchanged.
+
 Errata leaves vermilion proofing marks and temporary source-attached paper notes.
 Nothing remains idle except a bare unread count. **Q** recalls the answer index;
 **Right Alt** (or your configured lock shortcut) opens protected question entry.

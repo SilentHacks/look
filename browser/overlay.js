@@ -1285,8 +1285,8 @@
 
   // ---------- free-space placement ----------
   const CELL = 26;
-  function occupancy() {
-    const vw = innerWidth, vh = innerHeight, cols = Math.ceil(vw / CELL), rows = Math.ceil(vh / CELL);
+  function occupancy(height = innerHeight) {
+    const vw = innerWidth, vh = innerHeight, cols = Math.ceil(vw / CELL), rows = Math.ceil(Math.min(vh, height) / CELL);
     const grid = new Float32Array((cols + 1) * (rows + 1)); // summed-area table
     const hit = (x, y) => {
       const n = document.elementFromPoint(x, y);
@@ -1798,7 +1798,7 @@
     // Where notifications live, nudged off anything we can see.
     const rec = S.localPending.at(-1) || anchors.get(inProgress().at(-1)?.id);
     const {hard} = avoidance(rec);
-    const occ = occupancy();
+    const occ = occupancy(150 + PILL_H); // Capsule candidates never sample below this strip.
     let best = null;
     const vw = innerWidth;
     for (let y = MARGIN; y < 150; y += 13) for (let x = vw - w - MARGIN; x > vw * .45; x -= 26) {
@@ -1992,7 +1992,6 @@
       return;
     }
     S.coach.heard++;
-    sendCoach({heard: S.coach.heard});
     // Pointing somewhere else makes it a new question; otherwise it stays with the card.
     const follow = H.follow && !H.targets.length ? H.follow : null;
     const rec = follow ? null : {targets: H.targets, subject: subjectFor(H.targets)};
@@ -2005,6 +2004,8 @@
       P.pill.w.kick(70);
     } else updateCapsule();
     armRetreat();
+    // Close input and reserve the question before hint persistence uses the ordered worker.
+    sendCoach({heard: S.coach.heard});
     // What you pointed at goes into the capsule, so you can see where your question went.
     // The answer lights it again.
     setTimeout(() => {
