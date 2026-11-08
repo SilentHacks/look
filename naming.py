@@ -70,7 +70,7 @@ def plain_error(status: str, error: str) -> str:
     if status == "interrupted":
         return "This answer was interrupted."
     if "no speech" in lower:
-        return "I didn’t catch that."
+        return "I didn’t catch that; hold Space, wait for Listening, then ask again."
     if "send one normal hermes message" in lower:
         return "Hermes isn’t ready yet. Send it one normal message, then try again."
     if "injection outcome unknown" in lower:
@@ -79,8 +79,19 @@ def plain_error(status: str, error: str) -> str:
         return "I couldn’t tell what you were pointing at."
     if "capture" in lower and ("no transcribed" in lower or "no longer" in lower):
         return "That recording is no longer available."
-    if "transcri" in lower or "whisper" in lower or "parakeet" in lower or "microphone" in lower:
-        return "I couldn’t make out that recording."
+    if "microphone" in lower or "portaudio" in lower or "input device" in lower:
+        if "permission" in lower or "denied" in lower or "not permitted" in lower:
+            return ("Microphone access was denied; allow your Hermes terminal app in macOS "
+                    "Privacy & Security, Microphone, then restart that app.")
+        if "already in use" in lower or "closing" in lower:
+            return "The microphone is busy; let go of Space, wait, then hold it again."
+        return ("The microphone could not record; check your input device and your terminal app’s "
+                "microphone permission, then hold Space again.")
+    if "speech model" in lower:
+        return ("The speech recognition model could not load; check your internet connection and free disk space, "
+                "restart Hermes, then choose Try again.")
+    if any(word in lower for word in ("transcri", "recognition", "whisper", "parakeet", "asr")):
+        return "Speech recognition failed; choose Try again, or press Right Option to type your question."
     if "rate" in lower and "limit" in lower or "429" in lower or "quota" in lower:
         return "Hermes is rate limited right now."
     return "Hermes couldn’t finish this answer." if text or status == "failed" else ""

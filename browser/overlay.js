@@ -2225,7 +2225,7 @@
     if (event.session_connected && !S.coach.greeted && !event.items.length) {
       S.coach.greeted = true;
       sendCoach({greeted: true});
-      if (!S.hold) coachLine("Point at anything, hold Space and ask", 7000);
+      if (!S.hold) coachLine("Point at something. Hold Space. Wait for Listening, then ask. Text fields and keyboard-focused controls keep Space", 11000);
     }
     refresh();
   }
@@ -2541,7 +2541,7 @@
         S.keyDown = false;
         if (S.hold) { S.hold.tentative && dropRing(S.hold.tentative.key); for (const t of S.hold.targets) dropRing(t.key); S.hold = null; }
         if (S.pillMode === "wave") hidePill(true);
-        coachLine(msg.error || "The microphone isn’t available", 4600);
+        coachLine(msg.plain_error || "The microphone could not record; check your input device and microphone permission, then try again", 8000);
         armRetreat();
       } else if (isListening) {
         S.micReady = true;
@@ -2557,7 +2557,7 @@
       spaceHeld = false;
       S.keyDown = false;
       resetMic();
-      const reason = msg.error || "Recording cancelled.";
+      const reason = msg.plain_error || msg.error || "Recording cancelled; hold Space to ask again.";
       if (S.hold) {
         S.hold.tentative && dropRing(S.hold.tentative.key);
         for (const t of S.hold.targets) dropRing(t.key);
@@ -2573,7 +2573,7 @@
       if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         showPlainMessage(msg.explanation || "", true);
-      } else if (!msg.ok && !msg.item_id) showPlainMessage(msg.error || "That recording didn’t work.");
+      } else if (!msg.ok && !msg.item_id) showPlainMessage(msg.plain_error || "That recording didn’t work; hold Space and try again.");
       return;
     }
     if (msg.type === "confirm_action") {

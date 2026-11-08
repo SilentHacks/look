@@ -323,7 +323,10 @@ def transcribe_audio_buffer(
             return result
 
     _LAST_BACKEND = "whisper"
-    model = get_whisper_model(model_name)
+    try:
+        model = get_whisper_model(model_name)
+    except Exception as exc:
+        raise RuntimeError(f"Speech model could not load: {exc}") from exc
     if timing is not None:
         timing.mark("asr_model_ready")
         timing.mark("asr_inference_start")
