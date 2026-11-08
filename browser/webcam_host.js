@@ -39,7 +39,7 @@
     .steps li { padding:9px 0; color:var(--label); border-top:.5px solid var(--line); }
     .steps li:first-child { border-top:0; }
     .row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:18px; }
-    button { font:inherit; font-weight:500; border:0; border-radius:12px; padding:9px 18px; cursor:default; color:var(--label); background:var(--hover); transition:background .16s ease,opacity .16s ease; }
+    button { white-space:nowrap; font:inherit; font-weight:500; border:0; border-radius:12px; padding:9px 18px; cursor:default; color:var(--label); background:var(--hover); transition:background .16s ease,opacity .16s ease; }
     button.primary { background:var(--accent); color:var(--on-accent); }
     button.quiet { background:transparent; color:var(--secondary); padding:9px 10px; }
     button:hover { filter:brightness(1.07); } button:active { opacity:.78; }
