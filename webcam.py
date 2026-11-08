@@ -22,7 +22,7 @@ import time
 import urllib.request
 
 from .tracker.webcam_gaze import (CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator,
-                                  GazeEstimator, LandmarkEstimator, check_map, score_check_trial, summarize_check)
+                                  GazeEstimator, LandmarkEstimator, score_check_trial, summarize_check)
 
 _ASSETS = {
     "tasks.tgz": ("https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.32.tgz",
@@ -36,10 +36,8 @@ _SCREEN_KEYS = ("left", "top", "width", "height", "screen_width", "screen_height
 _WRONG_WINDOW = "Move this window onto one screen"
 _WRONG_DISPLAY = "Different screen. Recalibrate here."
 _OLD_MODEL = "The gaze model changed. Please recalibrate with /gaze calibrate."
-_OLD_MODEL_WINDOW = "Eye tracker updated. Recalibrate."
-_BAD_PROFILE_WINDOW = "Saved setup unreadable. Recalibrate."
-_WEAK = "Adjust light or position"
-_INSUFFICIENT = "Couldn\u2019t see your eyes"
+_OLD_MODEL_WINDOW = "Eye tracker updated. Start a new calibration."
+_BAD_PROFILE_WINDOW = "Saved calibration could not be read. Start a new calibration."
 
 
 def asset_directory() -> Path:
@@ -257,20 +255,22 @@ class WebcamHost:
             except (OSError, ValueError) as exc:
                 self.error = str(exc)[:300]
                 self._ui("notice", "Couldn\u2019t save. Try again."); return
-        # Coarse and drawn once; only the page holds it, until the next state clears it.
-        marks = check_map(check["trials"], check["targets"], check["screen"], check["viewport"])
-        self._ui("checkResult", {**self._result_words(outcome, candidate is not None, accepted), "map": marks})
+        self._ui("checkResult", self._result_words(outcome, candidate is not None, accepted))
 
     def _result_words(self, outcome: str, new: bool, accepted: bool) -> dict:
         if outcome == "good":
-            return {"outcome": outcome, "note": "", "kept": False, "calibrated": True,
-                    "actions": [["practise", "Practise"], ["done", "Done"]] if accepted
-                    else [["done", "Done"], ["practise", "Practise"], ["calibrate", "Recalibrate"]]}
-        note = _WEAK if outcome == "weak" else _INSUFFICIENT
-        if new:
-            return {"outcome": outcome, "note": note, "kept": self.profile is not None,
-                    "calibrated": self.profile is not None, "actions": [["calibrate", "Try again"]]}
-        return {"outcome": outcome, "note": note, "kept": False, "calibrated": True, "actions": [["calibrate", "Recalibrate"]]}
+            return {"outcome": outcome, "note": "Calibration saved" if accepted else "Saved calibration passed the test",
+                    "detail": "Try looking between the practice cards to see the broad area the tracker detects.",
+                    "kept": False, "calibrated": True,
+                    "actions": [["practise", "Try eye tracking"], ["done", "Finish setup"]]}
+        detail = ("The estimated gaze did not match the dots reliably. Try brighter, even lighting and keep your head still."
+                  if outcome == "weak" else
+                  "The camera could not get enough clear views of your eyes. Check the lighting and keep your face in view.")
+        if new and self.profile is None:
+            detail += " No calibration has been saved."
+        return {"outcome": outcome, "note": "Calibration needs another try" if new else "Saved calibration did not pass the test",
+                "detail": detail, "kept": self.profile is not None,
+                "calibrated": self.profile is not None, "actions": [["calibrate", "Try calibration again"]]}
 
     def _practice_observe(self, features: list | None, t: float) -> None:
         if features is None:

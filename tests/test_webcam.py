@@ -413,29 +413,20 @@ class CalibrationCheckFlow(unittest.TestCase):
                 _, result = self.run_check(gaze)
                 self.assertEqual(result["outcome"], outcome)
                 self.assertEqual([a for a, _ in result["actions"]], ["calibrate"])
-                self.assertEqual(result["actions"][0][1], "Try again")
+                self.assertEqual(result["actions"][0][1], "Try calibration again")
                 self.assertNotIn("ready", result["note"].lower())
                 self.assertNotRegex(result["note"], r"\d")
                 self.assertTrue(result["kept"])
                 self.assertEqual(self.host.profile_path.read_bytes(), before)
                 self.assertEqual(self.host.estimator.profile, json.loads(before))
 
-    def test_result_map_is_coarse_and_keeps_misses_as_misses(self):
+    def test_result_explains_failure_without_a_spatial_diagram(self):
         self.fit()
-        _, result = self.run_check(lambda t, trial: appearance_features(*t) if trial % 3 else None)
-        places = result["map"]
-        self.assertEqual([(p["x"], p["y"]) for p in places], list(CHECK_POINTS))
-        marks = [m for p in places for m in p["trials"]]
-        self.assertEqual(len(marks), 10)
-        self.assertTrue(all(len(p["trials"]) == 2 for p in places))
-        for mark in marks:
-            if mark["hit"]:
-                self.assertEqual(set(mark), {"hit", "dx", "dy"})
-                self.assertEqual(mark["dx"] * 4 % 1, 0)
-            else:
-                self.assertEqual(mark, {"hit": False})  # Missing trials have no position to draw.
-        self.assertEqual(sum(m["hit"] for m in marks), 6)
-        self.assertNotIn("map", json.dumps(self.host.status()))
+        _, result = self.run_check(lambda *_: None)
+        self.assertNotIn("map", result)
+        self.assertEqual(result["note"], "Calibration needs another try")
+        self.assertIn("lighting", result["detail"])
+        self.assertFalse(result["calibrated"])
         self.assertIsNone(self.host._check)
 
     def test_a_miss_draws_where_it_landed_in_the_window_and_nowhere_outside_it(self):
@@ -478,7 +469,7 @@ class CalibrationCheckFlow(unittest.TestCase):
         self.event("check_start", screen=SCREEN, viewport=VIEWPORT)
         _, result = self.run_check(lambda t, _: appearance_features(1 - t[0], 1 - t[1]))
         self.assertEqual(result["outcome"], "weak")
-        self.assertEqual(result["actions"][0][1], "Recalibrate")
+        self.assertEqual(result["actions"][0][1], "Try calibration again")
         self.assertEqual(self.host.profile_path.read_bytes(), before)
 
     def test_practice_is_private_to_the_window_and_never_clamps(self):

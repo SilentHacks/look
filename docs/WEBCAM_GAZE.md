@@ -44,7 +44,7 @@ unload and owned-document replacement close only the camera process we started.
 
 `/gaze calibrate` switches to webcam mode, starts the owned camera window and
 brings it forward; `/gaze mode webcam` opens the same flow. Maximize it, keep its zoom at
-100%, and click **Begin** (**Recalibrate** for a saved setup). At each dot, look at it, tap Space and keep looking for
+100%, and click **Start calibration** (**Start new calibration** for a saved setup). At each dot, look at it, tap Space and keep looking for
 about one second. A dot without enough usable frames asks again rather than ending
 the attempt. Esc cancels; moving/resizing/hiding the window
 cancels rather than applying wrong screen targets. The trusted opening click
@@ -55,25 +55,22 @@ converted to desktop logical coordinates using that origin, not a fullscreen or
 ### Held-out check and practice
 
 Fitting produces a **candidate** in a private estimator copy. The accepted estimator
-and file do not change until a check passes. The check is user-started with one
-Space tap, then automatic and hidden: five positions that differ from the training
-nine, in two orders (ten equal trials). Each trial ignores a settling period, then
+and file do not change until a check passes. The check uses the same gesture at
+every dot: look at it, tap Space, and keep looking until it moves. Each dot waits
+for a fresh tap. It tests five positions that differ from the training nine, in two orders (ten equal trials). Each trial ignores a settling period, then
 takes the median of its valid estimates. Missing, off-screen or mostly absent trials
 fail. Estimates stay in memory for that trial and never refit anything. Named
 constants in `tracker/webcam_gaze.py` are **provisional pending a real-camera
 trial**: a trial hits inside one cell of a 3×3 screen grid around its target; eight
 of ten pass; fewer than six valid trials cannot judge.
 
-The result is a map, never a score: five glass places where the check ran, each
-tried twice. Both landings inside closes the place; a miss opens the ring and draws
-a line to where that estimate landed in this window; a trial with no estimate shows
-nothing. Those coarse positions (a 40-cell window grid; hits as a quarter-step offset)
-exist only for this drawing, in memory, and are never logged or in status. The
-acceptance rule itself is unchanged. A weak or unmeasurable new calibration offers
-Try again or Use cursor and keeps the earlier one. A cancelled or failed attempt saves
-nothing, and moving, resizing or hiding the window during the dots or check ends the
-attempt and says so. **Check my gaze** tests the saved profile on the same display and
-never rewrites it.
+The result states whether calibration was saved, whether a saved calibration passed,
+or why another attempt is needed. No circles or miss lines are shown. A weak or
+unmeasurable new calibration offers **Try calibration again** or **Use cursor** and
+keeps any earlier saved calibration. A cancelled or failed attempt saves nothing.
+Moving, resizing or hiding the window during the dots or check ends the attempt
+and says so. When a saved profile is found, the opening screen explains this and
+lets you **Test saved calibration** or **Start new calibration**. Testing never rewrites it.
 
 Practice runs only in the owned window and only while open: six broad cards and a
 neutral lens. Python maps each estimate to the window; the page snaps it to a coarse

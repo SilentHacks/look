@@ -64,6 +64,36 @@ class CaptureTests(unittest.TestCase):
             self.assertTrue(streams[2].closed)
             self.assertEqual(mic._audio, bytearray())
 
+    def test_ready_waits_for_first_buffer_and_keeps_its_opening_audio(self):
+        opened, deliver = threading.Event(), threading.Event()
+        result = []
+        opening = b"\x01\x00\x02\x00"
+
+        class DelayedInput(Input):
+            def start(self):
+                opened.set()
+                def first_buffer():
+                    if deliver.wait(2):
+                        self.callback(opening, 2, SimpleNamespace(currentTime=1., inputBufferAdcTime=1.), None)
+                threading.Thread(target=first_buffer, daemon=True).start()
+
+        mic = Microphone()
+        self.addCleanup(mic.cancel)
+        with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=DelayedInput)):
+            worker = threading.Thread(target=lambda: result.append(mic.start("A", lambda: None)), daemon=True)
+            worker.start()
+            try:
+                self.assertTrue(opened.wait(1))
+                self.assertEqual(result, [])
+                deliver.set()
+                worker.join(3)
+                self.assertFalse(worker.is_alive())
+                self.assertTrue(result[0]["ok"])
+                self.assertEqual(mic.stop("A")[0], opening)
+            finally:
+                deliver.set()
+                worker.join(3)
+
     def test_release_seals_pcm_before_ui_and_closes_even_if_ui_fails(self):
         streams = []
 

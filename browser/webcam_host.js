@@ -32,8 +32,6 @@
     #beta { position:fixed; left:28px; top:24px; margin:0; font-size:13px; color:var(--tertiary); }
     body.focus #beta,body.practising #beta { display:none; }
     main { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; }
-    main.at-map { justify-content:flex-end; padding-bottom:34px; pointer-events:none; }
-    main.at-map > * { pointer-events:auto; }
     .arrive { animation:arrive .42s cubic-bezier(.2,.8,.2,1) both; }
     @keyframes arrive { from { opacity:0; transform:translateY(8px) scale(.985); } }
     #feed { position:fixed; left:0; top:0; width:2px; height:2px; opacity:0; pointer-events:none; }
@@ -48,7 +46,7 @@
     .you { left:50%; top:48%; width:62%; height:62%; opacity:0; border:2px solid #fff; filter:drop-shadow(0 0 2px rgba(0,0,0,.45));
       transition:left .22s ease,top .22s ease,width .22s ease,height .22s ease,opacity .25s ease; }
     .face.placed .guide { opacity:0; }
-    .note { margin:0; font-size:13px; color:var(--secondary); text-align:center; }
+    .note { max-width:560px; margin:0; font-size:13px; color:var(--secondary); text-align:center; }
     .note.notice { color:var(--label); font-weight:500; }
     .note.kept { color:var(--tertiary); margin-top:-8px; }
     .detail { margin:0; max-width:420px; font-size:12px; color:var(--tertiary); text-align:center; overflow-wrap:anywhere; }
@@ -76,14 +74,6 @@
     .echo { position:fixed; left:0; top:0; width:30px; height:30px; margin:-15px 0 0 -15px; border-radius:50%; pointer-events:none; box-shadow:0 0 0 1px var(--dot); opacity:0; animation:echo .5s ease-out forwards; }
     @keyframes echo { from { opacity:.34; scale:1; } to { opacity:0; scale:2.7; } }
     #cue { position:fixed; left:0; top:0; display:none; align-items:center; gap:7px; font-size:13px; color:var(--secondary); white-space:nowrap; transition:opacity .2s ease; }
-    #map,#marks { position:fixed; inset:0; pointer-events:none; }
-    #marks { width:100%; height:100%; overflow:visible; }
-    .place { position:absolute; width:92px; height:92px; margin:-46px 0 0 -46px; border-radius:50%; animation:settle .5s cubic-bezier(.2,.9,.3,1) both; }
-    @keyframes settle { from { opacity:0; transform:scale(.72); } }
-    .pop { transform-box:fill-box; transform-origin:center; animation:pop .4s cubic-bezier(.2,.9,.3,1) both; }
-    @keyframes pop { from { opacity:0; transform:scale(.3); } }
-    .draw { animation:draw .55s ease-out both; }
-    @keyframes draw { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }
     #practice { position:fixed; inset:0; display:none; padding:24px 24px 88px; grid:1fr 1fr / 1fr 1fr 1fr; gap:14px; }
     .topic { display:grid; place-items:center; border-radius:22px; box-shadow:var(--quiet); background:var(--fill); font:500 24px/1.2 -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif; letter-spacing:-.018em; }
     #region { position:fixed; left:0; top:0; width:42vmin; height:42vmin; margin:-21vmin 0 0 -21vmin; border-radius:50%; pointer-events:none; opacity:0;
@@ -122,8 +112,6 @@
   const dot = make("div"); dot.id = "dot";
   const disc = make("div", "", "disc glass"); dot.append(disc, make("div", "", "pt"));
   const cue = make("div"); cue.id = "cue";
-  const map = make("div"); map.id = "map";
-  const marks = document.createElementNS("http://www.w3.org/2000/svg", "svg"); marks.id = "marks";
   const practice = make("div"); practice.id = "practice";
   for (const topic of ["Saturn’s rings", "Coral reefs", "Sourdough", "The Silk Road", "Honeybees", "Northern lights"]) practice.append(make("div", topic, "topic glass"));
   const region = make("div"); region.id = "region";
@@ -136,24 +124,23 @@
   const say = make("div"); say.id = "say"; say.append(make("span", "Hold"), lessonKey, make("span", "in Chrome to ask"));
   const lesson = make("div"); lesson.id = "lesson"; lesson.append(capsule, say);
   const rehearse = make("p", "", "note"); rehearse.id = "rehearse";
-  document.body.append(video, beta, main, map, marks, practice, region, dot, cue, bar);
+  document.body.append(video, beta, main, practice, region, dot, cue, bar);
 
   const POINTS = [.1, .5, .9].flatMap(y => [.1, .5, .9].map(x => [x, y]));
   const NO_EYES = "Couldn’t see your eyes", OFF_SCREEN = "Off screen", MOVED = "Window moved";
-  const STAYS = "Stays in this window", STAYS_AND_OPEN = "Stays in this window. Leave open to keep tracking.";
+  const STAYS = "Camera stays in this window. No microphone is used during setup.";
   const CURSOR = ["cursor", "Use cursor"];
   // Display only: a coarse cell, so the area never reads as a precise pointer.
   const REGION_COLS = 8, REGION_ROWS = 6, LOST_AFTER_MS = 700, TAP_HOLD_MS = 220;
-  const CHECK_CUE_DELAY_MS = 3500;
   // Face cue, in fractions of the round picture. Fixed by eye; it is a hint, not a gate.
   const GUIDE = {x: .5, y: .48, size: .62}, FIT = {x: .075, y: .085, size: .14}, HEAD_SPAN = 1.65;
 
   let model, stream, timer, active = true, index = -1, collecting = false, until = 0, lastVideoTime = -1, awaiting = false;
   let frames = 0, firstFrame = 0, lastFrame = 0, frameMs = 0, featureMs = 0;
   let phase = "start", locked = null, calibrated = !!opts.calibrated, notice = opts.calibration_notice || "", faceAt = 0;
-  let check = null, checkIndex = -1, checkObserving = false, checkTimer = 0, cueTimer = 0;
+  let check = null, checkIndex = -1, checkObserving = false, checkTimer = 0;
   let seenAt = 0, lostWhy = "", barWords = "", practiceTick = 0;
-  let holdStart = 0, holdTimer = 0, afterDots = false, shownMap = null;
+  let holdStart = 0, holdTimer = 0;
 
   const windowNow = () => [screenX, screenY, innerWidth, innerHeight, devicePixelRatio];
   const faceVisible = () => performance.now() - faceAt < 800;
@@ -168,7 +155,7 @@
     return row;
   }
   // Every full page: optional round picture, only the words that can't be drawn, one capsule of actions.
-  function page({camera = "", waking = false, status = "", notes = [], kept = "", detail = "", extra = [], actions = [], atMap = false}) {
+  function page({camera = "", waking = false, status = "", notes = [], kept = "", detail = "", extra = [], actions = []}) {
     const parts = [];
     if (camera) {
       const live = camera === "live" && stream;
@@ -182,7 +169,7 @@
     if (kept) parts.push(make("p", kept, "note kept"));
     if (detail) parts.push(make("p", detail, "detail"));
     if (actions.length) parts.push(buttons(actions));
-    main.replaceChildren(...parts); main.className = atMap ? "at-map" : ""; main.style.display = "";
+    main.replaceChildren(...parts); main.className = ""; main.style.display = "";
     for (const part of parts) { part.classList.remove("arrive"); void part.offsetWidth; part.classList.add("arrive"); }
     updateFace();
   }
@@ -204,14 +191,14 @@
   }
   function home() {
     phase = "home"; locked = null; hideFlow();
-    if (calibrated) page({camera: "live", status: notice, notes: [STAYS_AND_OPEN], actions: [["check", "Check my gaze"], ["calibrate", "Recalibrate"], CURSOR]});
-    else page({camera: "live", status: notice, notes: [STAYS], actions: [["calibrate", "Begin", !faceVisible()], CURSOR]});
+    if (calibrated) page({camera: "live", status: notice || "A saved calibration was found", notes: ["Test whether it still matches how you’re sitting, or start a new calibration.", "To test: look at each dot, tap Space, and keep looking until it moves.", STAYS], actions: [["check", "Test saved calibration"], ["calibrate", "Start new calibration"], CURSOR]});
+    else page({camera: "live", status: notice || "Set up eye tracking", notes: ["Sit comfortably with your face inside the circle.", "Look at each dot, tap Space, and keep looking until it moves. No need to hold Space.", "First we learn where you’re looking, then test the calibration with more dots.", STAYS], actions: [["calibrate", "Start calibration", !faceVisible()], CURSOR]});
     notice = "";
   }
   function hideFlow() {
-    index = -1; collecting = false; awaiting = false; checkObserving = false; checkIndex = -1; clearTimeout(checkTimer); clearTimeout(cueTimer); check = null;
+    index = -1; collecting = false; awaiting = false; checkObserving = false; checkIndex = -1; clearTimeout(checkTimer); check = null;
     dot.style.display = "none"; cue.style.display = "none"; practice.style.display = "none"; bar.style.display = "none"; region.style.opacity = "0";
-    dot.classList.remove("collect", "travel", "shake"); setFocus(false); document.body.classList.remove("practising"); drawMap(null);
+    dot.classList.remove("collect", "travel", "shake"); setFocus(false); document.body.classList.remove("practising");
   }
   function fatal(raw, label, showRaw) {
     active = false; clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); stream = null; video.srcObject = null; preview.srcObject = null;
@@ -226,7 +213,7 @@
     return ["Camera stopped", true];
   }
   function moveDot(x, y) { dot.style.transform = `translate(${x * innerWidth}px,${y * innerHeight}px)`; }
-  function showCue(x, y, line) {
+  function showCue(x, y, line = "Look at the dot") {
     const key = make("span", "Space", "key");
     cue.replaceChildren(...(line ? [make("span", line), make("span", "·")] : []), make("span", "Tap"), key);
     cue.style.display = "flex";
@@ -237,7 +224,7 @@
   }
   function place() {
     const [x, y] = POINTS[index]; moveDot(x, y); dot.classList.remove("collect", "shake");
-    if (index === 0) showCue(x, y);
+    showCue(x, y);
   }
   function release() {
     const [x, y] = POINTS[index];
@@ -254,10 +241,10 @@
   function act(action, e) {
     if (!e.isTrusted || !active && action !== "retry" && action !== "cursor") return;
     if (action === "calibrate" && stream) {
-      hideFlow(); phase = "calibrate"; index = 0; afterDots = true; main.style.display = "none"; setFocus(true); dot.style.display = "block";
+      hideFlow(); phase = "calibrate"; index = 0; main.style.display = "none"; setFocus(true); dot.style.display = "block";
       emit("calibration_start", measure(e)); place();
     } else if (action === "check" && stream) {
-      hideFlow(); phase = "waiting"; afterDots = false; emit("check_start", measure(e));
+      hideFlow(); phase = "waiting"; emit("check_start", measure(e));
     } else if (action === "practise" && stream) {
       hideFlow(); phase = "waiting"; emit("practice_start", measure(e));
     } else if (action === "done") {
@@ -275,68 +262,34 @@
   function handoff() {
     hideFlow(); phase = "handoff"; locked = null;
     rehearse.textContent = ""; lessonKey.classList.remove("down"); capsule.classList.remove("on");
-    page({extra: [lesson, rehearse], notes: ["Move the pointer once on each page"], actions: [["home", "Done"], CURSOR]});
+    page({extra: [lesson, rehearse], notes: ["Return to the companion browser. Hold Space and wait for ‘Listening’, then speak.", "Let go to send. Tap Space to scroll. This practice does not record audio.", "Move the pointer once on each page"], actions: [["home", "Done"], CURSOR]});
   }
   function waitForCheck() {
-    // The same dot and the same tap as the nine dots; words only if nothing happens.
-    phase = "checkIntro"; main.style.display = "none"; setFocus(true); checkIndex = -1;
-    const [x, y] = check.points[0]; moveDot(x, y); dot.classList.remove("collect", "travel"); dot.style.display = "block";
-    clearTimeout(cueTimer);
-    cueTimer = setTimeout(() => { if (phase === "checkIntro") showCue(x, y); }, afterDots ? CHECK_CUE_DELAY_MS : 0);
+    // The same gesture for both stages: each dot waits for a fresh tap.
+    phase = "checkIntro"; main.style.display = "none"; setFocus(true); checkIndex = 0;
+    showCheckDot();
+  }
+  function showCheckDot() {
+    phase = "checkIntro";
+    const [x, y] = check.points[checkIndex]; moveDot(x, y);
+    dot.classList.remove("collect", "travel"); dot.style.display = "block";
+    showCue(x, y, "Test calibration · Look at the dot");
   }
   function startCheckRun() {
-    clearTimeout(cueTimer); cue.style.display = "none";
-    phase = "check"; dot.classList.add("travel");
-    checkIndex = 0; runTrial();
-  }
-  function runTrial() {
-    const [x, y] = check.points[checkIndex]; moveDot(x, y); checkObserving = false;
+    cue.replaceChildren(make("span", "Keep looking until the dot moves"));
+    phase = "check"; dot.classList.add("collect");
     checkTimer = setTimeout(() => {
       checkObserving = true;
       checkTimer = setTimeout(() => {
         checkObserving = false; emit("check_trial", {index: checkIndex}); checkIndex++;
-        if (checkIndex < check.points.length) runTrial();
+        if (checkIndex < check.points.length) showCheckDot();
       }, check.observe_ms);
     }, check.settle_ms);
   }
-  // The result is the map: closed glass where both landings were inside, open where one wasn't.
-  function drawMap(places) {
-    shownMap = places; map.replaceChildren(); marks.replaceChildren();
-    if (!places) return;
-    const R = 46, W = innerWidth, H = innerHeight, NS = marks.namespaceURI;
-    const svg = (tag, attrs, parent = marks) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); parent.append(n); return n; };
-    const line = (parent, x1, y1, x2, y2, attrs) => svg("line", {x1, y1, x2, y2, pathLength: 1, "stroke-dasharray": 1, class: "draw", ...attrs}, parent);
-    places.forEach((p, i) => {
-      const cx = p.x * W, cy = p.y * H, misses = p.trials.filter(t => !t.hit), landed = misses.find(t => "x" in t);
-      const hits = p.trials.filter(t => t.hit), delay = i * .07;
-      if (!misses.length) {
-        const plate = make("div", "", "place glass"); plate.style.left = `${cx}px`; plate.style.top = `${cy}px`; plate.style.animationDelay = `${delay}s`; map.append(plate);
-      } else if (!landed && !hits.length) {
-        svg("circle", {cx, cy, r: R, fill: "none", stroke: "var(--hollow)", "stroke-width": 2.25, "stroke-linecap": "round", "stroke-dasharray": "0.1 7", class: "pop", style: `animation-delay:${delay}s`});
-      } else {
-        const toward = landed ? Math.atan2(landed.y * H - cy, landed.x * W - cx) : -Math.PI / 2;
-        const a0 = toward + .62, a1 = toward + Math.PI * 2 - .62;
-        const d = `M${cx + R * Math.cos(a0)} ${cy + R * Math.sin(a0)}A${R} ${R} 0 1 1 ${cx + R * Math.cos(a1)} ${cy + R * Math.sin(a1)}`;
-        const tube = svg("g", {class: "pop", style: `animation-delay:${delay}s;filter:drop-shadow(0 4px 9px rgba(0,0,0,.2))`});
-        svg("path", {d, fill: "none", stroke: "var(--tube-edge)", "stroke-width": 11, "stroke-linecap": "round"}, tube);
-        svg("path", {d, fill: "none", stroke: "var(--tube)", "stroke-width": 10, "stroke-linecap": "round"}, tube);
-      }
-      p.trials.forEach((t, j) => {
-        const at = delay + .18 + j * .07;
-        if (t.hit) svg("circle", {cx: cx + t.dx * R * .62, cy: cy + t.dy * R * .62, r: 5.5, fill: "var(--dot)", class: "pop", style: `animation-delay:${at}s`});
-        else if ("x" in t) {
-          const x = t.x * W, y = t.y * H;
-          line(marks, cx, cy, x, y, {stroke: "var(--trace)", "stroke-width": 1, style: `animation-delay:${at}s`});
-          svg("circle", {cx: x, cy: y, r: 5.5, fill: "var(--dot)", class: "pop", style: `animation-delay:${at + .25}s`});
-        }
-      });
-    });
-  }
-  addEventListener("resize", () => { if (phase === "result" && shownMap) drawMap(shownMap); });
   function setPracticeWords(kind) {
     if (kind === barWords) return;
     barWords = kind;
-    if (kind === "hold") barText.replaceChildren(make("span", "Hold"), make("span", "Space", "key"), make("span", "in Chrome to ask"));
+    if (kind === "hold") barText.textContent = "Practice: look between the cards. The shaded area follows your gaze.";
     else barText.textContent = kind;
   }
   function practiceFrame() {
@@ -355,7 +308,7 @@
     if (phase === "calibrate") {
       e.preventDefault();
       if (e.repeat || collecting || awaiting || index < 0) return;
-      collecting = true; until = performance.now() + 1100; dot.classList.remove("shake"); dot.classList.add("collect"); cue.style.display = "none";
+      collecting = true; until = performance.now() + 1100; dot.classList.remove("shake"); dot.classList.add("collect"); cue.replaceChildren(make("span", "Keep looking until the dot moves"));
     } else if (phase === "checkIntro") {
       e.preventDefault(); if (!e.repeat) startCheckRun();
     } else if (phase === "handoff") {
@@ -384,17 +337,16 @@
       showCue(...POINTS[index], NO_EYES);
     },
     calibrationFailed() { hideFlow(); phase = "result";
-      page({camera: "live", status: "Adjust light or position", kept: calibrated ? "Earlier setup kept" : "", actions: [["calibrate", "Try again"], CURSOR]}); },
+      page({camera: "live", status: "Calibration could not be completed", notes: ["Try brighter, even lighting and keep your head comfortable and still.", "Look at each dot, tap Space, and keep looking until it moves."], kept: calibrated ? "Your saved calibration has not changed" : "No calibration has been saved", actions: [["calibrate", "Try calibration again"], CURSOR]}); },
     checkReady(value) { hideFlow(); check = value; waitForCheck(); },
     checkResult(result) {
       hideFlow(); phase = "result"; locked = null; calibrated = result.calibrated;
-      drawMap(result.map);
-      page({atMap: true, status: result.note, kept: result.kept ? "Earlier setup kept" : "", actions: [...result.actions, CURSOR]});
+      page({status: result.note, notes: [result.detail], kept: result.kept ? "Your saved calibration has not changed" : "", actions: [...result.actions, CURSOR]});
     },
     practiceReady() {
       hideFlow(); phase = "practice"; main.style.display = "none"; seenAt = performance.now(); lostWhy = "face"; barWords = ""; document.body.classList.add("practising");
       practice.style.display = "grid"; bar.style.display = "flex";
-      bar.replaceChildren(barText, ...[...buttons([["done", "Done"], ["calibrate", "Recalibrate"], CURSOR]).children]);
+      bar.replaceChildren(barText, ...[...buttons([["done", "Done"], ["calibrate", "Start new calibration"], CURSOR]).children]);
       setPracticeWords("hold");
     },
     practiceGaze(value) {

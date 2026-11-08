@@ -99,8 +99,10 @@ typing or navigation already performed.
 ### Try eyes, beta
 
 After a useful cursor answer, explicitly enter `/gaze calibrate`. It switches to
-webcam mode and opens the separate local camera window. Click **Begin**
-(**Recalibrate** for a saved setup), then follow its dots, check and practice.
+webcam mode and opens the separate local camera window. Click **Start calibration**
+(**Start new calibration** for a saved setup). In both the calibration and its test,
+look at each dot, tap Space, and keep looking until it moves. Each dot waits for you.
+A saved setup is identified explicitly and can be tested without replacing it.
 `/gaze mode webcam` opens the same flow. Move the pointer once in every page,
 and again after zooming or resizing. Use one display, good light and broad page
 regions; recalibrate after moving or changing camera, posture or glasses.

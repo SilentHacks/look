@@ -125,6 +125,16 @@ class Window:
         until(lambda: .1 <= self.clock() < 1.2, PERIOD + 8)  # All sixteen seconds fall inside the face footage.
         self.tap(); self.wait("check", 4)
 
+    def finish_check(self):
+        until(lambda: .1 <= self.clock() < 1.2, PERIOD + 8)
+        for index in range(10):
+            until(lambda: self.state()["phase"] == "checkIntro" and self.state()["checkIndex"] == index, 5)
+            # Each target waits: it must not advance until the user is ready.
+            time.sleep(.15)
+            assert self.state()["phase"] == "checkIntro" and self.state()["checkIndex"] == index
+            self.tap()
+        self.wait("result", 5)
+
     def close(self):
         self.tab.ws.close(); self.host.stop()
 
@@ -175,7 +185,7 @@ def old_profile(tmp, video, out, report):
     window = Window(WebcamHost(lambda *_: False, profile_path=path, fake_video=video, chrome_args=HEADLESS), out)
     try:
         window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
-        assert "recalibrate" in window.text().lower() and "Check my gaze" not in window.text()
+        assert "Start a new calibration" in window.text() and "Test saved calibration" not in window.text()
         assert not window.host.status()["calibrated"] and path.read_bytes() == before
         window.shot("11-old-calibration")
         report["old_profile"] = {"refused_with_plain_message": True, "file_unchanged": True}
@@ -199,7 +209,7 @@ def main_flow(tmp, video, out, report, scheme="light"):
         assert window.tab.main("typeof __HERMES_WEBCAM__") == "undefined"
         assert window.tab.main("typeof __hermesGazeIntent") == "undefined"
         words = window.text()
-        assert "Stays in this window" in words and "Eye tracking beta" in words and "Begin" in words
+        assert "stays in this window" in words and "Eye tracking beta" in words and "Start calibration" in words
         for gone in ("large", "glasses", "Hermes can see"):
             assert gone not in words, words
         window.shot("02-setup")
@@ -215,17 +225,15 @@ def main_flow(tmp, video, out, report, scheme="light"):
         # A real fit and real frames; the check sees scripted estimates near each target.
         window.fit(report)
         Scripted.script = jittered(host)
-        window.start_check()
-        until(lambda: window.state()["checkIndex"] >= 2)
         window.shot("06-check-running")
         hidden = window.tab.main("getComputedStyle(document.querySelector('#region')).opacity")
         assert hidden == "0"
         assert not path.exists()
-        window.wait("result", 25)
+        window.finish_check()
         Scripted.script = None
         words = window.text()
-        assert "Practise" in words and "Done" in words and "%" not in words and not any(c.isdigit() for c in words), words
-        assert len(window.tab.main("[...document.querySelectorAll('.place')].length.toString()")) and window.tab.main("document.querySelectorAll('.place').length") == 5
+        assert "Try eye tracking" in words and "Finish setup" in words and "%" not in words and not any(c.isdigit() for c in words), words
+        assert window.tab.main("document.querySelectorAll('#map, #marks').length") == 0
         assert path.exists() and oct(path.stat().st_mode & 0o777) == "0o600" and host.status()["calibrated"]
         assert host._check is None and "map" not in json.dumps(host.status())
         window.shot("07-success", 1.6)
@@ -234,9 +242,10 @@ def main_flow(tmp, video, out, report, scheme="light"):
 
         # Practice: only ever inside this window.
         Scripted.script = at(.3, .35)
+        until(lambda: .1 <= window.clock() < 12, PERIOD + 8)
         window.click("practise"); window.wait("practice")
         until(lambda: window.tab.main("document.querySelector('#region').style.opacity") == "1")
-        assert "in Chrome to ask" in window.text()
+        until(lambda: "Practice: look between the cards" in window.text(), 5)
         assert host.delivered == 0
         window.shot("08-practice")
         Scripted.script = lambda *_: None
@@ -262,17 +271,17 @@ def main_flow(tmp, video, out, report, scheme="light"):
         window.shot("10c-rehearsal-done", .25)
         report["rehearsal"] = {"says_rehearsal": True}
         window.click("home"); window.wait("home")
-        assert "Check my gaze" in window.text() and "Stays in this window" in window.text()
+        assert "Test saved calibration" in window.text() and "stays in this window" in window.text()
         window.shot("12-welcome-back")
 
-        # A weak attempt keeps the accepted calibration and draws where estimates landed.
+        # A weak attempt explains the failure and keeps the accepted calibration.
         window.fit(report)
         Scripted.script = jittered(host, misses={1, 2, 5, 7})
-        window.start_check(); window.wait("result", 25)
+        window.finish_check()
         Scripted.script = None
         words = window.text()
-        assert "Adjust light or position" in words and "Earlier setup kept" in words, words
-        assert "Try again" in words and "Use cursor" in words and "ready" not in words.lower()
+        assert "Calibration" in words and "Your saved calibration has not changed" in words, words
+        assert "Try calibration again" in words and "Use cursor" in words and "ready" not in words.lower()
         assert path.read_bytes() == saved
         window.shot("13-weak", 1.6)
         report["failed_check"] = {"previous_kept": True}
@@ -281,7 +290,7 @@ def main_flow(tmp, video, out, report, scheme="light"):
         Scripted.fail_next_fit = True
         window.nine(); window.wait("result", 30)
         words = window.text()
-        assert "Adjust light or position" in words and "Earlier setup kept" in words, words
+        assert "Calibration" in words and "Your saved calibration has not changed" in words, words
         assert path.read_bytes() == saved
         window.shot("13b-fit-failed")
 
@@ -300,14 +309,14 @@ def main_flow(tmp, video, out, report, scheme="light"):
                                    on_use_cursor=lambda: used.append(True)), out, scheme)
         host = window.host
         window.wait("home")
-        assert host.status()["calibrated"] and "Check my gaze" in window.text()
+        assert host.status()["calibrated"] and "Test saved calibration" in window.text()
         window.click("check"); window.wait("checkIntro")
         window.shot("14-saved-check-waiting", .9)
         Scripted.script = lambda *_: None
-        window.start_check(); window.wait("result", 25)
+        window.finish_check()
         Scripted.script = None
         words = window.text()
-        assert "Couldn’t see your eyes" in words and "Recalibrate" in words, words
+        assert "Saved calibration did not pass" in words and "Try calibration again" in words, words
         assert path.read_bytes() == saved
         window.shot("15-couldnt-check", 1.6)
         for name, value in (("reduced-solid", [{"name": "prefers-color-scheme", "value": scheme}, {"name": "prefers-reduced-transparency", "value": "reduce"}, {"name": "prefers-reduced-motion", "value": "reduce"}]),):

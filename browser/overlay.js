@@ -60,7 +60,7 @@
     advanceTimer: 0, engagedUntil: 0,
     ids: 0, sizes: {prevH: 0, cardH: 0, nextH: 0, contentH: 0, bodyH: 0}, maxBody: 420, dark: false, dir: null,
     coach: {greeted: false, heard: 0, answered: 0, retreated: false}, pillMode: "none", pillW: 96, pillLast: "",
-    micReady: false, micWarning: "", micSlow: false, localPending: [], compose: null, note: null, frameY: 0, frameH: 0,
+    micReady: false, micWarning: "", localPending: [], compose: null, note: null, frameY: 0, frameH: 0,
     wasBusy: false, cardFade: 0, shown: new Set(), reposition: new Set(), ready: false,
   };
   const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -1882,18 +1882,15 @@
   // ---------- talking ----------
   function waveText() {
     if (S.micWarning) return S.micWarning;
-    if (S.hold?.follow) return "Asking more about this";
-    if (!S.micReady) return S.micSlow ? "Starting…" : "";
-    return S.coach.heard < 3 ? "Listening" : "";
+    if (!S.micReady) return "Wait for Listening…";
+    return "Listening";
   }
   function refreshWave() { if (S.hold) { pushPill("wave", waveText(), false); } }
   function startListening() {
     if (isListening || document.visibilityState !== "visible" || !document.hasFocus()) return false;
     isListening = true;
-    S.micReady = false; S.micSlow = false; S.micWarning = "";
-    clearTimeout(S.micTimer);
-    // Only a slow start earns a word. A quick one just goes straight to Listening.
-    S.micTimer = setTimeout(() => { if (isListening && !S.micReady) { S.micSlow = true; refreshWave(); } }, 250);
+    S.micReady = false; S.micWarning = "";
+    // Readiness follows the first native audio buffer, including on follow-ups.
     if (!_emit({ type: "record_start" })) { isListening = false; return false; }
     return true;
   }
@@ -2100,8 +2097,7 @@
     S.localPending.push(rec);
   }
   function resetMic() {
-    S.micReady = false; S.micWarning = ""; S.micSlow = false;
-    clearTimeout(S.micTimer);
+    S.micReady = false; S.micWarning = "";
   }
   function cancelListening(reason = "") {
     if (!isListening) return;
@@ -2603,8 +2599,6 @@
         armRetreat();
       } else if (isListening) {
         S.micReady = true;
-        S.micSlow = false;
-        clearTimeout(S.micTimer);
         refreshWave();
       }
       return;
@@ -3220,7 +3214,7 @@
     document.removeEventListener("toggle", onTopLayer, true);
     document.removeEventListener("fullscreenchange", onTopLayer, true);
     clearInterval(transportTimer);
-    clearTimeout(S.retreatTimer); clearTimeout(S.coachTimer); clearTimeout(S.armTimer); clearTimeout(S.micTimer);
+    clearTimeout(S.retreatTimer); clearTimeout(S.coachTimer); clearTimeout(S.armTimer);
     clearTimeout(S.advanceTimer);
     if (raf) cancelAnimationFrame(raf);
     window.removeEventListener("resize", onViewportResize);
