@@ -64,6 +64,9 @@ def _first_run_guide(session, *, initialized: bool = False) -> str:
         "Local camera and speech recognition do not make the whole conversation local. "
         "Optional TypeSafe highlighting also receives your question and scope descriptions when configured; "
         "extra page text is off by default.",
+        "Failed speech can remain in memory for retry until the plugin exits. "
+        "A recognition fallback uses a temporary audio file, normally deleted afterward; "
+        "a crash or failed deletion can leave it in the system temporary folder.",
         "Connected conversations use guarded browsing tools. /gaze disconnect restores ordinary Hermes tools.",
         "First cursor question: run /gaze mode hover after connecting. Open a page, or /gaze demo for practice. "
         "Point at something. Hold Space. Wait for Listening, then ask. Let go when you are done.",
@@ -92,7 +95,11 @@ def _handle_slash_command(raw_args: str) -> str:
     if sub == "start":
         if not session.is_chrome_reachable():
             port = urlparse(session.cdp_http_url).port or 9333
-            launch_chrome_with_cdp("about:blank", port=port)
+            try:
+                launch_chrome_with_cdp("about:blank", port=port)
+            except OSError:
+                return ("Chrome could not start. Install Google Chrome in Applications, "
+                        "then run /gaze connect again. Use /gaze setup to check readiness.")
             for _ in range(40):
                 if session.is_chrome_reachable():
                     break
@@ -105,7 +112,7 @@ def _handle_slash_command(raw_args: str) -> str:
             except OSError:
                 pass
         return ("Chrome companion ready. Hold Space; wait for Listening, then speak."
-                if ready else "Chrome companion could not attach to a supported page.")
+                if ready else "Chrome could not attach. Open an ordinary page in the companion, then run /gaze connect again.")
 
     if sub == "demo":
         cfg = _config()

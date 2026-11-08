@@ -2225,7 +2225,7 @@
     if (event.session_connected && !S.coach.greeted && !event.items.length) {
       S.coach.greeted = true;
       sendCoach({greeted: true});
-      if (!S.hold) coachLine("Point at something. Hold Space. Wait for Listening, then ask. Text fields and keyboard-focused controls keep Space", 11000);
+      if (!S.hold) coachLine("Hold Space. Wait for Listening. Leave fields or keyboard-focused controls.", 11000);
     }
     refresh();
   }
@@ -2541,7 +2541,7 @@
         S.keyDown = false;
         if (S.hold) { S.hold.tentative && dropRing(S.hold.tentative.key); for (const t of S.hold.targets) dropRing(t.key); S.hold = null; }
         if (S.pillMode === "wave") hidePill(true);
-        coachLine(msg.plain_error || "The microphone could not record; check your input device and microphone permission, then try again", 8000);
+        coachLine(msg.plain_error || "Microphone failed. Check input and permission, then try again.", 8000);
         armRetreat();
       } else if (isListening) {
         S.micReady = true;

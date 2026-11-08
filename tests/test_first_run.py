@@ -3,12 +3,14 @@ import importlib.machinery
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
 from hermes_gaze import cli, service, voice
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.naming import plain_error
+from hermes_gaze.voice_turns import VoiceTurns
 
 
 class FirstRunTests(unittest.TestCase):
@@ -92,7 +94,7 @@ class FirstRunTests(unittest.TestCase):
              patch.object(voice, 'record_microphone', side_effect=PermissionError('denied private detail')):
             result = service.resolve_now(session, utterance='', record_voice=True)
         self.assertIn('Microphone', result['plain_error'])
-        self.assertIn('Privacy & Security', result['plain_error'])
+        self.assertIn('settings', result['plain_error'])
         self.assertNotIn('private detail', result['plain_error'])
         with patch.object(session, 'configure'), \
              patch.object(session, 'fetch_cursor_context', return_value={}), \
@@ -100,7 +102,7 @@ class FirstRunTests(unittest.TestCase):
              patch.object(voice, 'transcribe_audio_buffer', side_effect=RuntimeError('decoder private detail')):
             result = service.resolve_now(session, utterance='', record_voice=True)
         self.assertIn('Speech recognition', result['plain_error'])
-        self.assertIn('type your question', result['plain_error'])
+        self.assertIn('Right Option', result['plain_error'])
         self.assertNotIn('microphone', result['plain_error'])
         self.assertNotIn('private detail', result['plain_error'])
 
@@ -115,6 +117,57 @@ class FirstRunTests(unittest.TestCase):
         self.assertIn('disk space', message)
         self.assertNotIn('private cache path', message)
         self.assertNotIn('make out', message)
+
+    def test_owned_microphone_errors_are_labelled_without_exposing_native_diagnostics(self):
+        session = GazeSession('http://127.0.0.1:1')
+        self.addCleanup(session.close)
+        for kind, method in (('record_start', 'start'), ('record_stop', 'stop')):
+            replies = []
+            with self.subTest(kind=kind), \
+                 patch.object(service, 'get_shared_session', return_value=session), \
+                 patch.object(service, '_VOICE_TURNS', None), \
+                 patch.object(session.microphone, method, side_effect=OSError('native PRIVATE_DIAGNOSTIC')):
+                service.handle_intent({'type': kind, 'nonce': session._intent_nonce,
+                                       '_browser_target': 'tab', '_browser_document': 'doc'}, replies.append)
+            self.assertFalse(replies[-1]['ok'])
+            self.assertIn('Microphone', replies[-1]['plain_error'])
+            self.assertIn('permission', replies[-1]['plain_error'])
+            self.assertNotIn('PRIVATE_DIAGNOSTIC', replies[-1]['plain_error'])
+
+    def test_chrome_launch_failure_returns_a_repair_action(self):
+        session = SimpleNamespace(cdp_http_url='http://127.0.0.1:1', is_chrome_reachable=lambda: False)
+        with patch.object(cli, 'get_shared_session', return_value=session), \
+             patch.object(cli, 'launch_chrome_with_cdp', side_effect=FileNotFoundError):
+            result = cli._handle_slash_command('start')
+        self.assertIn('/gaze setup', result)
+        self.assertIn('Applications', result)
+
+    def test_busy_and_stopping_speech_refuse_capture_with_their_own_recovery(self):
+        session = GazeSession('http://127.0.0.1:1')
+        self.addCleanup(session.close)
+        turns = VoiceTurns(SimpleNamespace(), session)
+        self.addCleanup(turns.close)
+        release = threading.Event()
+        worker = threading.Thread(target=release.wait, daemon=True)
+        worker.start()
+        try:
+            for capture, speech_worker, cause in (('recording', None, 'Microphone'),
+                                                  ('idle', worker, 'Read aloud')):
+                turns.capture_state, turns._speech_thread = capture, speech_worker
+                replies = []
+                with self.subTest(cause=cause), \
+                     patch.object(service, 'get_shared_session', return_value=session), \
+                     patch.object(service, '_VOICE_TURNS', turns), \
+                     patch.object(session.microphone, 'start') as microphone:
+                    service.handle_intent({'type': 'record_start', 'nonce': session._intent_nonce,
+                                           '_browser_target': 'tab', '_browser_document': 'doc'}, replies.append)
+                microphone.assert_not_called()
+                self.assertFalse(replies[-1]['ok'])
+                self.assertIn(cause, replies[-1]['plain_error'])
+                self.assertNotIn('permission', replies[-1]['plain_error'])
+        finally:
+            release.set()
+            worker.join(2)
 
 
 if __name__ == '__main__':

@@ -124,7 +124,9 @@ Calibration is sensitive and saved locally. The separate development recorder
 can save video only when explicitly started; it is not part of this guide.
 The microphone opens only while talking. Recognition is local; model preparation
 can download assets. Failed recordings can remain in memory for transcription
-retry until the plugin exits; ordinary use does not write microphone audio.
+retry until the plugin exits. The macOS MLX recognition fallback writes a
+temporary WAV and normally deletes it after recognition; a crash or failed
+deletion can leave that audio in the operating system's temporary folder.
 
 Your transcribed or typed question and bounded page evidence go to the model
 configured in Hermes. **Hermes can retain page context in conversation history
@@ -550,6 +552,14 @@ hermes gaze demo
 hermes gaze benchmark
 python3 -m unittest discover -s tests -t .  # full suite; no Chrome needed
 ```
+
+Installation verification uses Hermes's real validator and package manager with
+temporary `HOME` and `HERMES_HOME`, a local Git commit pin, explicit dependency
+consent, and a fresh-process enabled-state check. This proves the local manager
+path, not a yet-unpublished GitHub release pin or catalogue acceptance.
+Private headless Chrome checks use fake devices and scripted answers; they do
+not prove macOS permission dialogs, physical audio, real-camera accuracy or a
+first live answer from a provider. Those remain user-operated release checks.
 
 ## Documentation
 

@@ -79,19 +79,18 @@ def plain_error(status: str, error: str) -> str:
         return "I couldn’t tell what you were pointing at."
     if "capture" in lower and ("no transcribed" in lower or "no longer" in lower):
         return "That recording is no longer available."
+    if "read aloud" in lower and "stopping" in lower:
+        return "Read aloud is stopping. Wait, then hold Space again."
     if "microphone" in lower or "portaudio" in lower or "input device" in lower:
         if "permission" in lower or "denied" in lower or "not permitted" in lower:
-            return ("Microphone access was denied; allow your Hermes terminal app in macOS "
-                    "Privacy & Security, Microphone, then restart that app.")
+            return "Microphone denied. Allow your terminal in settings, then restart it."
         if "already in use" in lower or "closing" in lower:
-            return "The microphone is busy; let go of Space, wait, then hold it again."
-        return ("The microphone could not record; check your input device and your terminal app’s "
-                "microphone permission, then hold Space again.")
+            return "Microphone busy. Let go of Space, wait, then hold again."
+        return "Microphone failed. Check input and permission, then try again."
     if "speech model" in lower:
-        return ("The speech recognition model could not load; check your internet connection and free disk space, "
-                "restart Hermes, then choose Try again.")
+        return "Speech model unavailable. Check internet and disk space; restart Hermes."
     if any(word in lower for word in ("transcri", "recognition", "whisper", "parakeet", "asr")):
-        return "Speech recognition failed; choose Try again, or press Right Option to type your question."
+        return "Speech recognition failed. Try again, or use Right Option to type."
     if "rate" in lower and "limit" in lower or "429" in lower or "quota" in lower:
         return "Hermes is rate limited right now."
     return "Hermes couldn’t finish this answer." if text or status == "failed" else ""

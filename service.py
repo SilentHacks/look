@@ -534,7 +534,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 if _VOICE_TURNS is not None:
                     ready = _VOICE_TURNS.prepare_recording()
                     if not ready["ok"]:
-                        reply(ready)
+                        reply({**ready, "plain_error": plain_error("failed", ready.get("error", ""))})
                         return
                 def cancelled(error):
                     if _VOICE_TURNS is not None:
@@ -590,9 +590,10 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 try:
                     audio, epoch = session.microphone.stop(owner, timing=timing, before_stop=reserve)
                 except Exception as exc:
+                    error = f"Microphone capture failed: {exc}"
                     if reservation and reservation.get("ok"):
-                        turns.transcribed(reservation["request_id"], "", error=str(exc))
-                    raise
+                        turns.transcribed(reservation["request_id"], "", error=error)
+                    raise RuntimeError(error) from exc
                 finally:
                     if turns is not None and sealed:
                         turns.capture_status("idle")
