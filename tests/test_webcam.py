@@ -14,7 +14,8 @@ import numpy as np
 from hermes_gaze.benchmark.gaze_research import Candidate, Fit
 from hermes_gaze import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, LandmarkEstimator, ScreenPoint, screen_to_viewport
+from hermes_gaze.tracker.webcam_gaze import (CHECK_ENOUGH_TRIALS, CHECK_ORDERS, CHECK_PASS_TRIALS, CHECK_POINTS, AppearanceEstimator,
+                                             LandmarkEstimator, ScreenPoint, score_check_trial, screen_to_viewport, summarize_check)
 from hermes_gaze.webcam import WebcamHost
 
 SCREEN = {"left": 0, "top": 0, "width": 1440, "height": 900, "dpr": 2,
@@ -319,6 +320,175 @@ class WebcamContracts(unittest.TestCase):
             self.assertTrue(all(type(count) is int for count in drops.values()))
             drops["offscreen"] = 0
             self.assertEqual(host.status()["drops"]["offscreen"], 1)
+
+
+VIEWPORT = {"left": 0, "top": 0, "width": 1440, "height": 900}
+TRAINING = [(x, y) for y in (.1, .5, .9) for x in (.1, .5, .9)]
+
+
+class CalibrationCheckFlow(unittest.TestCase):
+    """The accepted calibration changes only after a held-out check passes."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.cursor = []
+        self.delivered = []
+        self.host = WebcamHost(lambda point, screen: self.delivered.append(point) or True,
+                               profile_path=Path(directory.name) / "calibration.json",
+                               on_use_cursor=lambda: self.cursor.append(True))
+        self.host._context, self.host._nonce = 8, "owned"
+        self.ui = []
+        self.host._ui = lambda method, value="": self.ui.append((method, value))
+        self.now = time.time()
+
+    def event(self, kind, **data):
+        self.host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+            "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", **data})}})
+
+    def sample(self, features, **tags):
+        self.now += .001
+        self.event("sample", t=self.now, features=features, **tags)
+
+    def fit(self):
+        self.event("calibration_start", screen=SCREEN, viewport=VIEWPORT)
+        for index, (x, y) in enumerate(TRAINING):
+            for _ in range(6):
+                self.sample(appearance_features(x, y), calibration=index)
+            self.event("calibration_point", index=index)
+
+    def run_check(self, gaze):
+        """gaze(target, trial) returns features or None for one trial's five frames."""
+        self.assertEqual(self.ui[-1][0], "checkReady")
+        points = self.ui[-1][1]["points"]
+        for trial, (x, y) in enumerate(points):
+            for _ in range(5):
+                self.sample(gaze((x, y), trial), check=trial)
+            self.event("check_trial", index=trial)
+        return self.ui[-1]
+
+    def saved(self):
+        return AppearanceEstimator().calibrate(appearance_observations(), SCREEN)
+
+    def test_check_positions_are_held_out_and_ordered_twice(self):
+        for point in CHECK_POINTS:
+            self.assertGreaterEqual(min(math.dist(point, t) for t in TRAINING), .19, point)
+        self.assertEqual(len(CHECK_ORDERS), 2)
+        self.assertNotEqual(*CHECK_ORDERS)
+        self.assertEqual(sorted(CHECK_ORDERS[0]), sorted(CHECK_ORDERS[1]))
+
+    def test_each_trial_votes_once_and_missing_estimates_fail_it(self):
+        target = (.5, .5)
+        self.assertTrue(score_check_trial([(.5, .5)] * 3, target)["hit"])
+        self.assertFalse(score_check_trial([(.9, .5)] * 3, target)["hit"])
+        # A tiny surviving subset cannot pass: mostly missing is not a valid trial.
+        self.assertEqual(score_check_trial([(.5, .5)] * 3 + [None] * 4, target), {"valid": False, "hit": False})
+        self.assertEqual(score_check_trial([], target), {"valid": False, "hit": False})
+        hit, miss, gone = {"valid": True, "hit": True}, {"valid": True, "hit": False}, {"valid": False, "hit": False}
+        self.assertEqual(summarize_check([hit] * CHECK_PASS_TRIALS + [gone] * (10 - CHECK_PASS_TRIALS)), "good")
+        self.assertEqual(summarize_check([hit] * (CHECK_PASS_TRIALS - 1) + [miss] * (11 - CHECK_PASS_TRIALS)), "weak")
+        self.assertEqual(summarize_check([hit] * (CHECK_ENOUGH_TRIALS - 1) + [gone] * (11 - CHECK_ENOUGH_TRIALS)), "insufficient")
+
+    def test_passing_check_saves_only_at_the_end_without_refitting(self):
+        self.fit()
+        self.assertFalse(self.host.profile_path.exists())
+        self.assertIsNone(self.host.profile)
+        self.assertIsNone(self.host.estimator.profile)
+        candidate = self.host._check["estimator"]
+        weights = candidate.profile["weights"]
+        method, result = self.run_check(lambda t, _: appearance_features(*t))
+        self.assertEqual((method, result["outcome"]), ("checkResult", "good"))
+        self.assertEqual(candidate.profile["weights"], weights)
+        self.assertEqual(self.host.profile["weights"], weights)
+        self.assertEqual(json.loads(self.host.profile_path.read_text())["weights"], weights)
+        self.assertEqual(self.delivered, [])
+        self.assertIsNone(self.host._check)
+
+    def test_weak_or_missing_checks_keep_the_earlier_calibration_and_never_say_ready(self):
+        self.host._save(self.saved()); before = self.host.profile_path.read_bytes()
+        self.host.profile = json.loads(before); self.host.estimator.load(self.host.profile)
+        for gaze, outcome in ((lambda t, _: appearance_features(1 - t[0], 1 - t[1]), "weak"), (lambda *_: None, "insufficient")):
+            with self.subTest(outcome):
+                self.fit()
+                _, result = self.run_check(gaze)
+                self.assertEqual(result["outcome"], outcome)
+                self.assertEqual([a for a, _ in result["actions"]], ["calibrate"])
+                self.assertEqual(result["actions"][0][1], "Try again")
+                words = (result["title"] + " ".join(result["body"])).lower()
+                self.assertNotIn("ready", words)
+                self.assertNotRegex(words, r"\d")
+                self.assertIn("earlier calibration has not changed", words)
+                self.assertEqual(self.host.profile_path.read_bytes(), before)
+                self.assertEqual(self.host.estimator.profile, json.loads(before))
+
+    def test_cancelling_after_the_fit_discards_the_candidate(self):
+        self.host._save(self.saved()); before = self.host.profile_path.read_bytes()
+        self.host.profile = json.loads(before); self.host.estimator.load(self.host.profile)
+        self.fit()
+        self.event("calibration_cancel")
+        self.assertIsNone(self.host._check)
+        self.assertEqual(self.host.profile_path.read_bytes(), before)
+        self.assertEqual(self.host.estimator.profile, json.loads(before))
+
+    def test_a_point_without_enough_samples_retries_that_dot(self):
+        self.event("calibration_start", screen=SCREEN, viewport=VIEWPORT)
+        self.event("calibration_point", index=0)
+        self.assertEqual(self.ui[-1][0], "pointRetry")
+        self.assertEqual(self.host._point_index, 0)
+        self.assertIsNotNone(self.host._calibration)
+
+    def test_check_results_and_estimates_stay_out_of_status(self):
+        self.fit()
+        self.run_check(lambda t, _: appearance_features(*t))
+        status = json.dumps(self.host.status()).lower()
+        for word in ("estimate", "outcome", "good", "x_vp", "target", "weights"):
+            self.assertNotIn(word, status)
+
+    def test_saved_check_needs_the_same_display_and_never_changes_the_file(self):
+        self.host._save(self.saved()); before = self.host.profile_path.read_bytes()
+        self.host.profile = json.loads(before); self.host.estimator.load(self.host.profile)
+        self.event("check_start", screen={**SCREEN, "screen_width": 1920, "width": 1920}, viewport=VIEWPORT)
+        self.assertEqual(self.ui[-1][0], "notice")
+        self.event("check_start", screen=SCREEN, viewport=VIEWPORT)
+        _, result = self.run_check(lambda t, _: appearance_features(1 - t[0], 1 - t[1]))
+        self.assertEqual(result["outcome"], "weak")
+        self.assertEqual(result["actions"][0][1], "Recalibrate")
+        self.assertEqual(self.host.profile_path.read_bytes(), before)
+
+    def test_practice_is_private_to_the_window_and_never_clamps(self):
+        self.host.profile = self.saved(); self.host.estimator.load(self.host.profile)
+        self.event("practice_start", screen=SCREEN, viewport=VIEWPORT)
+        self.assertEqual(self.ui[-1][0], "practiceReady")
+        self.sample(appearance_features(.3, .7))
+        method, value = self.ui[-1]
+        self.assertEqual(method, "practiceGaze")
+        self.assertAlmostEqual(value["x"], .3, delta=.02)
+        self.sample([3.] * 130)
+        self.assertEqual(self.ui[-1][1], {"lost": "offscreen"})
+        self.sample(None)
+        self.assertEqual(self.ui[-1][1], {"lost": "face"})
+        self.assertEqual(self.delivered, [])
+        self.event("practice_end")
+        self.sample(appearance_features(.3, .7))
+        self.assertEqual(len(self.delivered), 1)
+
+    def test_practice_refuses_without_an_accepted_calibration(self):
+        self.event("practice_start", screen=SCREEN, viewport=VIEWPORT)
+        self.assertEqual(self.ui[-1][0], "notice")
+        self.assertIsNone(self.host._practice)
+
+    def test_camera_error_keeps_the_window_and_real_text_then_use_cursor_changes_mode(self):
+        self.event("error", error="NotReadableError: Could not start video source")
+        self.assertEqual(self.host.state, "failed")
+        self.assertIn("NotReadableError", self.host.status()["error"])
+        self.assertFalse(self.host._stop.is_set())
+        self.event("retry_camera")
+        self.assertEqual((self.host.state, self.host.error), ("starting", ""))
+        self.event("use_cursor")
+        until = time.monotonic() + 2
+        while not self.cursor and time.monotonic() < until:
+            time.sleep(.01)
+        self.assertEqual(self.cursor, [True])
 
 
 if __name__ == "__main__":

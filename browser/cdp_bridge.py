@@ -724,7 +724,7 @@ class GazeSession:
         from ..webcam import WebcamHost
         with self._lock:
             if self.webcam is None:
-                self.webcam = WebcamHost(self._accept_webcam_point)
+                self.webcam = WebcamHost(self._accept_webcam_point, on_use_cursor=lambda: self.configure(mode="hover"))
         return self.webcam.start()
 
     def stop_webcam(self) -> None:

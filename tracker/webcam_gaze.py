@@ -110,6 +110,35 @@ class AppearanceEstimator(LandmarkEstimator):
     feature_limits = (math.sqrt(128),) * 128 + (4., 4.)
 
 
+# Held-out check after calibration: positions differ from the nine training points.
+CHECK_POINTS = ((.3, .3), (.7, .3), (.2, .7), (.5, .7), (.8, .7))
+CHECK_ORDERS = ((0, 3, 1, 4, 2), (4, 1, 2, 0, 3))
+# PROVISIONAL pending the user's real-camera trial; fake devices cannot choose these.
+CHECK_SETTLE_MS = 900  # Dot travel and eye movement; ignored samples.
+CHECK_OBSERVE_MS = 700
+CHECK_REGION_HALF = 1 / 6  # Screen fraction per axis: one cell of a 3×3 grid around the target.
+CHECK_MIN_VALID_FRACTION = .5  # Of the trial's samples.
+CHECK_MIN_VALID_SAMPLES = 3
+CHECK_PASS_TRIALS = 8  # Of ten: "most of the time" must be clearly more than a majority.
+CHECK_ENOUGH_TRIALS = 6  # Fewer valid trials than this cannot judge the calibration.
+
+
+def score_check_trial(estimates: list[tuple[float, float] | None], target: tuple[float, float]) -> dict:
+    """One target trial, one vote. Missing or off-screen estimates count against it."""
+    valid = [e for e in estimates if e is not None]
+    if len(valid) < CHECK_MIN_VALID_SAMPLES or len(valid) < CHECK_MIN_VALID_FRACTION * len(estimates):
+        return {"valid": False, "hit": False}
+    x, y = np.median(np.asarray(valid, dtype=float), axis=0)
+    return {"valid": True, "hit": bool(abs(x - target[0]) <= CHECK_REGION_HALF and abs(y - target[1]) <= CHECK_REGION_HALF)}
+
+
+def summarize_check(trials: list[dict]) -> str:
+    """Plain outcome only: "good", "weak" or "insufficient". Never a score."""
+    if sum(t["hit"] for t in trials) >= CHECK_PASS_TRIALS:
+        return "good"
+    return "weak" if sum(t["valid"] for t in trials) >= CHECK_ENOUGH_TRIALS else "insufficient"
+
+
 def screen_to_viewport(point: ScreenPoint, geometry: dict, screen: dict, sigma_px: float = 120.) -> dict | str:
     """Map desktop logical pixels to page CSS pixels, including browser zoom.
 

@@ -10,7 +10,7 @@ const pixel = (x, y) => x < 0 || y < 0 || x >= width || y >= height ? [0, 0, 0] 
     (Math.floor(x) * 2 + Math.floor(y) * 11) % 256, (Math.floor(x) + Math.floor(y) * 5) % 256]);
 const elements = [];
 function element(tag) {
-  const node = {tag, style: {}, classList: {add() {}, remove() {}}, append() {}, addEventListener() {},
+  const node = {tag, style: {}, classList: {add() {}, remove() {}, toggle() {}}, dataset: {}, append() {}, replaceChildren() {}, querySelector: () => null, addEventListener() {},
     videoWidth: width, videoHeight: height, currentTime: 0, readyState: 2, async play() {}};
   if (tag === "canvas") {
     const ctx = {
@@ -35,7 +35,7 @@ globalThis.addEventListener = () => {};
 Object.defineProperty(globalThis, "navigator", {value: {mediaDevices: {
   async getUserMedia(options) { assert.equal(options.audio, false); return {getTracks: () => [{stop() {}}]}; }
 }}, configurable: true});
-globalThis.setInterval = callback => { interval = callback; return 1; };
+globalThis.setInterval = callback => { if (callback.name === "tick") interval = callback; return 1; };
 globalThis.clearInterval = () => {};
 const messages = [];
 globalThis.__hermesGazeIntent = text => messages.push(JSON.parse(text));
@@ -88,7 +88,7 @@ function legacyAppearance(features) {
     const sample = messages.at(-1);
     assert.equal(sample.type, "sample");
     assert.deepEqual(sample.features, saved.appearance.slice(0, 128).concat(saved.appearance.slice(-8, -6)));
-    assert.deepEqual(Object.keys(sample).sort(), ["calibration", "features", "hidden", "nonce", "t", "type"]);
+    assert.deepEqual(Object.keys(sample).sort(), ["calibration", "check", "features", "hidden", "nonce", "t", "type"]);
   }
   assert.equal(globalThis.__HERMES_WEBCAM__.status().frames, 2);
   assert(globalThis.__HERMES_WEBCAM__.status().sample_hz > 0);
