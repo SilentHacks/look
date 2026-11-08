@@ -96,7 +96,11 @@ try:
                 release.set()
                 until(lambda: not r.session.microphone._closing and r.turns.active is None
                       and not r.turns.pending, 8, 'answer completed')
-            trace = json.loads(cli._handle_slash_command('timing'))['turns'][-1]
+            with patch.object(cli.Path, 'home', return_value=Path(r.tmp)):
+                cli._handle_slash_command('timing')
+            timing_file = Path(r.tmp) / '.cache/hermes-gaze/release-timing.json'
+            trace = json.loads(timing_file.read_text())['turns'][-1]
+            assert timing_file.stat().st_mode & 0o777 == 0o600
             assert 'first_ui_push' in trace['python_ms'], trace
             assert 'first_delta' in trace['python_ms'], trace
             assert trace['browser_ms']['evidence_frozen'] >= trace['browser_ms']['evidence_start']

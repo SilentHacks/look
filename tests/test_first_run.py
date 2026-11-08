@@ -131,6 +131,20 @@ class FirstRunTests(unittest.TestCase):
         self.assertIn('/gaze setup', result)
         self.assertIn('Applications', result)
 
+    def test_stopped_camera_launch_offers_retry_not_calibration_instructions(self):
+        session = GazeSession('http://127.0.0.1:1')
+        self.addCleanup(session.close)
+        with patch.object(cli, 'get_shared_session', return_value=session), \
+             patch.object(session, 'start_webcam', return_value={'state': 'stopped', 'error': ''}):
+            for command in ('calibrate', 'mode webcam'):
+                with self.subTest(command=command):
+                    result = cli._handle_slash_command(command)
+                    self.assertEqual(session.tracker.mode, 'webcam')
+                    self.assertIn('Camera stopped', result)
+                    self.assertIn('Try again', result)
+                    self.assertIn('/gaze calibrate', result)
+                    self.assertNotIn('click Begin', result)
+
     def test_busy_and_stopping_speech_refuse_capture_with_their_own_recovery(self):
         session = GazeSession('http://127.0.0.1:1')
         self.addCleanup(session.close)

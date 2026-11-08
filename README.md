@@ -98,9 +98,10 @@ typing or navigation already performed.
 
 ### Try eyes, beta
 
-After a useful cursor answer, explicitly enter `/gaze mode webcam`, then
-`/gaze calibrate`. This opens the separate local camera window; follow its
-calibration, check and practice guidance. Move the pointer once in every page,
+After a useful cursor answer, explicitly enter `/gaze calibrate`. It switches to
+webcam mode and opens the separate local camera window. Click **Begin**
+(**Recalibrate** for a saved setup), then follow its dots, check and practice.
+`/gaze mode webcam` opens the same flow. Move the pointer once in every page,
 and again after zooming or resizing. Use one display, good light and broad page
 regions; recalibrate after moving or changing camera, posture or glasses.
 No real-camera population accuracy has been established. `/gaze tracker stop`
@@ -199,6 +200,12 @@ Start Hermes in your permitted terminal app; initialize each new conversation
 with a normal message, then `/gaze` to reconnect. Eyes stay an explicit step.
 After a gaze-model change, recalibrate when asked; a saved profile is not proof
 of today's accuracy.
+
+**Before updating or reloading the plugin, quit Hermes and run
+`hermes gateway stop` first.** Hermes runs a background gateway that keeps the old
+code loaded even after the terminal closes. Closing and reopening the terminal
+alone does not reload Gaze. Stop the gateway before replacing files or repairing
+the environment, then restart Hermes and start a new conversation.
 
 `hermes plugins check-updates` checks for updates. A GitHub SHA install is
 intentionally pinned: `hermes plugins update hermes-gaze` will not move that pin.

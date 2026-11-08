@@ -15,6 +15,10 @@ on CPU in a **separate Chrome process and private temporary profile**. This host
 currently supports macOS's standard Google Chrome installation. No new Python
 runtime or Python dependency is installed.
 
+Before updating or reloading the plugin, quit Hermes and run `hermes gateway stop`
+first, then restart Hermes. Hermes runs a background gateway that keeps old code
+loaded even after the terminal closes; closing the terminal alone is not a reload.
+
 During ordinary plugin use, only `/gaze mode webcam` or `/gaze calibrate` starts
 the camera. Registration, model tools, status and changing configuration do not.
 The owned window requests video only, never audio. It captures and infers locally;
@@ -38,8 +42,9 @@ unload and owned-document replacement close only the camera process we started.
 
 ## Calibration and coordinates
 
-`/gaze calibrate` brings the owned window forward. Maximize it, keep its zoom at
-100%, and click **Begin**. At each dot, look at it, tap Space and keep looking for
+`/gaze calibrate` switches to webcam mode, starts the owned camera window and
+brings it forward; `/gaze mode webcam` opens the same flow. Maximize it, keep its zoom at
+100%, and click **Begin** (**Recalibrate** for a saved setup). At each dot, look at it, tap Space and keep looking for
 about one second. A dot without enough usable frames asks again rather than ending
 the attempt. Esc cancels; moving/resizing/hiding the window
 cancels rather than applying wrong screen targets. The trusted opening click
@@ -79,7 +84,9 @@ it is one and touches no microphone or model. The window asks the user to return
 itself: another Chrome process's focus cannot be reliably raised from here.
 
 **Use cursor** is offered on every screen and changes the session mode with the
-camera. Camera errors stay on screen with their actual text and a Try again.
+camera. Camera errors stay on screen with a plain state and **Try again**.
+If the window closes or startup returns `stopped`, the command offers
+**Try again** with `/gaze calibrate`; it does not claim calibration is ready.
 
 The accepted profile is stored atomically at
 `${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`, mode `0600`

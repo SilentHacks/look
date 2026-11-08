@@ -48,8 +48,8 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
         "Chrome: standard Google Chrome is installed." if chrome else
         "Chrome: install Google Chrome in Applications, then run /gaze setup again.",
         "Dependencies: Python packages are present; this does not test audio devices." if not missing else
-        "Dependencies: missing " + ", ".join(missing) + ". Quit Hermes, run hermes pm install, then "
-        "hermes plugins enable hermes-gaze in your terminal and restart Hermes.",
+        "Dependencies: missing " + ", ".join(missing) + ". Quit Hermes, run hermes gateway stop, then "
+        "hermes pm install and hermes plugins enable hermes-gaze in your terminal and restart Hermes.",
         disclosure,
         recognition,
         "Connection: Chrome is attached." if session.cdp.is_connected else
@@ -58,8 +58,10 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
         "Hermes readiness is not confirmed. Send a normal message here, such as Reply only Ready. "
         "Wait for its answer, then run /gaze connect. Connecting alone cannot prepare a fresh conversation.",
         "Before connecting, set plugins.isolation to in_process and "
-        "plugins.entries.hermes-gaze.allow_gateway_injection to true in Hermes config.yaml, then restart Hermes. "
-        "This changes plugin isolation for Hermes; the guide never changes it for you.",
+        "plugins.entries.hermes-gaze.allow_gateway_injection to true in Hermes config.yaml. "
+        "Before updating or reloading the plugin, quit Hermes and run hermes gateway stop, then restart Hermes. "
+        "Hermes runs a background gateway that keeps old code loaded even after the terminal closes. "
+        "The guide never changes configuration or stops the gateway for you.",
         "Launch Hermes from Terminal or another terminal app allowed in macOS System Settings, "
         "Privacy & Security, Microphone and Camera. Camera is only needed for eyes. "
         "Restart that app after changing permissions. Do not use T3 Code's terminal for camera setup.",
@@ -76,8 +78,8 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
         "Text fields and keyboard-focused page controls keep Space. Click ordinary page text first. "
         "A tap scrolls. Right Option opens typed questions without a microphone. "
         "Q recalls answers; Esc stops or dismisses; hold Space on an answer to follow up.",
-        "Then try eye tracking, beta: /gaze mode webcam explicitly opens the separate camera window; "
-        "/gaze calibrate opens calibration. Follow its check and practice guidance before asking with your eyes. "
+        "Then try eye tracking, beta: /gaze calibrate switches to webcam mode and opens the separate camera window. "
+        "Click Begin (Recalibrate for a saved setup), then follow the dots, check and practice before asking with your eyes. "
         "Use one display and English; move the pointer once in each page and after resizing or zooming. "
         "Broad areas only, not precise controls. /gaze tracker stop returns to cursor.",
         "Read aloud is optional: quit Hermes and run hermes gaze setup-speech in your terminal to download "
@@ -159,22 +161,24 @@ def _handle_slash_command(raw_args: str) -> str:
             "Companion CDP unreachable or no page tab. Check `hermes gaze status` and Chrome."
         )
 
-    if sub == "mode" and len(argv) >= 2:
-        mode = argv[1].lower()
+    if sub == "calibrate" or (sub == "mode" and len(argv) >= 2):
+        mode = "webcam" if sub == "calibrate" else argv[1].lower()
         if mode not in ("hover", "simulated", "webcam"):
             return "Usage: /gaze mode {hover|simulated|webcam}"
         session.configure(mode=mode)
-        if mode == "webcam":
-            status = session.start_webcam()
-            return json.dumps(status) + "\nUse /gaze calibrate in the owned webcam window before asking."
-        return f"Hermes Gaze mode set to '{mode}' (sigma={session.tracker.sigma_px}px)."
-
-    if sub == "calibrate":
-        session.configure(mode="webcam")
+        if mode != "webcam":
+            return f"Hermes Gaze mode set to '{mode}' (sigma={session.tracker.sigma_px}px)."
         status = session.start_webcam()
+        if status["state"] in ("running", "failed"):
+            status = session.webcam.calibrate()
         if status["state"] == "running":
-            session.webcam.calibrate()
-        return json.dumps(status) + "\nIn the webcam window, click Calibrate nine points. Look at each dot, then press Space."
+            guidance = ("In the webcam window, click Begin (Recalibrate for a saved setup). "
+                        "Look at each dot, tap Space and keep looking, then follow the check and practice.")
+        elif status["state"] == "starting":
+            guidance = "Camera is still starting. Check /gaze tracker; if it stops, try again with /gaze calibrate."
+        else:
+            guidance = "Camera stopped or could not start. Try again in the camera window, or run /gaze calibrate."
+        return json.dumps(status) + "\n" + guidance
 
     if sub == "tracker":
         if len(argv) > 1 and argv[1] == "stop":
