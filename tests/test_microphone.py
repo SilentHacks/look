@@ -61,3 +61,37 @@ class CaptureTests(unittest.TestCase):
                 mic.stop("tab-C")
             self.assertTrue(streams[2].closed)
             self.assertEqual(mic._audio, bytearray())
+
+    def test_release_seals_pcm_before_ui_and_closes_even_if_ui_fails(self):
+        streams = []
+
+        class Input:
+            def __init__(self, **kwargs):
+                self.callback, self.closed = kwargs["callback"], False
+                streams.append(self)
+
+            def start(self):
+                self.callback(b"\x01\x00", 1, SimpleNamespace(currentTime=1., inputBufferAdcTime=1.), None)
+
+            def stop(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        mic = Microphone()
+        with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=Input)):
+            mic.start("A", lambda: None)
+            def ui():
+                self.assertFalse(streams[-1].closed)
+                streams[-1].callback(b"\x02\x00", 1, None, "late device error")
+            audio, _ = mic.stop("A", before_stop=ui)
+            self.assertEqual(audio, b"\x01\x00")
+            self.assertTrue(streams[-1].closed)
+            mic.start("A", lambda: None)
+            def failed_ui():
+                raise RuntimeError("renderer unavailable")
+            with self.assertRaisesRegex(RuntimeError, "renderer unavailable"):
+                mic.stop("A", before_stop=failed_ui)
+            self.assertTrue(streams[-1].closed)
+            self.assertEqual(mic._audio, bytearray())

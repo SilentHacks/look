@@ -27,6 +27,7 @@ from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 from .resolver.temporal_aligner import has_deictic_pronoun
 from .naming import safe_link
 from .voice import MAX_AUDIO_BYTES
+from .release_timing import TIMINGS
 
 logger = logging.getLogger(__name__)
 
@@ -553,38 +554,57 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                     _VOICE_TURNS.capture_status("idle")
                 reply({"ok": True, "cancelled": True})
             else:
-                audio, epoch = session.microphone.stop(owner)
-                if _VOICE_TURNS is not None:
-                    _VOICE_TURNS.capture_status("idle")
+                timing = TIMINGS.get(intent.get("_release_trace")) or TIMINGS.begin(intent.get("release_timing"))
+                intent["_release_trace"] = timing.turn
+                timing.mark("worker_received")
                 pushed = _intent_evidence(intent)
                 mode = str(intent.get("mode") or session.tracker.mode)
-                if mode == "hover" and not isinstance(pushed["cursor_context"], dict):
-                    reply({"ok": False, "error": "Recording has no cursor capture"})
-                    return
-                if mode in ("simulated", "webcam"):
-                    session.clear_hover_snapshot()  # Revoke at capture, never when a late ASR result arrives.
-                # Reserve capture order before ASR, including a visible transcription state.
+                timing.mark("evidence_frozen")
                 reservation = None
+                sealed = False
                 turns = _VOICE_TURNS
-                if turns is not None and turns.connected:
-                    initial = resolve_now(session, utterance="Captured question", words=None,
-                                          mode=mode, pushed=pushed, activate=False)
-                    initial["subject"] = intent.get("subject")
-                    reservation = turns.capture(initial, transcribing=True,
-                                                item_id=str(intent.get("item_id") or ""))
-                    if not reservation["ok"]:
-                        reply(reservation)
-                        return
-                    # The overlay ties its local rings to the item now, not after ASR.
-                    reply({"type": "record_reserved", "ok": True, "item_id": reservation["item_id"],
-                           "request_id": reservation["request_id"]})
+                def reserve():
+                    nonlocal reservation, sealed
+                    sealed = True
+                    if mode == "hover" and not isinstance(pushed["cursor_context"], dict):
+                        raise ValueError("Recording has no cursor capture")
+                    if mode in ("simulated", "webcam"):
+                        session.clear_hover_snapshot()  # Revoke at capture, never at late ASR.
+                    # Publish the reserved question before native stop/close can block.
+                    if turns is not None and turns.connected:
+                        initial = resolve_now(session, utterance="Captured question", words=None,
+                                              mode=mode, pushed=pushed, activate=False)
+                        initial["subject"] = intent.get("subject")
+                        reservation = turns.capture(initial, transcribing=True,
+                                                    item_id=str(intent.get("item_id") or ""), timing=timing)
+                        if reservation["ok"]:
+                            timing.mark("capture_reserved")
+                            reply({"type": "record_reserved", "ok": True, "item_id": reservation["item_id"],
+                                   "request_id": reservation["request_id"]})
+                try:
+                    audio, epoch = session.microphone.stop(owner, timing=timing, before_stop=reserve)
+                except Exception as exc:
+                    if reservation and reservation.get("ok"):
+                        turns.transcribed(reservation["request_id"], "", error=str(exc))
+                    raise
+                finally:
+                    if turns is not None and sealed:
+                        turns.capture_status("idle")
+                if reservation and not reservation["ok"]:
+                    timing.mark("failed")
+                    timing.finish()
+                    reply(reservation)
+                    return
+                timing.mark("asr_queued")
                 def finish_recording():
                     try:
                         # Release the ordered intent worker so the next talk can open
                         # while ASR runs. Admission is bounded by the inbox's eight slots.
                         with _TRANSCRIBE_LOCK:
+                            timing.mark("asr_started")
                             text, words = _voice.transcribe_audio_buffer(
-                                audio, model_name=_whisper_model_name(), audio_epoch=epoch)
+                                audio, model_name=_whisper_model_name(), audio_epoch=epoch, timing=timing)
+                        timing.mark("asr_done")
                         snapshot = resolve_now(session, utterance=text, words=words,
                                                mode=mode, pushed=pushed, activate=False)
                         snapshot["subject"] = intent.get("subject")
@@ -592,11 +612,15 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                             result = turns.transcribed(reservation["request_id"], text, snapshot)
                         else:
                             result = submit_snapshot(snapshot)
+                            timing.mark("one_shot_done")
+                            timing.finish()
                         reply({**result, "text": text})
                     except Exception as exc:
                         result = (turns.transcribed(reservation["request_id"], "", error=str(exc))
                                   if reservation else {"ok": False, "error": str(exc)})
                         reply(result)
+                        timing.mark("failed")
+                        timing.finish()
                 if reservation:
                     turns.start_transcription(reservation["request_id"], finish_recording)
                 else:
@@ -760,6 +784,11 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
 
         reply({"ok": False, "error": "unknown intent type"})
     except Exception as exc:
+        if itype == "record_stop":
+            timing = TIMINGS.get(intent.get("_release_trace"))
+            if timing is not None:
+                timing.mark("failed")
+                timing.finish()
         reply({"ok": False, "error": str(exc),
                **({"resolution_id": intent.get("resolution_id"), "scope_id": intent.get("scope_id")}
                   if itype == "explain" else {})})

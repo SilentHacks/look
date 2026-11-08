@@ -33,6 +33,8 @@ import time
 import wave
 from typing import Any, Dict, List, Optional, Tuple
 
+from .release_timing import TIMINGS
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "base.en"
@@ -120,6 +122,7 @@ def prewarm() -> None:
     so a first utterance cannot race it. Only the primary backend is warmed;
     the 2.4 GB parakeet-mlx fallback stays lazy.
     """
+    TIMINGS.start()
     if sys.platform != "darwin":
         return
     threading.Thread(target=_get_coreml_runner, name="gaze-asr-prewarm", daemon=True).start()
@@ -154,13 +157,18 @@ def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[
     return words
 
 
-def _transcribe_coreml(audio_np: Any, sample_rate: int, epoch_off: float) -> Optional[Tuple[str, List[Dict[str, object]]]]:
+def _transcribe_coreml(audio_np: Any, sample_rate: int, epoch_off: float, timing=None) -> Optional[Tuple[str, List[Dict[str, object]]]]:
     """CoreML/ANE path: feed the float32 array straight to the in-process runner."""
     runner = _get_coreml_runner()
     if runner is None:
         return None
+    if timing is not None:
+        timing.mark("asr_model_ready")
+        timing.mark("asr_inference_start")
     try:
         res = runner.transcribe_array(audio_np)
+        if timing is not None:
+            timing.mark("asr_inference_done")
     except Exception as exc:
         logger.warning("coreml parakeet transcription failed (%s); using parakeet-mlx", exc)
         return None
@@ -170,13 +178,15 @@ def _transcribe_coreml(audio_np: Any, sample_rate: int, epoch_off: float) -> Opt
     return (res.text or "").strip(), _tokens_to_words(tokens, end_s, epoch_off)
 
 
-def _transcribe_parakeet(audio_np: Any, sample_rate: int, epoch_off: float) -> Optional[Tuple[str, List[Dict[str, object]]]]:
+def _transcribe_parakeet(audio_np: Any, sample_rate: int, epoch_off: float, timing=None) -> Optional[Tuple[str, List[Dict[str, object]]]]:
     """parakeet-mlx path: write PCM to a temp WAV (the model only takes file paths)."""
     import numpy as np
 
     model = _get_parakeet_model()
     if model is None:
         return None
+    if timing is not None:
+        timing.mark("asr_model_ready")
     pcm16 = (np.clip(audio_np, -1.0, 1.0) * 32767.0).astype(np.int16)
     tmp = ""
     try:
@@ -187,7 +197,11 @@ def _transcribe_parakeet(audio_np: Any, sample_rate: int, epoch_off: float) -> O
             wf.setsampwidth(2)
             wf.setframerate(sample_rate)
             wf.writeframes(pcm16.tobytes())
+        if timing is not None:
+            timing.mark("asr_inference_start")
         res = model.transcribe(tmp)
+        if timing is not None:
+            timing.mark("asr_inference_done")
     except Exception as exc:
         logger.warning("parakeet-mlx transcription failed (%s); using faster-whisper", exc)
         return None
@@ -274,6 +288,7 @@ def transcribe_audio_buffer(
     audio_epoch: Optional[float] = None,
     backend: str = "auto",
     mime_type: Optional[str] = None,
+    timing=None,
 ) -> Tuple[str, List[Dict[str, object]]]:
     """Transcribe WebM, WAV, or PCM bytes into text with word-level timestamps.
 
@@ -300,17 +315,20 @@ def transcribe_audio_buffer(
 
     global _LAST_BACKEND
     if backend in ("auto", "parakeet"):
-        result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0))
+        result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0), timing)
         if result is not None:
             _LAST_BACKEND = "parakeet-coreml-ane"
             return result
-        result = _transcribe_parakeet(audio_np, sample_rate, float(audio_epoch or 0.0))
+        result = _transcribe_parakeet(audio_np, sample_rate, float(audio_epoch or 0.0), timing)
         if result is not None:
             _LAST_BACKEND = "parakeet-mlx"
             return result
 
     _LAST_BACKEND = "whisper"
     model = get_whisper_model(model_name)
+    if timing is not None:
+        timing.mark("asr_model_ready")
+        timing.mark("asr_inference_start")
     segments, _info = model.transcribe(
         audio_np,
         word_timestamps=True,
@@ -324,6 +342,8 @@ def transcribe_audio_buffer(
         text_parts.append(seg.text.strip())
         for w in getattr(seg, "words", None) or []:
             words.append({"word": w.word, "start": float(w.start) + epoch_off, "end": float(w.end) + epoch_off})
+    if timing is not None:
+        timing.mark("asr_inference_done")
 
     full_text = " ".join(text_parts).strip()
     return full_text, words

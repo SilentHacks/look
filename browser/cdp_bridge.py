@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from collections import deque
 from ..resolver.cursor_context import stamp_resolution
+from ..release_timing import TIMINGS
 
 try:
     from plugins.plugin_utils import lazy_singleton
@@ -289,9 +290,14 @@ class CdpSession:
 
     async def _render_ui(self, message: dict) -> None:
         frame = self._ui_frames.get(str(message.get("frame") or "card"))
+        trace = getattr(self, "_release_trace", None)
         if frame:
             await self._eval_coro("window.__HERMES_GAZE_PANEL__?.render(" + json.dumps(message) + ")",
                                   timeout=5., context_id=frame[1])
+            if trace is not None and message.get("mode") != "wave":
+                trace.mark("first_ui_push")
+                if message.get("frame") == "pill" and message.get("mode") == "capsule":
+                    trace.mark("processing_ui_push")
 
     def push_level(self, level: float) -> None:
         """Voice level to the protected capsule only. Drop frames rather than queue them."""
@@ -496,6 +502,9 @@ class CdpSession:
         context_id = self._context_unique_id
         intent["_browser_document"] = context_id
         intent["_browser_route"] = self._route_id
+        if intent.get("type") == "record_stop" and intent.get("nonce") == self.intent_nonce:
+            self._release_trace = TIMINGS.begin(intent.get("release_timing"))
+            intent["_release_trace"] = self._release_trace.turn
 
         def reply(reply_payload: Dict[str, Any]) -> None:
             if self._closed:

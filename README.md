@@ -169,11 +169,49 @@ as plain text. After compaction, resolving again captures the current cursor, no
 the historical target. `/gaze disconnect` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
 
-Release freezes browser evidence before transcription. The existing capsule immediately
-shows “Looking into …”; hint persistence runs after microphone stop/reservation, not
-ahead of them on the ordered intent worker. Capsule placement samples only its
-candidate strip, without changing placement scores. CoreML prewarm loads and runs
-one silent prediction before sharing the cached runner; models and fallbacks are unchanged.
+Release freezes browser evidence and seals PCM before transcription. The question is
+reserved/published before native stream stop/close, so a slow shutdown cannot delay
+the inbox's transcribing state. New input still waits for shutdown to finish.
+Hint persistence follows stop/reservation on the ordered intent worker. Capsule
+placement and visual design are unchanged. CoreML prewarm still runs one silent
+prediction before sharing the cached runner; models and fallbacks are unchanged.
+
+`/gaze timing` works without recording opt-in or a connected browser. It returns
+only monotonic milliseconds for the last eight releases, in memory: browser keyup
+(zero), evidence start/freeze/send; Python binding/worker receipt, PCM seal,
+capture reservation, native stop/close, ASR queue/start/model ready/inference/end,
+first protected-frame UI/processing push, injection and first matching text delta.
+Browser and Python clocks are separate: subtract stages within their own group,
+never across groups. Missing stages have not happened (or that path was not used).
+The first UI push is a completed CDP render, not proof of a painted frame.
+No audio, transcript, page data, coordinates or browser/request identifiers enter
+the trace, and it is never persisted or sent to Chrome/model providers.
+
+A 20 ms Python heartbeat reports each turn's maximum scheduling gap through its
+first delta or failure/completion, plus the process-wide maximum since startup.
+A large gap indicates Python could not schedule (GIL/native blocking, CPU pressure
+or machine sleep); a healthy heartbeat with slow UI instead points at a specific
+worker, transport or Chrome. Evidence duration isolates synchronous page-side
+capture; native stop and close have separate stages. The original hardware freeze
+is not yet reproduced: compare whether ordinary page typing/scrolling also freezes,
+or only the companion card/capsule stops updating.
+
+Device-free synthetic 3-second PCM through the real, offline CoreML path on
+2026-11-08: first process load/transcription 29,834 ms, heartbeat max gap 19.8 ms;
+warm transcriptions 76.5/78.2 ms, gaps 12.5/12.5 ms. A later fresh process after
+those cache/compile effects took 1,584.7 ms (model ready 1,506.5 ms), max gap
+128.1 ms; warm runs 77.6/75.3 ms, max gaps 12.5 ms. These are not an ASR
+before/after speedup: neither run demonstrates a multi-second GIL stall. No model
+download, microphone, camera, speaker or live Hermes was used; ASR remains
+in-process because isolation is not justified by this evidence.
+
+The blocked-close regression originally published no transcribing inbox state
+within 200 ms; after sealing PCM and moving reservation ahead of shutdown it
+published in 0.4–0.8 ms, while close remained blocked. In private headless Chrome,
+the capsule was visibly populated in 70/83/90 ms while fake stop/close/ASR were
+blocked for roughly 500 ms. Page timers, scrolling and typing remained responsive
+on a 10,000-paragraph local page; heartbeat gaps stayed below 26 ms. These probes
+exercise failure isolation, not physical PortAudio latency or the reported freeze.
 
 Private headless Chrome measurements against `d2f6657`, using synthesized
 “Explain this region” PCM in a fake native input, real offline CoreML, and a

@@ -21,6 +21,7 @@ class Microphone:
         self._error = ""
         self._generation = 0
         self._level = 0.
+        self._accepting = False
 
     def start(self, owner: str, check_loss, sample_rate: int = 16000, on_cancel=None, on_warning=None,
               on_level=None) -> dict:
@@ -38,10 +39,13 @@ class Microphone:
             self._audio = bytearray()
             self._error = ""
             self._epoch = 0.
+            self._accepting = True
             first = threading.Event()
             started = time.monotonic()
 
             def receive(data, frames, clock, status):
+                if not self._accepting:
+                    return
                 if not self._epoch:
                     self._epoch = time.time() - (clock.currentTime - clock.inputBufferAdcTime)
                 if status:
@@ -131,18 +135,33 @@ class Microphone:
         threading.Thread(target=watch, name="hermes-gaze-mic", daemon=True).start()
         return {"ok": True, "ready_ms": round((time.monotonic() - started) * 1000)}
 
-    def stop(self, owner: str) -> tuple[bytes, float]:
+    def stop(self, owner: str, timing=None, before_stop=None) -> tuple[bytes, float]:
         with self._lock:
             if self._stream is None or self._owner != owner:
                 raise RuntimeError("Recording was cancelled or belongs to another tab")
             stream, self._stream = self._stream, None
             self._owner = None
+            self._accepting = False
+            if timing is not None:
+                timing.mark("record_stop")
+            audio = bytes(self._audio)
             try:
-                stream.stop()
-                audio = bytes(self._audio)
+                if before_stop is not None:
+                    before_stop()
             finally:
-                self._audio.clear()
-                stream.close()
+                try:
+                    if timing is not None:
+                        timing.mark("stream_stop_start")
+                    stream.stop()
+                    if timing is not None:
+                        timing.mark("stream_stopped")
+                finally:
+                    self._audio.clear()
+                    if timing is not None:
+                        timing.mark("mic_close_start")
+                    stream.close()
+                    if timing is not None:
+                        timing.mark("mic_closed")
             if self._error:
                 raise RuntimeError(self._error)
             return audio, self._epoch
@@ -151,6 +170,7 @@ class Microphone:
         with self._lock:
             if self._stream is not None and (owner is None or owner == self._owner):
                 stream, self._stream = self._stream, None
+                self._accepting = False
                 self._owner = None
                 try:
                     stream.abort()

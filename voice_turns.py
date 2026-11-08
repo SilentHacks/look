@@ -18,6 +18,7 @@ from .naming import FALLBACK_SUBJECT, clean_subject, plain_error, speech_text, s
 from .resolver.cursor_context import MAX_CONTEXT, build_context
 from .resolver.bayesian_fusion import _ACTION_VERBS, _DESTRUCTIVE_VERBS, classify_utterance_intent
 from .resolver.temporal_aligner import has_deictic_pronoun
+from .release_timing import TIMINGS
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,10 @@ class VoiceTurns:
 
     def _event(self, run, status, **fields):
         previous_status = run["status"]
+        timing = TIMINGS.get(run.get("release_timing"))
+        if status in ("complete", "failed", "interrupted") and timing is not None:
+            timing.mark(status)
+            timing.finish()
         run.update(status=status, **fields)
         if status in ("complete", "failed", "interrupted"):
             item = self._item(run["item_id"])
@@ -222,7 +227,7 @@ class VoiceTurns:
                                  display=run["sequence"] == self.sequence)
         run["snapshot"] = snapshot
 
-    def capture(self, snapshot, *, transcribing=False, item_id=""):
+    def capture(self, snapshot, *, transcribing=False, item_id="", timing=None):
         """Reserve capture order before ASR. A transcribing head blocks later admission."""
         with self.lock:
             if not self.connected:
@@ -265,6 +270,8 @@ class VoiceTurns:
                 self.items.append(item)
             self.session.actions.invalidate()
             run = self._new_run(str(snapshot.get("utterance") or ""), frozen, item_id)
+            if timing is not None:
+                run["release_timing"] = timing.turn
             run["followup"] = followup
             if transcribing:
                 run["status"] = "transcribing"
@@ -362,7 +369,12 @@ class VoiceTurns:
                 key = self.binding["session_key"]
                 self._event(run, "thinking")
             try:
+                timing = TIMINGS.get(run.get("release_timing"))
+                if timing is not None:
+                    timing.mark("injection")
                 accepted = bool(self.ctx.inject_message(run["wire"], session_key=key))
+                if timing is not None:
+                    timing.mark("injection_returned")
                 error = "Host refused injection; send one normal Hermes message, then Retry."
             except Exception as exc:
                 accepted, error = False, f"Injection outcome unknown: {exc}"
@@ -701,6 +713,10 @@ class VoiceTurns:
             run = self._owned(session_id, turn_id)
             if not run or run["finished"] or run["ended"]:
                 return
+            timing = TIMINGS.get(run.get("release_timing"))
+            if timing is not None:
+                timing.mark("first_delta")
+                timing.finish()
             parser = run["title_stream"]
             was_decided = parser.decided
             text = parser.feed(delta)

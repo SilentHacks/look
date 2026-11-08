@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -180,6 +182,62 @@ class TestSessionDelivery(unittest.TestCase):
         self.assertTrue(choice["ok"], choice)
         self.assertEqual(choice["selected"]["id"], "purge")
 
+    def test_wrong_document_release_cannot_clear_another_capture(self):
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+        turns.capture_status("recording")
+        mic = self.session.microphone
+        mic._stream, mic._owner = mock.Mock(), "other:document"
+        replies = []
+        intent = {"type": "record_stop", "nonce": self.session._intent_nonce,
+                  "_browser_target": "wrong", "_browser_document": "document",
+                  "cursor_context": capture()}
+        with mock.patch.object(service, "_VOICE_TURNS", turns):
+            service.handle_intent(intent, replies.append)
+        self.assertFalse(replies[0]["ok"])
+        self.assertEqual(turns.capture_state, "recording")
+        self.assertEqual(turns.items, [])
+        mic._stream.close.assert_not_called()
+
+    def test_slow_stream_close_cannot_delay_transcribing_ui(self):
+        entered, release, pushed = threading.Event(), threading.Event(), threading.Event()
+        replies = []
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+
+        class Stream:
+            def stop(self):
+                pass
+
+            def close(self):
+                entered.set()
+                release.wait(3)
+
+        mic = self.session.microphone
+        mic._stream, mic._owner = Stream(), "source:document"
+        mic._audio.extend(b"\x01\x00")
+        def display(event):
+            if any(r["status"] == "transcribing" for i in event["items"] for r in i["conversation"]):
+                pushed.set()
+        intent = {"type": "record_stop", "nonce": self.session._intent_nonce,
+                  "_browser_target": "source", "_browser_document": "document",
+                  "cursor_context": capture()}
+        with mock.patch.object(service, "_VOICE_TURNS", turns), \
+                mock.patch.object(self.session, "display_session_event", side_effect=display), \
+                mock.patch("hermes_gaze.voice.transcribe_audio_buffer", return_value=("", [])):
+            worker = threading.Thread(target=service.handle_intent, args=(intent, replies.append))
+            started = time.monotonic()
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(1))
+                self.assertTrue(pushed.wait(.2), "Native close blocked the transcribing UI")
+                print(f"Slow-close release → transcribing UI: {(time.monotonic() - started) * 1000:.1f} ms")
+            finally:
+                release.set()
+                worker.join(3)
+
     def test_slow_transcription_releases_intents_and_preserves_capture_order(self):
         import threading
         from hermes_gaze import voice
@@ -200,14 +258,20 @@ class TestSessionDelivery(unittest.TestCase):
         intent = {"type": "record_stop", "nonce": self.session._intent_nonce,
                   "_browser_target": "source", "_browser_document": "document",
                   "cursor_context": capture()}
+        events = []
+        def stop(owner, *, before_stop, **kwargs):
+            before_stop()
+            return b"audio", 100.
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
-                mock.patch.object(self.session.microphone, "stop", return_value=(b"audio", 100.)), \
+                mock.patch.object(self.session.microphone, "stop", side_effect=stop), \
+                mock.patch.object(self.session, "display_session_event", side_effect=events.append), \
                 mock.patch.object(voice, "transcribe_audio_buffer", side_effect=transcribe):
             try:
                 service.handle_intent(intent, reply)
                 self.assertTrue(entered.wait(1))
                 service.handle_intent({**intent, "cursor_context": capture()}, reply)
                 self.assertEqual([r["status"] for r in turns.pending], ["transcribing", "transcribing"])
+                self.assertEqual(events[-1]["items"][-1]["conversation"][0]["status"], "transcribing")
                 self.assertEqual([r for r in replies if r.get('type') != 'record_reserved'], [])
             finally:
                 release.set()

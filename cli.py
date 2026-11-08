@@ -24,6 +24,10 @@ def _handle_slash_command(raw_args: str) -> str:
     sub = argv[0].lower() if argv else "status"
     session = get_shared_session()
 
+    if sub == "timing":
+        from .release_timing import TIMINGS
+        return json.dumps(TIMINGS.snapshot(), indent=2)
+
     if sub == "start":
         if not session.is_chrome_reachable():
             port = urlparse(session.cdp_http_url).port or 9333
@@ -118,6 +122,7 @@ def _handle_slash_command(raw_args: str) -> str:
         "  /gaze mode <hover|simulated|webcam> Choose cursor, simulated noise or real webcam\n"
         "  /gaze calibrate              Open the owned nine-point webcam calibration window\n"
         "  /gaze tracker [stop]         Show tracker status, or stop camera and return to cursor\n"
+        "  /gaze timing                 Show last eight release traces (monotonic milliseconds only)\n"
         "  /gaze resolve <utterance>    Resolve a deictic phrase against the live Chrome tab\n"
         "  /gaze benchmark              Run quantitative accuracy benchmark across noise levels"
     )

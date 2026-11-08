@@ -140,6 +140,8 @@ def register(ctx: Any) -> None:
                 return result
             return (result + "\n" + turns.bind("connect", **kwargs)
                     + "\nFresh Hermes sessions still need one normal Hermes message before Chrome turns.")
+        if raw_args.strip() == "timing":
+            return _handle_slash_command(raw_args)
         if raw_args.strip() == "disconnect":
             session.microphone.cancel()
             session.stop_webcam()

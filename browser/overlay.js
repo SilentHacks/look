@@ -1969,7 +1969,7 @@
     // The moving pool gives way to a pinned one, so light never stacks up.
     lit.get(c.key)?.g.o.to(nearPin || (now - G.stillAt > 340) ? 0 : 1);
   }
-  function holdEnd(cancelled, reason) {
+  function holdEnd(cancelled, reason, releasedAt = performance.now()) {
     const H = S.hold;
     if (!H) return;
     S.hold = null;
@@ -1995,7 +1995,7 @@
     // Pointing somewhere else makes it a new question; otherwise it stays with the card.
     const follow = H.follow && !H.targets.length ? H.follow : null;
     const rec = follow ? null : {targets: H.targets, subject: subjectFor(H.targets)};
-    stopListening(rec, follow);
+    stopListening(rec, follow, releasedAt);
     S.pointer.moved = 0;
     if (S.pillMode === "wave") hidePill(!!follow);
     if (rec) {
@@ -2024,16 +2024,20 @@
       }
     }, 230);
   }
-  function stopListening(rec, follow) {
+  function stopListening(rec, follow, releasedAt) {
     if (!isListening) return;
     isListening = false;
     resetMic();
     // Freeze evidence at release, before transcription and before routing can change it.
     litIds = rec ? rec.targets.map(t => t.hit ? cursorId(t.hit) : null).filter(Boolean) : [];
+    const timing = {keyup_received: 0, evidence_start: performance.now() - releasedAt};
     const intent = { type: "record_stop", mode: state.mode, item_id: follow?.id || "", subject: rec?.subject,
       ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : captureNoisyContext()) };
+    timing.evidence_frozen = performance.now() - releasedAt;
+    intent.release_timing = timing;
     litIds = [];
     if (rec) bindRequest(intent, rec);
+    timing.intent_sent = performance.now() - releasedAt;
     _emit(intent);
     if (rec) { requestOwner.set(intent.id, rec); }
   }
@@ -2674,11 +2678,12 @@
     }
     // A held key always finishes, wherever the release lands.
     if (e.code === TALK_KEY && !down && spaceHeld) {
+      const releasedAt = performance.now();
       swallow();
       spaceHeld = false;
       S.keyDown = false;
       clearTimeout(S.armTimer);
-      if (S.hold) holdEnd(false);
+      if (S.hold) holdEnd(false, undefined, releasedAt);
       else if (S.keyArmed) tapThrough(e);
       return;
     }

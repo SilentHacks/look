@@ -110,7 +110,8 @@ class TrustBoundaries(unittest.TestCase):
         with patch.object(service, 'get_shared_session', return_value=session), \
                 patch.object(service, '_VOICE_TURNS', None), patch.object(service, '_CONFIG', GazeConfig()), \
                 patch.object(service, '_LLM', SimpleNamespace(complete_structured=complete)), \
-                patch.object(session.microphone, 'stop', return_value=(b'\x01\x00', time.time())), \
+                patch.object(session.microphone, 'stop', side_effect=lambda owner, before_stop, **kw:
+                             (before_stop(), (b'\x01\x00', time.time()))[1]), \
                 patch.object(voice, 'transcribe_audio_buffer', return_value=('What does this do?', [])):
             service.handle_intent(intent, replies.append)
         self.assertTrue(replies[0]['ok'], replies)
