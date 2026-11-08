@@ -32,6 +32,12 @@ DETAILS = {
     "lid": dict(posture="upright", lighting="normal", distance="usual", camera_angle="lid tilted"),
     "no-recalibration": dict(posture="upright", lighting="normal", distance="lean back", camera_angle="baseline"),
 }
+DEFAULT_BLOCKS = ["upright", "distance", "head", "no-recalibration"]
+DEFAULT_SECONDS = 25 * 1.2 + 9 * 1.2 + 16 * 1.2 + 15 + 16.8 + 9 * 1.2
+
+
+def block_seconds(block, duration=None):
+    return duration if duration is not None else DEFAULT_SECONDS - (30 if block == "no-recalibration" else 0)
 
 
 def completed_blocks(root, person, glasses, device):
@@ -40,7 +46,7 @@ def completed_blocks(root, person, glasses, device):
 
 
 class RecordingHost(WebcamHost):
-    def __init__(self, directory: Path, *, person="p-demo", condition="upright", duration=150., fake_video=None,
+    def __init__(self, directory: Path, *, person="p-demo", condition="upright", duration=None, fake_video=None,
                  geometry=None, glasses="none", device="laptop", note="", blocks=None, dataset_root=None):
         self.directory = private_directory(directory)
         self.dataset_root = Path(dataset_root) if dataset_root is not None else None
@@ -124,10 +130,10 @@ class RecordingHost(WebcamHost):
             self.metadata = dict(version=2, person=self.person, session=self.directory.name, condition=block,
                                  glasses=self.glasses, device=self.device, note=note, condition_details=details,
                                  fake_camera=self.fake_video is not None, finished=False, complete=False,
-                                 requested_seconds=self.duration, screen={**geometry, **physical}, audio=False,
+                                 requested_seconds=block_seconds(block, self.duration), screen={**geometry, **physical}, audio=False,
                                  date_time=datetime.now().astimezone().isoformat(), epoch=data["epoch"],
                                  viewport_origin=data.get("viewport_origin"), calibration_source=source,
-                                 target_seed=data.get("seed"), protocol_version=2)
+                                 target_seed=data.get("seed"), protocol_version=3)
             # Exclusive creation: never append to another recording, including partial sessions.
             self.video_file = os.fdopen(os.open(self.directory / "camera.webm", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb")
             self.targets_file = os.fdopen(os.open(self.directory / "targets.jsonl", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w")
@@ -141,7 +147,7 @@ class RecordingHost(WebcamHost):
         elif kind == "record_frame" and self.targets_file is not None:
             t, target = data.get("t"), data.get("target")
             g = self.metadata["screen"]
-            if not isinstance(t, (int, float)) or not math.isfinite(t) or not self.last_frame < t <= self.duration + 1:
+            if not isinstance(t, (int, float)) or not math.isfinite(t) or not self.last_frame < t <= self.metadata["requested_seconds"] + 1:
                 return
             if not isinstance(target, list) or len(target) != 2 or not all(isinstance(v, (int, float)) and math.isfinite(v) and 0 <= v <= g[k] for v, k in zip(target, ("width", "height"))):
                 return
@@ -153,7 +159,7 @@ class RecordingHost(WebcamHost):
         elif kind == "record_end" and self.video_file is not None:
             self.video_file.close(); self.targets_file.close()
             self.metadata.update(finished=self.bytes > 0 and self.last_frame > 0, reason=str(data.get("reason", "unknown"))[:80],
-                                 complete=data.get("reason") == "complete" and self.last_frame >= self.duration - 1,
+                                 complete=data.get("reason") == "complete" and self.last_frame >= self.metadata["requested_seconds"] - 1,
                                  actual_seconds=self.last_frame, video_bytes=self.bytes)
             save_json(self.directory / "recording.json", self.metadata)
             self.saved.append(self.directory)
@@ -180,9 +186,9 @@ def main():
     p.add_argument("--glasses", choices=("none", "glasses", "contacts"), required=True)
     p.add_argument("--device", required=True, help="anonymous camera/display label, e.g. laptop-front")
     p.add_argument("--note", default="", help="no names or contact details")
-    p.add_argument("--blocks", nargs="+", choices=CONDITIONS, default=list(CONDITIONS))
+    p.add_argument("--blocks", nargs="+", choices=CONDITIONS, default=DEFAULT_BLOCKS)
     p.add_argument("--repeat", action="store_true", help="record completed blocks again instead of resuming")
-    p.add_argument("--duration", type=float, default=150., help="120–180 seconds; shorter only with a fake camera")
+    p.add_argument("--duration", type=float, help="override each block's seconds (72–180; 36–180 with a fake camera); default: unscaled schedule")
     p.add_argument("--fake-video", type=Path, help="Y4M/MJPEG fake camera; mandatory for agents")
     p.add_argument("--width-mm", type=float)
     p.add_argument("--height-mm", type=float)
@@ -194,8 +200,8 @@ def main():
         p.error(str(exc))
     if not args.device.strip() or len(args.device) > 100 or len(args.note) > 1000:
         p.error("Device label is required (max 100 characters); note max 1000; no personal names")
-    if not math.isfinite(args.duration) or not (36 if args.fake_video else 120) <= args.duration <= 180:
-        p.error("--duration must be 120–180 seconds (36–180 for fake devices)")
+    if args.duration is not None and (not math.isfinite(args.duration) or not (36 if args.fake_video else 72) <= args.duration <= 180):
+        p.error("--duration must be 72–180 seconds (36–180 for fake devices)")
     physical = {k: v for k, v in vars(args).items() if k in ("width_mm", "height_mm", "distance_mm") and v is not None}
     if physical and (len(physical) != 3 or any(not math.isfinite(v) or v <= 0 for v in physical.values())):
         p.error("Supply all three positive physical measurements, or none (degrees will be N/A)")

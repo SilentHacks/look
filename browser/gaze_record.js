@@ -1,6 +1,46 @@
 // Explicit dataset mode in the owned tracker process, never a website.
-(async function (opts) {
+(function () {
   "use strict";
+  const grid = (n, edge) => Array.from({length: n * n}, (_, i) => [edge + (1 - edge * 2) * (i % n) / (n - 1), edge + (1 - edge * 2) * Math.floor(i / n) / (n - 1)]);
+  function shuffle(points, seed) {
+    let state = seed || 1;
+    for (let i = points.length - 1; i > 0; i--) {
+      state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+      const j = (state >>> 0) % (i + 1); [points[i], points[j]] = [points[j], points[i]];
+    }
+    return points;
+  }
+  function protocol(block, seed) {
+    const schedule = [];
+    const fixed = (points, phase) => points.forEach(xy => schedule.push({xy, phase, span: 1.2}));
+    const validation = shuffle(grid(3, .12), seed);
+    if (block !== "no-recalibration") fixed(shuffle(grid(5, .04), seed), "calibration");
+    fixed(validation, "validation-start");
+    fixed(shuffle(grid(4, 1 / 8), seed), "fixed");
+    schedule.push({phase: "moving", span: 15}, {phase: "reading", span: 16.8});
+    fixed(validation, "validation-end");
+    return schedule;
+  }
+  const scheduleLength = schedule => schedule.reduce((sum, step) => sum + step.span, 0);
+  function target(schedule, t, duration = scheduleLength(schedule)) {
+    let local = t * scheduleLength(schedule) / duration;
+    for (const step of schedule) {
+      if (local >= step.span) { local -= step.span; continue; }
+      const p = local / step.span;
+      if (step.phase === "moving") return {xy: [.5 + .42 * Math.sin(p * Math.PI * 4), .5 + .4 * Math.sin(p * Math.PI * 2)], phase: step.phase, settling: false};
+      if (step.phase === "reading") {
+        const line = Math.min(3, Math.floor(local / 4.2));
+        const elapsed = local - line * 4.2;
+        return {xy: [.08 + .84 * Math.max(0, (elapsed - .8) / 3.4), .12 + line * .25], phase: step.phase, settling: elapsed < .8};
+      }
+      return {xy: step.xy, phase: step.phase, settling: local < .35};
+    }
+    return {xy: [.5, .5], phase: "validation-end", settling: true};
+  }
+  // The same pure schedule/target functions run in Node without a DOM or devices.
+  if (typeof module !== "undefined") module.exports = {protocol, scheduleLength, target};
+  return async function (opts) {
+  const blockDuration = block => opts.duration ?? scheduleLength(protocol(block, 1));
   const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, ...data}));
   const make = (tag, text) => { const n = document.createElement(tag); n.textContent = text || ""; return n; };
   document.head.append(make("style", "body{margin:0;background:#17191c;color:#f5f5f7;font:18px system-ui;text-align:center}main{max-width:850px;margin:auto;padding:24px}video{width:240px;transform:scaleX(-1)}button,input,textarea{font:inherit;padding:8px;margin:6px}label{display:block}input,textarea{width:340px}button{cursor:pointer}#dot{position:fixed;width:20px;height:20px;border-radius:50%;background:#a9d7ff;transform:translate(-50%,-50%);display:none}#instruction{position:fixed;bottom:0;width:100%;pointer-events:none;font-size:14px}body.recording main{display:none}button:focus-visible{outline:3px solid #a9d7ff}"));
@@ -10,50 +50,14 @@
   video.autoplay = true; video.muted = true; video.playsInline = true;
   document.body.append(main, dot, instruction);
   let stream, recorder, index = 0, active = false, saving = false, geometry, windowState, startTime,
-    chain = Promise.resolve(), frames = 0, seed, schedule = [], shown, reason, pending = false, frameCallback;
+    chain = Promise.resolve(), frames = 0, seed, schedule = [], shown, reason, pending = false, frameCallback, duration;
   const fields = {};
-  const grid = (n, edge) => Array.from({length: n * n}, (_, i) => [edge + (1 - edge * 2) * (i % n) / (n - 1), edge + (1 - edge * 2) * Math.floor(i / n) / (n - 1)]);
   function button(id, text, fn) {
     const b = make("button", text); b.id = id;
     b.addEventListener("click", e => { if (e.isTrusted) fn(e); }); main.append(b); return b;
   }
   function close() {
     stream?.getTracks().forEach(t => t.stop()); emit("protocol_end");
-  }
-  function shuffle(points) {
-    let state = seed || 1;
-    for (let i = points.length - 1; i > 0; i--) {
-      state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
-      const j = (state >>> 0) % (i + 1); [points[i], points[j]] = [points[j], points[i]];
-    }
-    return points;
-  }
-  function protocol() {
-    seed = crypto.getRandomValues(new Uint32Array(1))[0];
-    schedule = [];
-    const fixed = (points, phase, span = 1.2) => points.forEach(xy => schedule.push({xy, phase, span}));
-    const noFit = opts.blocks[index].name === "no-recalibration";
-    const validation = shuffle(grid(3, .12));
-    if (!noFit) fixed(shuffle(grid(5, .04)), "calibration");
-    fixed(validation, "validation-start");
-    fixed(shuffle(grid(6, 1 / 12)), "fixed");
-    if (noFit) fixed(shuffle(grid(5, .08)), "fixed");
-    schedule.push({phase: "moving", span: 30}, {phase: "reading", span: 25.2});
-    fixed(validation, "validation-end");
-  }
-  function target(t) {
-    let local = t * 150 / opts.duration;
-    for (const step of schedule) {
-      if (local >= step.span) { local -= step.span; continue; }
-      const p = local / step.span;
-      if (step.phase === "moving") return {xy: [.5 + .42 * Math.sin(p * Math.PI * 4), .5 + .4 * Math.sin(p * Math.PI * 2)], phase: step.phase, settling: false};
-      if (step.phase === "reading") {
-        const line = Math.min(5, Math.floor(p * 6));
-        return {xy: [.08 + .84 * ((p * 6) % 1), .12 + line * .15], phase: step.phase, settling: (p * 6) % 1 < .08};
-      }
-      return {xy: step.xy, phase: step.phase, settling: local < .35};
-    }
-    return {xy: [.5, .5], phase: "validation-end", settling: true};
   }
   function finish(why = "complete") {
     if (!active) return;
@@ -66,10 +70,10 @@
     if (!active) return;
     if (windowState.some((v, i) => v !== [screenX, screenY, innerWidth, innerHeight, devicePixelRatio][i])) { finish("window changed"); return; }
     const t = (performance.now() - startTime) / 1000;
-    if (t >= opts.duration) { finish(); return; }
-    shown = target(t);
+    if (t >= duration) { finish(); return; }
+    shown = target(schedule, t, duration);
     dot.style.left = `${shown.xy[0] * 100}%`; dot.style.top = `${shown.xy[1] * 100}%`;
-    instruction.textContent = `${shown.phase} · Follow the dot with your eyes · ${Math.ceil(opts.duration - t)} seconds · Esc saves and stops early`;
+    instruction.textContent = `${shown.phase} · Follow the dot with your eyes · ${Math.ceil(duration - t)} seconds · Esc saves and stops early`;
     requestAnimationFrame(draw);
   }
   function capture(_, metadata) {
@@ -108,9 +112,10 @@
   function prepare(message = "Take a break. Restore baseline settings except for the next named change.") {
     if (index >= opts.blocks.length) { close(); return; }
     const block = opts.blocks[index];
+    duration = blockDuration(block.name);
     main.replaceChildren(make("h1", `${index ? "Break — next" : "Ready"}: ${block.name}`),
       make("p", `${opts.person} · ${opts.glasses} · ${opts.device}`), make("p", message),
-      make("p", block.instruction), make("p", `${opts.duration} seconds. Follow the dot naturally. Keep this window visible; maximize it now, before starting.`), video);
+      make("p", block.instruction), make("p", `${duration.toFixed(1)} seconds. Follow the dot naturally. Keep this window visible; maximize it now, before starting.`), video);
     for (const [key, value] of Object.entries(block.details)) {
       const label = make("label", key.replaceAll("_", " "));
       fields[key] = make("input"); fields[key].id = key; fields[key].value = value; fields[key].maxLength = 200;
@@ -132,7 +137,8 @@
       if (distance_mm !== null && (!Number.isFinite(distance_mm) || distance_mm <= 0)) {
         instruction.textContent = "Enter a positive measured distance."; return;
       }
-      protocol(); pending = true;
+      seed = crypto.getRandomValues(new Uint32Array(1))[0];
+      schedule = protocol(block.name, seed); pending = true;
       geometry = {left: 0, top: 0, width: innerWidth, height: innerHeight, screen_width: screen.width,
         screen_height: screen.height, screen_left: screen.availLeft, screen_top: screen.availTop, dpr: devicePixelRatio};
       windowState = [screenX, screenY, innerWidth, innerHeight, devicePixelRatio];
@@ -150,7 +156,7 @@
   }
   function intro() {
     main.replaceChildren(make("h1", "Private gaze dataset"), make("p", `${opts.person} · ${opts.glasses} · ${opts.device}`),
-      make("p", `Selected blocks: ${opts.blocks.map(b => b.name).join(", ")}. About ${Math.round(opts.duration * opts.blocks.length / 60)} minutes plus breaks. Stop between blocks and rerun the same command to resume.`));
+      make("p", `Selected blocks: ${opts.blocks.map(b => b.name).join(", ")}. About ${Math.ceil(opts.blocks.reduce((sum, b) => sum + blockDuration(b.name), 0) / 60)} minutes plus breaks. Stop between blocks and rerun the same command to resume.`));
     button("camera", "Enable camera", enableCamera); button("exit", "Not now", close);
   }
   globalThis.__HERMES_WEBCAM__ = {
@@ -175,4 +181,5 @@
     button("decline", "No thanks", close);
   } else intro();
   emit("ready");
-})
+  };
+})()

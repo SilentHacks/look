@@ -23,6 +23,10 @@ needed for the dataset tools. The first run prepares the existing checksum-pinne
 Apache-2.0 MediaPipe runtime assets; cached assets work offline. Do not run the
 hyphenated checkout as `python -m benchmark.gaze_record`: use the wrapper above.
 
+Run the recorder from a terminal app with **macOS camera permission**, such as
+Terminal.app. T3 Code's built-in terminal is refused by macOS without any prompt;
+the page stays stuck on **“Starting camera only”**. Use Terminal.app instead.
+
 Choose a **random anonymous ID**, e.g. `p-a7c4` (p- plus 4–24 lowercase
 letters/digits). Do not use your name, initials, email or a public account handle.
 Use the **same ID** for both glasses rounds and later sessions. Use an anonymous,
@@ -35,11 +39,11 @@ Private files live outside the repo at:
 `~/.cache/hermes-gaze-eval/recordings/<ID>/<session>/`. Directories are `0700`,
 files `0600`. Each session retains original face/background `camera.webm`,
 `targets.jsonl` and `recording.json`. The participant folder also holds `consent.json`.
-Check free disk space before recording. At 1.5 Mbit/s, allow roughly 30 MB per
-150-second session, plus encoder variation. Decoded evaluation frames can be much
+Check free disk space before recording. At 1.5 Mbit/s, allow roughly 20 MB per
+103-second session, plus encoder variation. Decoded evaluation frames can be much
 larger; never put raw or derived data in Git or a shared/cloud-synced folder.
 
-## 2. First round: six blocks, about 15 minutes + breaks
+## 2. First round: four blocks, about 7 minutes + breaks
 
 Clear private material from the background. Fix the laptop and camera, use 100%
 Chrome zoom and your usual display brightness. Do not strain or use uncomfortable
@@ -63,7 +67,7 @@ light. Run **one command**:
 4. Scroll down to **Start session**. Follow the dot with your **eyes**, not the
    pointer. Blink naturally. Keep the window visible and its position/size/zoom
    fixed. Stay in the named posture for the whole session.
-5. After 150 seconds, the session saves and a **break screen** names the next block.
+5. After about 103 seconds (73 without recalibration), the session saves and a **break screen** names the next block.
    Rest your eyes, restore baseline settings, then make only that block's change.
    The camera preview remains active during breaks, but video is not recorded.
    Start the next session when ready; breaks have no timer.
@@ -75,19 +79,26 @@ light. Run **one command**:
 | `upright` | Normal upright posture, comfortable normal light, usual distance; remember this camera/lid angle. | New 25-location collection |
 | `distance` | Lean back comfortably; alternatively move closer. Describe which and approximate distance in the field/note. Keep lid/camera fixed. | New collection |
 | `head` | Return to usual distance. Turn or tilt your head **slightly**, hold that comfortable pose and follow with your eyes. Describe direction/tilt. | New collection |
-| `light` | Upright again. Lower or brighten the room light comfortably. Describe light direction/level; avoid strong glare or darkness. | New collection |
-| `lid` | Restore normal light. Tilt the laptop lid a little **before** starting; describe direction/angle. Keep camera fixed during the session. | New collection |
+| `light` (optional) | Upright again. Lower or brighten the room light comfortably. Describe light direction/level; avoid strong glare or darkness. | New collection |
+| `lid` (optional) | Restore normal light. Tilt the laptop lid a little **before** starting; describe direction/angle. Keep camera fixed during the session. | New collection |
 | `no-recalibration` | Restore baseline lid, display/window size and light; lean back slightly. Keep the new distance while following. | **Earlier complete upright session with the same ID/glasses/device**, no new calibration |
 
-All sessions are 2.5 minutes by default (`--duration 120` through `180` is allowed).
-The fixed calibration is a **random-order 5×5 grid near the screen edges**, about
-1.2 seconds per target, first .35 seconds excluded for settling. This supports
-9/16/25-location experiments on retained frames. A matched nine-target validation
-probe follows calibration; later come randomized held-out fixed targets, moving
-targets, reading-style sweeps, and **the same short validation probe at the end**.
-Validation is never used for fitting. The no-recalibration block replaces the
-initial calibration time with additional tests. Session duration scales the timing
-proportionally; use the default for comparable human collections.
+Default order: `upright`, `distance`, `head`, `no-recalibration`; `light` and `lid`
+remain selectable with `--blocks`. Each calibrated session is **102.6 seconds**:
+25 calibration targets (30s), nine validation-start targets (10.8s), a randomized
+4×4 held-out fixed grid (19.2s), moving targets (15s), four reading lines (16.8s),
+and the same nine-target validation-end probe (10.8s).
+Calibration remains a **random-order 5×5 grid near the screen edges**, 1.2 seconds
+per target with the first .35 seconds excluded for settling. This supports
+9/16/25-location experiments on retained frames. Validation is never used for fitting.
+Each reading line holds at the left end for .8 seconds, then moves right for 3.4s.
+Hold frames are marked settling and excluded by the loader before scoring or tuning.
+The no-recalibration block simply omits calibration: **72.6 seconds**, no extra grid.
+The default leaves all timings unscaled. `--duration 72` through `180` overrides
+each block's total, scaling its entire schedule proportionally (including holds);
+use the default for new human collections. Protocol 3 changes timing, not the file
+schema: existing complete protocol 2 / 150-second sessions still load, score
+alongside new sessions, supply baseline calibration and count toward resume.
 
 The no-recalibration baseline must have compatible viewport/display dimensions and
 DPR. If the screen says no compatible baseline, restore the original window size
@@ -122,9 +133,12 @@ To do only part of the protocol:
 ```bash
 .venv/bin/python scripts/gaze.py record --person p-a7c4 --glasses glasses --device laptop-front \
   --blocks upright distance head
-# Later, select the rest (or rerun the full command):
+# Later, select the remaining default block (or rerun the full command):
 .venv/bin/python scripts/gaze.py record --person p-a7c4 --glasses glasses --device laptop-front \
-  --blocks light lid no-recalibration
+  --blocks no-recalibration
+# Optional extra conditions:
+.venv/bin/python scripts/gaze.py record --person p-a7c4 --glasses glasses --device laptop-front \
+  --blocks light lid
 # Repeat a completed block, retaining the previous session too:
 .venv/bin/python scripts/gaze.py record --person p-a7c4 --glasses glasses --device laptop-front \
   --blocks upright --repeat
@@ -147,8 +161,8 @@ Take a longer break if needed, remove glasses, restore baseline setup, then use 
 .venv/bin/python scripts/gaze.py record --person p-a7c4 --glasses none --device laptop-front
 ```
 
-Repeat the six blocks. Do not skip baseline: the no-recalibration block must reuse
-an earlier baseline **in this eyewear state**. This makes about 30 minutes of video
+Repeat the four default blocks. Do not skip baseline: the no-recalibration block must reuse
+an earlier baseline **in this eyewear state**. Allow about 14 minutes of recording
 across both rounds, plus breaks; split across days if you prefer. Record contacts
 as `--glasses contacts`, not `none`. Date/time preserves the order; glasses transfer
 is evaluated from the earlier eyewear round to the later one, with its source ID
@@ -234,7 +248,7 @@ of forensic erasure from SSDs or backup systems.
    Explain that face video is identifiable and stays on their computer until they
    explicitly export/share it. No coercion; declining opens no camera.
 3. Let **them** read/accept the consent screen and operate the camera. Ask them to
-   record the same six blocks with their usual glasses, then without (or mark
+   record the same four default blocks with their usual glasses, then without (or mark
    contacts accurately), using their own stable camera/display label.
 4. They export their ID's bundle. Agree on trusted transfer and retention/deletion
    before copying it to this machine. Import and list it here; keep their device
