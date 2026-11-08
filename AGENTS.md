@@ -358,7 +358,9 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   `AppearanceEstimator` (`mediapipe-face-v2-left-appearance-iris-ridge10-1`) in a
   separate owned macOS Chrome process: 128 row-major normalized left-eye grayscale
   features plus that eye's two iris coordinates, standardized linear ridge λ10.
-  Keep nine points, strict off-screen rejection and no smoothing. Old model profiles
+  Keep nine points, strict off-screen rejection and no smoothing. A candidate fit is
+  saved only after its held-out check passes (provisional thresholds, in memory);
+  practice estimates reach only the owned window. Old model profiles
   request recalibration without overwriting them. Recalibrate after posture, camera
   or eyewear changes; five-point bias refresh is a follow-up, not live functionality.
   These numeric appearance features are biometric: never log them or expose them in
@@ -368,7 +370,8 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   One calibrated display; each page needs a trusted pointer movement to measure its
   viewport origin, repeated after zoom/resize/chrome changes. Wrong-display, stale
   or absent gaze yields no fixation. No cursor fallback or gaze click authority.
-  See `docs/WEBCAM_GAZE.md`; `tests/webcam_chrome.py` uses fake camera/microphone only.
+  See `docs/WEBCAM_GAZE.md`; `tests/webcam_chrome.py` and headless
+  `tests/calibration_chrome.py` use fake devices only.
   `/gaze tracker` reports cumulative numeric per-reason `drops`, including missing
   features, off-screen predictions, missing/changed page anchors, outside-page
   mapping and absent foreground tabs. Never expose features/coordinates there.

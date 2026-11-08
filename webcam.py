@@ -5,6 +5,7 @@ Only this class's Popen process is closed. Importing this module opens no device
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -20,7 +21,8 @@ import threading
 import time
 import urllib.request
 
-from .tracker.webcam_gaze import AppearanceEstimator, GazeEstimator, LandmarkEstimator
+from .tracker.webcam_gaze import (CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator,
+                                  GazeEstimator, LandmarkEstimator, check_map, score_check_trial, summarize_check)
 
 _ASSETS = {
     "tasks.tgz": ("https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.32.tgz",
@@ -30,6 +32,14 @@ _ASSETS = {
 }
 _CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 _POINTS = [(x, y) for y in (.1, .5, .9) for x in (.1, .5, .9)]
+_SCREEN_KEYS = ("left", "top", "width", "height", "screen_width", "screen_height", "screen_left", "screen_top", "dpr")
+_WRONG_WINDOW = "Move this window onto one screen"
+_WRONG_DISPLAY = "Different screen. Recalibrate here."
+_OLD_MODEL = "The gaze model changed. Please recalibrate with /gaze calibrate."
+_OLD_MODEL_WINDOW = "Eye tracker updated. Recalibrate."
+_BAD_PROFILE_WINDOW = "Saved setup unreadable. Recalibrate."
+_WEAK = "Adjust light or position"
+_INSUFFICIENT = "Couldn\u2019t see your eyes"
 
 
 def asset_directory() -> Path:
@@ -66,10 +76,12 @@ class WebcamHost:
     def __init__(self, on_point, *, estimator: GazeEstimator | None = None,
                  profile_path: Path | None = None, assets: Path | None = None,
                  fake_video: Path | None = None, runtime_source: Path | None = None,
-                 runtime_options: dict | None = None) -> None:
+                 runtime_options: dict | None = None, on_use_cursor=None, chrome_args: tuple[str, ...] = ()) -> None:
         self.estimator = estimator or AppearanceEstimator()
         self._feature_limits = getattr(self.estimator, "feature_limits", (4.,) * self.estimator.feature_count)
         self.on_point = on_point
+        self.on_use_cursor = on_use_cursor
+        self.chrome_args = tuple(chrome_args)
         self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hermes-gaze" / "webcam-calibration.json"
         self.assets = assets
         self.fake_video = fake_video
@@ -99,6 +111,8 @@ class WebcamHost:
         self._observations = []
         self._point_samples = []
         self._point_index = 0
+        self._check = None  # In-memory held-out check; estimates are discarded after each result.
+        self._practice = None
 
     def status(self) -> dict:
         return {"state": self.state, "calibrated": self.profile is not None, "samples": self.samples,
@@ -117,8 +131,7 @@ class WebcamHost:
             return self.status()
         self._stop.clear(); self._ready.clear(); self.error = ""; self.state = "starting"
         self.last_sample = 0.
-        self._calibration = None
-        self._observations = []; self._point_samples = []; self._point_index = 0
+        self._clear_flow()
         try:
             self.assets = prepare_assets(self.assets)
         except (OSError, ValueError) as exc:
@@ -134,7 +147,7 @@ class WebcamHost:
                 if not isinstance(profile, dict):
                     raise ValueError("Invalid calibration profile")
                 if profile.get("model_id") != self.estimator.model_id:
-                    self._calibration_notice = "The gaze model changed. Please recalibrate with /gaze calibrate."
+                    self._calibration_notice = _OLD_MODEL
                     profile = None
                 if profile is not None:
                     self.estimator.load(profile); self.profile = profile
@@ -159,13 +172,12 @@ class WebcamHost:
             self._process.terminate()
         if self._thread and self._thread is not threading.current_thread():
             self._thread.join(12)
-        self._calibration = None
-        self._observations = []; self._point_samples = []; self._point_index = 0
+        self._clear_flow()
         self.state = "stopped"
 
     def calibrate(self) -> dict:
         status = self.start()
-        if status["state"] == "running":
+        if status["state"] in ("running", "failed"):  # A failed window explains why and offers a way out.
             self._commands.put(("Page.bringToFront", {}))
         return status
 
@@ -185,9 +197,92 @@ class WebcamHost:
             self._event(message)
         raise RuntimeError("Tracker stopped")
 
-    def _ui(self, method: str, text: str) -> None:
-        self._send("Runtime.evaluate", {"expression": "globalThis.__HERMES_WEBCAM__?." + method + "(" + json.dumps(text) + ")",
+    def _ui(self, method: str, value="") -> None:
+        self._send("Runtime.evaluate", {"expression": "globalThis.__HERMES_WEBCAM__?." + method + "(" + json.dumps(value) + ")",
                                        "contextId": self._context})
+
+    def _clear_flow(self) -> None:
+        self._calibration = self._check = self._practice = None
+        self._observations = []; self._point_samples = []; self._point_index = 0
+
+    def _measure(self, data: dict) -> tuple[dict, dict] | None:
+        screen, viewport = data.get("screen", {}), data.get("viewport", {})
+        if not all(isinstance(screen.get(k), (int, float)) and math.isfinite(screen[k]) for k in _SCREEN_KEYS):
+            return None
+        if min(screen[k] for k in ("width", "height", "dpr")) <= 0:
+            return None
+        if not all(isinstance(viewport.get(k), (int, float)) and math.isfinite(viewport[k])
+                   for k in ("left", "top", "width", "height")) or min(viewport["width"], viewport["height"]) <= 0:
+            return None
+        return screen, viewport
+
+    @staticmethod
+    def _targets_on_screen(points, viewport: dict, screen: dict) -> list[tuple[float, float]] | None:
+        targets = [((viewport["left"] + x * viewport["width"] - screen["left"]) / screen["width"],
+                    (viewport["top"] + y * viewport["height"] - screen["top"]) / screen["height"]) for x, y in points]
+        return None if any(not 0 <= v <= 1 for point in targets for v in point) else targets
+
+    def _on_saved_display(self, screen: dict) -> bool:
+        saved = self.profile["screen"]
+        return all(abs(float(screen[k]) - float(saved[k])) <= 1 for k in ("screen_width", "screen_height", "screen_left", "screen_top"))
+
+    def _begin_check(self, estimator, screen: dict, viewport: dict, candidate: dict | None) -> None:
+        points = [CHECK_POINTS[i] for order in CHECK_ORDERS for i in order]
+        targets = self._targets_on_screen(points, viewport, screen)
+        if targets is None:
+            self._clear_flow(); self._ui("notice", _WRONG_WINDOW); return
+        self._calibration = None; self._observations = []
+        self._check = {"estimator": estimator, "screen": screen, "targets": targets, "candidate": candidate,
+                       "viewport": viewport, "trial": 0, "estimates": [], "trials": []}
+        self._ui("checkReady", {"points": points, "settle_ms": CHECK_SETTLE_MS, "observe_ms": CHECK_OBSERVE_MS})
+
+    def _check_observe(self, data: dict, features: list | None, t: float) -> None:
+        check = self._check
+        if data.get("check") != check["trial"] or len(check["estimates"]) >= 60:
+            return
+        point = check["estimator"].predict(features, t) if features is not None else None
+        screen = check["screen"]
+        check["estimates"].append(None if point is None else
+                                  ((point.x - screen["left"]) / screen["width"], (point.y - screen["top"]) / screen["height"]))
+
+    def _finish_check(self) -> None:
+        check, self._check = self._check, None
+        outcome, candidate = summarize_check(check["trials"]), check["candidate"]
+        accepted = False
+        if outcome == "good" and candidate is not None:
+            try:
+                self._save(candidate)
+                self.estimator.load(candidate); self.profile = candidate
+                self.error = ""; self._calibration_notice = ""; accepted = True
+            except (OSError, ValueError) as exc:
+                self.error = str(exc)[:300]
+                self._ui("notice", "Couldn\u2019t save. Try again."); return
+        # Coarse and drawn once; only the page holds it, until the next state clears it.
+        marks = check_map(check["trials"], check["targets"], check["screen"], check["viewport"])
+        self._ui("checkResult", {**self._result_words(outcome, candidate is not None, accepted), "map": marks})
+
+    def _result_words(self, outcome: str, new: bool, accepted: bool) -> dict:
+        if outcome == "good":
+            return {"outcome": outcome, "note": "", "kept": False, "calibrated": True,
+                    "actions": [["practise", "Practise"], ["done", "Done"]] if accepted
+                    else [["done", "Done"], ["practise", "Practise"], ["calibrate", "Recalibrate"]]}
+        note = _WEAK if outcome == "weak" else _INSUFFICIENT
+        if new:
+            return {"outcome": outcome, "note": note, "kept": self.profile is not None,
+                    "calibrated": self.profile is not None, "actions": [["calibrate", "Try again"]]}
+        return {"outcome": outcome, "note": note, "kept": False, "calibrated": True, "actions": [["calibrate", "Recalibrate"]]}
+
+    def _practice_observe(self, features: list | None, t: float) -> None:
+        if features is None:
+            self._ui("practiceGaze", {"lost": "face"}); return
+        point = self.estimator.predict(features, t)
+        viewport = self._practice
+        x, y = None, None
+        if point is not None:
+            x, y = (point.x - viewport["left"]) / viewport["width"], (point.y - viewport["top"]) / viewport["height"]
+        if point is None or not (0 <= x <= 1 and 0 <= y <= 1):
+            self._ui("practiceGaze", {"lost": "offscreen"}); return  # Removed, never clamped to an edge.
+        self._ui("practiceGaze", {"x": x, "y": y})
 
     def _save(self, profile: dict) -> None:
         self.profile_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -217,51 +312,74 @@ class WebcamHost:
             return
         kind = data.get("type")
         if kind == "ready":
-            self.state = "running"; self._ready.set()
+            self.error = ""; self.state = "running"; self._ready.set()
         elif kind == "error":
-            self.error = str(data.get("error", "Tracker failed"))[:300]; self.state = "failed"; self._stop.set()
-        elif kind == "stopped":
-            self._stop.set()
+            # The window stays open to explain this; Use cursor or Try again ends it.
+            self.error = str(data.get("error", "Tracker failed"))[:300]; self.state = "failed"
+            self._clear_flow(); self._ready.set()
+        elif kind == "retry_camera":
+            self.error = ""; self.state = "starting"; self.last_sample = 0.
+        elif kind == "use_cursor":
+            self._clear_flow()
+            if self.on_use_cursor is None:
+                self._stop.set()
+            else:  # configure() stops this host and joins this thread's loop; keep it off the reader.
+                threading.Thread(target=self.on_use_cursor, name="hermes-webcam-cursor", daemon=True).start()
         elif kind == "calibration_start":
-            screen = data.get("screen", {})
-            if not all(isinstance(screen.get(k), (int, float)) and math.isfinite(screen[k]) for k in
-                       ("left", "top", "width", "height", "screen_width", "screen_height", "screen_left", "screen_top", "dpr")):
+            measured = self._measure(data)
+            if measured is None:
                 return
-            if min(screen[k] for k in ("width", "height", "dpr")) <= 0:
+            screen, viewport = measured
+            targets = self._targets_on_screen(_POINTS, viewport, screen)
+            if targets is None:
+                self._clear_flow(); self._ui("notice", _WRONG_WINDOW); return
+            self._clear_flow()
+            self._targets, self._calibration, self._viewport = targets, screen, viewport
+        elif kind == "check_start" or kind == "practice_start":
+            measured = self._measure(data)
+            if measured is None:
                 return
-            viewport = data.get("viewport", {})
-            if not all(isinstance(viewport.get(k), (int, float)) and math.isfinite(viewport[k])
-                       for k in ("left", "top", "width", "height")):
+            self._clear_flow()
+            screen, viewport = measured
+            if self.profile is None:
+                self._ui("notice", "Calibrate first."); return
+            if not self._on_saved_display(screen):
+                self._ui("notice", _WRONG_DISPLAY); return
+            if kind == "check_start":
+                self._begin_check(self.estimator, self.profile["screen"], viewport, None)
+            else:
+                self._practice = viewport; self._ui("practiceReady")
+        elif kind == "calibration_cancel" or kind == "practice_end":
+            self._clear_flow()  # An unaccepted candidate goes with it; the saved profile stays.
+        elif kind == "check_trial" and self._check is not None:
+            check = self._check
+            if data.get("index") != check["trial"]:
                 return
-            self._targets = [((viewport["left"] + x * viewport["width"] - screen["left"]) / screen["width"],
-                              (viewport["top"] + y * viewport["height"] - screen["top"]) / screen["height"])
-                             for x, y in _POINTS]
-            if any(not 0 <= v <= 1 for point in self._targets for v in point):
-                self._ui("calibrationResult", "Move the calibration window fully onto one screen and try again.")
-                return
-            self._calibration = screen; self._observations = []; self._point_samples = []; self._point_index = 0
-        elif kind == "calibration_cancel":
-            self._calibration = None; self._observations = []; self._point_samples = []
+            check["trials"].append(score_check_trial(check["estimates"], check["targets"][check["trial"]]))
+            check["estimates"] = []; check["trial"] += 1
+            if check["trial"] == len(check["targets"]):
+                self._finish_check()
         elif kind == "calibration_point" and self._calibration is not None:
             if data.get("index") != self._point_index:
                 return
             if len(self._point_samples) < 5:
-                self.error = "Face was lost during calibration; try again"; self._calibration = None
-                self._ui("calibrationResult", self.error); return
+                self._point_samples = []
+                self._ui("pointRetry"); return
             x, y = self._targets[self._point_index]
             self._observations.extend((f, x, y) for f in self._point_samples)
             self._point_samples = []; self._point_index += 1
-            if self._point_index == 9:
-                try:
-                    profile = self.estimator.calibrate(self._observations, self._calibration)
-                    self._save(profile); self.profile = profile; self.error = ""; self._calibration_notice = ""
-                    self._ui("calibrationResult", "Calibration saved locally. Recalibrate after moving or changing glasses. Return to Chrome; move the pointer once in the page, then hold Space.")
-                except (OSError, ValueError) as exc:
-                    if self.profile is not None:
-                        self.estimator.load(self.profile)
-                    self.error = str(exc); self._ui("calibrationResult", self.error)
-                finally:
-                    self._calibration = None; self._observations = []
+            if self._point_index < 9:
+                self._ui("pointAccepted"); return
+            screen, observations = self._calibration, self._observations
+            try:
+                # Fit a private copy: the accepted estimator and file change only after the check passes.
+                candidate = copy.deepcopy(self.estimator)
+                profile = candidate.calibrate(observations, screen)
+            except (OSError, ValueError) as exc:
+                self._clear_flow(); self.error = str(exc)[:300]
+                self._ui("calibrationFailed", self.error)
+                return
+            self._begin_check(candidate, screen, self._viewport, profile)
         elif kind == "sample":
             t, f = data.get("t"), data.get("features")
             if not isinstance(t, (int, float)) or not math.isfinite(t) or not (self.last_sample < t <= time.time() + .2) or time.time() - t > 1:
@@ -273,7 +391,18 @@ class WebcamHost:
                 for v, limit in zip(f, self._feature_limits)
             ):
                 self.drops["no_features"] += 1
+                if self._check is not None:
+                    self._check_observe(data, None, t)  # Counts against this trial.
+                elif self._practice is not None:
+                    self._practice_observe(None, t)
                 return  # Missing face/blink: never synthesize a center fixation.
+            if self._check is not None or self._practice is not None:
+                self.drops["calibrating"] += 1  # Owned window only; never delivered to a page.
+                if self._check is not None:
+                    self._check_observe(data, f, t)
+                else:
+                    self._practice_observe(f, t)
+                return
             if self._calibration is not None:
                 self.drops["calibrating"] += 1
                 if data.get("calibration") == self._point_index and len(self._point_samples) < 30:
@@ -307,7 +436,7 @@ class WebcamHost:
                 args = [_CHROME, f"--user-data-dir={profile}", "--remote-debugging-port=0", "--no-first-run",
                         "--no-default-browser-check", "--disable-extensions", "--allow-file-access-from-files", "--start-maximized",
                         "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-                        "--disable-backgrounding-occluded-windows", host.as_uri()]
+                        "--disable-backgrounding-occluded-windows", *self.chrome_args, host.as_uri()]
                 if self.fake_video is not None:
                     if not self.fake_video.is_file():
                         raise ValueError("Fake camera video does not exist")
@@ -343,7 +472,8 @@ class WebcamHost:
                     self._command("Runtime.evaluate", {"expression": features.read_text(), "contextId": self._context})
                     options = {"nonce": self._nonce, "module": (self.assets / "package/vision_bundle.mjs").as_uri(),
                                "wasm": (self.assets / "package/wasm").as_uri(), "model": (self.assets / "face_landmarker.task").as_uri(),
-                               "calibrated": self.profile is not None, "calibration_notice": self._calibration_notice,
+                               "calibrated": self.profile is not None,
+                               "calibration_notice": _OLD_MODEL_WINDOW if self._calibration_notice else (_BAD_PROFILE_WINDOW if self.error else ""),
                                **self.runtime_options}
                     result = self._command("Runtime.evaluate", {"expression": self.runtime_source.read_text() + "(" + json.dumps(options) + ")",
                                            "contextId": self._context, "awaitPromise": True})
@@ -355,8 +485,10 @@ class WebcamHost:
                         try:
                             self._event(json.loads(self._ws.recv(timeout=.1)))
                         except TimeoutError:
-                            if self.last_sample and time.time() - self.last_sample > 4:
-                                raise RuntimeError("Tracker stopped producing camera frames")
+                            if self.state == "running" and self.last_sample and time.time() - self.last_sample > 4:
+                                # Keep the window to say so; its stop releases the camera.
+                                self.error = "Tracker stopped producing camera frames"; self.state = "failed"
+                                self.last_sample = 0.; self._clear_flow(); self._ui("cameraFailed", self.error)
                     self._send("Runtime.evaluate", {"expression": "globalThis.__HERMES_WEBCAM__?.stop()", "contextId": self._context})
                     self._send("Browser.close", {})
                 self._process.wait(8)

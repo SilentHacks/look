@@ -58,6 +58,13 @@ def tracker_tab(host):
     return Tab(next(t["webSocketDebuggerUrl"] for t in pages if t["id"] == host.target_id))
 
 
+def click_action(camera, action):
+    bounds = until(lambda: camera.main(f"(()=>{{const b=[...document.querySelectorAll('[data-action={action}]')].find(n=>n.getClientRects().length);"
+                                       "if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()"), 30)
+    for kind in ("mousePressed", "mouseReleased"):
+        camera.send("Input.dispatchMouseEvent", {"type": kind, "button": "left", "clickCount": 1, **bounds})
+
+
 def run(out):
     out.mkdir(parents=True, exist_ok=True)
     os.environ["SHOTS"] = str(out)
@@ -87,9 +94,7 @@ def run(out):
             ctx = host._context
             def camera_state():
                 return camera.iso("globalThis.__HERMES_WEBCAM__.status()", ctx)
-            bounds = camera.main("(()=>{const r=document.querySelector('button').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
-            for kind in ("mousePressed", "mouseReleased"):
-                camera.send("Input.dispatchMouseEvent", {"type": kind, "button": "left", "clickCount": 1, **bounds})
+            click_action(camera, "calibrate")
             until(lambda: camera_state()["index"] == 0)
             shot = camera.send("Page.captureScreenshot", {"format": "png"})["data"]
             (out / "nine-point-calibration.png").write_bytes(base64.b64decode(shot))
@@ -98,7 +103,13 @@ def run(out):
                 for kind in ("keyDown", "keyUp"):
                     camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
                 until(lambda: camera_state()["index"] != index)
-            until(lambda: host.profile is not None)
+            # This portrait cannot follow the dot, so its held-out result is set; the fit is real.
+            until(lambda: camera_state()["phase"] == "checkIntro")
+            assert not host.profile_path.exists()
+            with patch("hermes_gaze.webcam.summarize_check", return_value="good"):
+                for kind in ("keyDown", "keyUp"):
+                    camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
+                until(lambda: host.profile is not None, 30)
             assert host.profile_path.stat().st_mode & 0o777 == 0o600
             report["calibration"] = {"points": 9, "stored_mode": "0600", "model": host.profile["model_id"]}
             runtime = camera_state()
@@ -198,9 +209,9 @@ def run(out):
             # Stop midway through a second calibration, then reuse the saved profile.
             until(lambda: camera.main("!document.body.classList.contains('calibrating')"))
             saved_profile = host.profile_path.read_bytes()
-            bounds = camera.main("(()=>{const r=document.querySelector('button').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
-            for kind in ("mousePressed", "mouseReleased"):
-                camera.send("Input.dispatchMouseEvent", {"type": kind, "button": "left", "clickCount": 1, **bounds})
+            click_action(camera, "done")
+            click_action(camera, "home")
+            click_action(camera, "calibrate")
             until(lambda: camera_state()["index"] == 0)
             for kind in ("keyDown", "keyUp"):
                 camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})

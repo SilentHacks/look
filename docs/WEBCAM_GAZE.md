@@ -39,14 +39,49 @@ unload and owned-document replacement close only the camera process we started.
 ## Calibration and coordinates
 
 `/gaze calibrate` brings the owned window forward. Maximize it, keep its zoom at
-100%, and click **Calibrate nine points**. Look at each dot, press Space, and keep
-looking for about one second. Esc cancels; moving/resizing the calibration window
+100%, and click **Begin**. At each dot, look at it, tap Space and keep looking for
+about one second. A dot without enough usable frames asks again rather than ending
+the attempt. Esc cancels; moving/resizing/hiding the window
 cancels rather than applying wrong screen targets. The trusted opening click
 measures the actual viewport origin, including browser chrome. Nine targets are
 converted to desktop logical coordinates using that origin, not a fullscreen or
 `outerHeight - innerHeight` guess.
 
-The fitted profile is stored atomically at
+### Held-out check and practice
+
+Fitting produces a **candidate** in a private estimator copy. The accepted estimator
+and file do not change until a check passes. The check is user-started with one
+Space tap, then automatic and hidden: five positions that differ from the training
+nine, in two orders (ten equal trials). Each trial ignores a settling period, then
+takes the median of its valid estimates. Missing, off-screen or mostly absent trials
+fail. Estimates stay in memory for that trial and never refit anything. Named
+constants in `tracker/webcam_gaze.py` are **provisional pending a real-camera
+trial**: a trial hits inside one cell of a 3×3 screen grid around its target; eight
+of ten pass; fewer than six valid trials cannot judge.
+
+The result is a map, never a score: five glass places where the check ran, each
+tried twice. Both landings inside closes the place; a miss opens the ring and draws
+a line to where that estimate landed in this window; a trial with no estimate shows
+nothing. Those coarse positions (a 40-cell window grid; hits as a quarter-step offset)
+exist only for this drawing, in memory, and are never logged or in status. The
+acceptance rule itself is unchanged. A weak or unmeasurable new calibration offers
+Try again or Use cursor and keeps the earlier one. A cancelled or failed attempt saves
+nothing, and moving, resizing or hiding the window during the dots or check ends the
+attempt and says so. **Check my gaze** tests the saved profile on the same display and
+never rewrites it.
+
+Practice runs only in the owned window and only while open: six broad cards and a
+neutral lens. Python maps each estimate to the window; the page snaps it to a coarse
+8×6 cell for display only, with the same no-smoothing estimator underneath. Off-window
+estimates are removed, never clamped. Practice and checks deliver nothing to
+websites. Finish teaches the real companion gesture; its hold-Space rehearsal says
+it is one and touches no microphone or model. The window asks the user to return to Chrome
+itself: another Chrome process's focus cannot be reliably raised from here.
+
+**Use cursor** is offered on every screen and changes the session mode with the
+camera. Camera errors stay on screen with their actual text and a Try again.
+
+The accepted profile is stored atomically at
 `${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`, mode `0600`
 in a `0700` directory. No images, audio, raw calibration samples or profile values
 are logged or committed. Delete that file to forget calibration. The profile is
@@ -111,8 +146,9 @@ nine-point recalibration after moving instead.
 1. Start a normal Hermes conversation, then `/gaze connect`.
 2. `/gaze mode webcam`: allow **camera only** in the separate tracker window.
    Confirm the camera indicator; no website needs a camera permission.
-3. `/gaze calibrate`: maximize that window and complete nine points. Confirm
-   “Calibration saved locally”. Stay in the same posture and lighting.
+3. `/gaze calibrate`: maximize that window and complete the dots and the short
+   check. Note the plain result and whether it matched how well it followed you.
+   Stay in the same posture and lighting. Try Practise and losing your face.
 4. Return to a supported Chrome page; move the pointer once in its content.
    Leave the pointer elsewhere, look at a broad region, hold Space, wait for
    Listening, and ask about “this”. Judge a roughly 3×3–4×4 region, not buttons.
@@ -163,6 +199,10 @@ instruction. Missing gaze still blocks talking; there is no cursor/center fallba
 .venv/bin/python -m unittest discover -s tests -t .
 .venv/bin/python tests/webcam_chrome.py --out /tmp/hermes-webcam-proof
 ```
+
+`tests/calibration_chrome.py --out DIR` is headless and exercises every calibration,
+check, practice, failure and restart state with a fake camera; only `predict` is scripted
+for the passing path. The headed probe below still needs a separate serial run.
 
 The probe uses `--use-fake-device-for-media-stream` and
 `--use-file-for-fake-video-capture`, a hash-pinned NASA public-domain portrait
