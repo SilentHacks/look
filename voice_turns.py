@@ -229,7 +229,11 @@ class VoiceTurns:
 
     def capture(self, snapshot, *, transcribing=False, item_id="", timing=None):
         """Reserve capture order before ASR. A transcribing head blocks later admission."""
+        if timing is not None:
+            timing.mark("inbox_lock_wait")
         with self.lock:
+            if timing is not None:
+                timing.mark("inbox_lock_acquired")
             if not self.connected:
                 return {"ok": False, "fallback_allowed": True, "error": "Run /gaze connect."}
             if len(self.pending) >= self.MAX_PENDING:
@@ -268,7 +272,11 @@ class VoiceTurns:
                             model_subject="", target_count=count, presented=False, archived=False,
                             notice=_notice(frozen), follows_question=follows_question)
                 self.items.append(item)
+            if timing is not None:
+                timing.mark("approval_revoke_start")
             self.session.actions.invalidate()
+            if timing is not None:
+                timing.mark("approval_revoked")
             run = self._new_run(str(snapshot.get("utterance") or ""), frozen, item_id)
             if timing is not None:
                 run["release_timing"] = timing.turn
@@ -278,7 +286,11 @@ class VoiceTurns:
                 run["utterance"] = ""
             else:
                 self._start_highlight(run)
+            if timing is not None:
+                timing.mark("inbox_publish_start")
             self.publish()
+            if timing is not None:
+                timing.mark("inbox_published")
             return {"ok": True, "item_id": item_id, "request_id": run["request_id"],
                     "sequence": run["sequence"], "delivery": "session", "status": run["status"]}
 

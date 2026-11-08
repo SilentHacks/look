@@ -566,14 +566,25 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 def reserve():
                     nonlocal reservation, sealed
                     sealed = True
+                    timing.mark("release_ui_wait_start")
+                    ready = timing.ui_ready
+                    if ready is not None and not ready.wait(5):
+                        timing.mark("release_ui_timeout")
+                        raise RuntimeError("Release display unavailable; recording cancelled.")
+                    timing.mark("release_ui_ready")
+                    timing.mark("reservation_start")
                     if mode == "hover" and not isinstance(pushed["cursor_context"], dict):
                         raise ValueError("Recording has no cursor capture")
                     if mode in ("simulated", "webcam"):
+                        timing.mark("capture_revoke_start")
                         session.clear_hover_snapshot()  # Revoke at capture, never at late ASR.
+                        timing.mark("capture_revoked")
                     # Publish the reserved question before native stop/close can block.
                     if turns is not None and turns.connected:
+                        timing.mark("capture_resolve_start")
                         initial = resolve_now(session, utterance="Captured question", words=None,
                                               mode=mode, pushed=pushed, activate=False)
+                        timing.mark("capture_resolve_done")
                         initial["subject"] = intent.get("subject")
                         reservation = turns.capture(initial, transcribing=True,
                                                     item_id=str(intent.get("item_id") or ""), timing=timing)
@@ -600,13 +611,16 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                     try:
                         # Release the ordered intent worker so the next talk can open
                         # while ASR runs. Admission is bounded by the inbox's eight slots.
+                        timing.mark("asr_lock_wait")
                         with _TRANSCRIBE_LOCK:
                             timing.mark("asr_started")
                             text, words = _voice.transcribe_audio_buffer(
                                 audio, model_name=_whisper_model_name(), audio_epoch=epoch, timing=timing)
                         timing.mark("asr_done")
+                        timing.mark("answer_resolve_start")
                         snapshot = resolve_now(session, utterance=text, words=words,
                                                mode=mode, pushed=pushed, activate=False)
+                        timing.mark("answer_resolve_done")
                         snapshot["subject"] = intent.get("subject")
                         if reservation:
                             result = turns.transcribed(reservation["request_id"], text, snapshot)

@@ -291,13 +291,26 @@ class CdpSession:
     async def _render_ui(self, message: dict) -> None:
         frame = self._ui_frames.get(str(message.get("frame") or "card"))
         trace = getattr(self, "_release_trace", None)
+        release = getattr(self, "_release_ui", None)
+        matches_release = (release is not None and message.get("release_id") == release[0]
+                           and self._context_unique_id == release[1])
         if frame:
-            await self._eval_coro("window.__HERMES_GAZE_PANEL__?.render(" + json.dumps(message) + ")",
-                                  timeout=5., context_id=frame[1])
+            if trace is not None and matches_release:
+                trace.mark("release_ui_render_start")
+            rendered = await self._eval_coro(
+                "(() => {const panel = window.__HERMES_GAZE_PANEL__; if (!panel) return false;"
+                "panel.render(" + json.dumps(message) + "); return true})()",
+                timeout=5., context_id=frame[1])
+            if rendered is not True:
+                return
             if trace is not None and message.get("mode") != "wave":
                 trace.mark("first_ui_push")
                 if message.get("frame") == "pill" and message.get("mode") == "capsule":
                     trace.mark("processing_ui_push")
+                if (matches_release and self._context_unique_id == release[1]
+                        and frame == self._ui_frames.get("pill")):
+                    trace.mark("release_ui_push")
+                    release[2].set()
 
     def push_level(self, level: float) -> None:
         """Voice level to the protected capsule only. Drop frames rather than queue them."""
@@ -505,6 +518,11 @@ class CdpSession:
         if intent.get("type") == "record_stop" and intent.get("nonce") == self.intent_nonce:
             self._release_trace = TIMINGS.begin(intent.get("release_timing"))
             intent["_release_trace"] = self._release_trace.turn
+            # Inbox publication acknowledges the overlay, not its private renderer.
+            # Only this release's completed protected-frame render opens the gate.
+            ready = threading.Event()
+            self._release_ui = (intent.get("id"), context_id, ready)
+            self._release_trace.ui_ready = ready
 
         def reply(reply_payload: Dict[str, Any]) -> None:
             if self._closed:

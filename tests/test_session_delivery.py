@@ -238,6 +238,116 @@ class TestSessionDelivery(unittest.TestCase):
                 release.set()
                 worker.join(3)
 
+    def test_native_shutdown_waits_for_protected_release_render_not_inbox_publication(self):
+        import asyncio
+        from hermes_gaze.browser.cdp_bridge import CdpSession
+
+        rendered, stopping, unblock = (threading.Event() for _ in range(3))
+        native_saw_ui = []
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+        tab = CdpSession("http://127.0.0.1:1")
+        self.addCleanup(tab.close)
+        tab._context_unique_id = "document"
+        tab._ui_frames = {"pill": (2, "private")}
+        tab.intent_nonce = self.session._intent_nonce
+        tab.set_intent_handler(lambda intent, reply: service.handle_intent(
+            {**intent, "_browser_target": "source"}, reply))
+
+        class Stream:
+            def stop(self):
+                native_saw_ui.append(rendered.is_set())
+                stopping.set()
+                unblock.wait(3)
+
+            def close(self):
+                pass
+
+        self.session.microphone._stream = Stream()
+        self.session.microphone._owner = "source:document"
+        self.session.microphone._audio.extend(b"\x01\x00")
+
+        async def evaluate(*args, **kwargs):
+            # Inbox/overlay acknowledgement precedes this second, private-frame hop.
+            await asyncio.sleep(.1)
+            rendered.set()
+            return True
+
+        async def reply(*args):
+            pass
+
+        with mock.patch.object(service, "_VOICE_TURNS", turns), \
+                mock.patch.object(self.session, "display_session_event"), \
+                mock.patch.object(tab, "_eval_coro", side_effect=evaluate), \
+                mock.patch.object(tab, "_deliver_reply", side_effect=reply), \
+                mock.patch("hermes_gaze.voice.transcribe_audio_buffer", return_value=("", [])):
+            tab._ensure_thread()
+            tab._dispatch_intent(json.dumps({"type": "record_stop", "id": 42,
+                                            "nonce": tab.intent_nonce, "cursor_context": capture()}))
+            rendered_call = asyncio.run_coroutine_threadsafe(
+                tab._render_ui({"frame": "pill", "mode": "capsule", "release_id": 42}), tab._loop)
+            try:
+                self.assertTrue(stopping.wait(2), "release never reached native shutdown")
+                self.assertEqual(native_saw_ui, [True], "inbox publication raced the private-frame render")
+                self.assertTrue(self.session.microphone._closing)
+            finally:
+                unblock.set()
+                rendered_call.result(2)
+                tab._handler_pool.submit(lambda: None).result(3)
+
+    def test_failed_release_renderer_discards_audio_and_clears_close_gate(self):
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+        mic = self.session.microphone
+        stream = mock.Mock()
+        mic._stream, mic._owner = stream, "source:document"
+        mic._audio.extend(b"\x01\x00")
+        ready = mock.Mock()
+        ready.wait.return_value = False
+        trace = service.TIMINGS.begin()
+        trace.ui_ready = ready
+        replies = []
+        with mock.patch.object(service, "_VOICE_TURNS", turns), \
+                mock.patch("hermes_gaze.voice.transcribe_audio_buffer") as transcribe:
+            service.handle_intent({"type": "record_stop", "nonce": self.session._intent_nonce,
+                                   "_browser_target": "source", "_browser_document": "document",
+                                   "cursor_context": capture(), "_release_trace": trace.turn}, replies.append)
+        self.assertFalse(replies[0]["ok"])
+        self.assertIn("display unavailable", replies[0]["error"])
+        stream.stop.assert_called_once()
+        stream.close.assert_called_once()
+        transcribe.assert_not_called()
+        self.assertFalse(mic._closing)
+        self.assertEqual(turns.items, [])
+        self.assertEqual(turns.capture_state, "idle")
+
+    def test_unrelated_or_replaced_private_render_cannot_release_native_work(self):
+        import asyncio
+        from hermes_gaze.browser.cdp_bridge import CdpSession
+
+        tab = CdpSession("http://127.0.0.1:1")
+        self.addCleanup(tab.close)
+        tab._context_unique_id = "document"
+        tab._ui_frames = {"pill": (2, "private")}
+        ready = threading.Event()
+        tab._release_trace = service.TIMINGS.begin()
+        tab._release_ui = (42, "document", ready)
+        with mock.patch.object(tab, "_eval_coro", new_callable=mock.AsyncMock, return_value=True) as evaluate:
+            asyncio.run(tab._render_ui({"frame": "pill", "mode": "capsule", "release_id": 41}))
+            self.assertFalse(ready.is_set())
+            tab._context_unique_id = "replacement"
+            asyncio.run(tab._render_ui({"frame": "pill", "mode": "capsule", "release_id": 42}))
+            self.assertFalse(ready.is_set())
+            tab._context_unique_id = "document"
+            evaluate.return_value = False  # Missing panel is not a successful render.
+            asyncio.run(tab._render_ui({"frame": "pill", "mode": "capsule", "release_id": 42}))
+            self.assertFalse(ready.is_set())
+            evaluate.return_value = True
+            asyncio.run(tab._render_ui({"frame": "pill", "mode": "off", "release_id": 42}))
+            self.assertTrue(ready.is_set())  # Follow-up: Listening is removed without a new capsule.
+
     def test_session_rebind_during_release_does_not_invert_inbox_and_microphone_locks(self):
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
         turns.bind(session_key="route", session_id="session")

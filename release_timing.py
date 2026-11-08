@@ -1,8 +1,11 @@
-"""In-memory monotonic timings only: never audio, text, URLs or identities."""
+"""Memory-only stage timings and code-location stacks; never capture user data."""
 from __future__ import annotations
 
 from collections import deque
+import copy
 import math
+import os
+import sys
 import threading
 import time
 import weakref
@@ -21,6 +24,9 @@ class ReleaseTiming:
                 self.browser[key] = round(value, 2)
         self.max_gap = 0.0
         self.finished = False
+        self.stack_sample = None
+        self.observed_stage = "binding_received"
+        self.ui_ready = None  # Transport-owned Event, never serialized.
 
     def mark(self, stage):
         with self.lock:
@@ -33,7 +39,22 @@ class ReleaseTiming:
     def snapshot(self):
         with self.lock:
             return {"turn": self.turn, "browser_ms": dict(self.browser),
-                    "python_ms": dict(self.stages), "heartbeat_max_gap_ms": round(self.max_gap, 2)}
+                    "python_ms": dict(self.stages), "heartbeat_max_gap_ms": round(self.max_gap, 2),
+                    "slow_release": copy.deepcopy(self.stack_sample)}
+
+
+def _thread_stacks():
+    # No traceback formatting: source lines and frame locals may contain private text.
+    threads = []
+    for ident, frame in sys._current_frames().items():
+        stack = []
+        while frame is not None and len(stack) < 64:
+            code = frame.f_code
+            stack.append({"file": os.path.basename(code.co_filename),
+                          "function": code.co_name, "line": frame.f_lineno})
+            frame = frame.f_back
+        threads.append({"thread_id": ident, "stack": stack})
+    return threads
 
 
 class ReleaseTimings:
@@ -85,6 +106,16 @@ class ReleaseTimings:
                     with trace.lock:
                         end = min(now, trace.finished or now)
                         trace.max_gap = max(trace.max_gap, (end - max(last, trace.started)) * 1000)
+                        if (end - trace.started >= .5 and trace.stack_sample is None):
+                            trace.stack_sample = {
+                                "sampled_ms": round((now - trace.started) * 1000, 2),
+                                "after_stage": trace.observed_stage,
+                                "current_stage": next(reversed(trace.stages)),
+                                "scheduler_gap_ms": round(gap, 2),
+                                "sampled_after_finish": bool(trace.finished),
+                                "threads": _thread_stacks(),
+                            }
+                        trace.observed_stage = next(reversed(trace.stages))
                         active |= not trace.finished
                 if not active:
                     timings.thread = None
@@ -98,7 +129,8 @@ class ReleaseTimings:
 
     def snapshot(self):
         with self.lock:
-            return {"heartbeat_interval_ms": 20, "heartbeat_max_gap_ms": round(self.max_gap, 2),
+            return {"heartbeat_interval_ms": 20, "watchdog_threshold_ms": 500,
+                    "heartbeat_max_gap_ms": round(self.max_gap, 2),
                     "turns": [trace.snapshot() for trace in self.turns]}
 
 

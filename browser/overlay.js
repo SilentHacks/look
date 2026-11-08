@@ -1749,13 +1749,14 @@
 
   // ---------- capsule ----------
   function pillVisible() { return P.pill.o.t > 0; }
-  function pushPill(mode, text, shimmer) {
+  function pushPill(mode, text, shimmer, releaseId = 0) {
     if (!S.ready) return;
     const startup = mode === "wave" && !S.micReady;
     const key = JSON.stringify([mode, text, shimmer, S.dark, startup]);
-    if (key === S.pillLast) return;
+    if (key === S.pillLast && !releaseId) return;
     S.pillLast = key;
-    rawSend({type: "_ui_render", frame: "pill", kind: "pill", mode, text, shimmer: !!shimmer, startup, dark: S.dark, reduce: reduced()});
+    rawSend({type: "_ui_render", frame: "pill", kind: "pill", mode, text, shimmer: !!shimmer, startup, dark: S.dark, reduce: reduced(),
+      ...(releaseId ? {release_id: releaseId} : {})});
   }
   function hidePill(instant) {
     P.pill.o.to(0);
@@ -1774,13 +1775,17 @@
     if (things === 1) return `Looking into ${waiting[0]?.subject || local[0].subject?.name || "this"}`;
     return `Looking into ${things} things`;
   }
-  function updateCapsule() {
+  function updateCapsule(releaseId = 0) {
     if (S.hold || S.coachTimer) return;
     const text = capsuleText();
-    if (!text) { if (S.pillMode === "capsule") hidePill(); return; }
+    if (!text) {
+      if (S.pillMode === "capsule") hidePill();
+      if (releaseId) pushPill("off", "", false, releaseId); // Follow-up: removing Listening is the release update.
+      return;
+    }
     S.pillMode = "capsule";
     P.pill.o.to(1);
-    pushPill("capsule", text, !inbox?.paused);
+    pushPill("capsule", text, !inbox?.paused, releaseId);
     placeCapsule();
   }
   function capsuleSpot(w) {
@@ -1995,14 +2000,14 @@
     // Pointing somewhere else makes it a new question; otherwise it stays with the card.
     const follow = H.follow && !H.targets.length ? H.follow : null;
     const rec = follow ? null : {targets: H.targets, subject: subjectFor(H.targets)};
-    stopListening(rec, follow, releasedAt);
+    const released = stopListening(rec, follow, releasedAt);
     S.pointer.moved = 0;
     if (S.pillMode === "wave") hidePill(!!follow);
     if (rec) {
       S.pillW = S.pillW || 170;
-      updateCapsule();
+      updateCapsule(released?.id);
       P.pill.w.kick(70);
-    } else updateCapsule();
+    } else updateCapsule(released?.id);
     armRetreat();
     // Close input and reserve the question before hint persistence uses the ordered worker.
     sendCoach({heard: S.coach.heard});
@@ -2040,6 +2045,7 @@
     timing.intent_sent = performance.now() - releasedAt;
     _emit(intent);
     if (rec) { requestOwner.set(intent.id, rec); }
+    return intent;
   }
   function bindRequest(intent, rec) {
     rec.pointerAnchor = {x: state.pointerX, y: state.pointerY, hit: hitNode(state.pointerX, state.pointerY)};

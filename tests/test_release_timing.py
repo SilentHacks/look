@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 import unittest
 import weakref
@@ -31,6 +32,44 @@ class ReleaseTimingTests(unittest.TestCase):
         self.assertEqual(state["turns"][-1]["browser_ms"], {"keyup_received": 0, "evidence_frozen": 12.5})
         self.assertIsNone(timings.get(1))
         self.assertNotIn("secret", str(state))
+
+    def test_watchdog_names_blocked_stage_and_samples_stacks_without_payloads(self):
+        timings = ReleaseTimings()
+        self.addCleanup(timings.stop)
+        trace = timings.begin()
+        release, entered = threading.Event(), threading.Event()
+
+        def blocked_native_stop():
+            audio = b"PRIVATE-PAYLOAD"
+            transcript = "PRIVATE-PAYLOAD"
+            gaze = ["PRIVATE-PAYLOAD"]
+            trace.mark("stream_stop_start")
+            entered.set()
+            release.wait(3)
+
+        worker = threading.Thread(target=blocked_native_stop)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            deadline = time.monotonic() + 2
+            while trace.snapshot()["slow_release"] is None and time.monotonic() < deadline:
+                time.sleep(.01)
+            sample = trace.snapshot()["slow_release"]
+            self.assertIsNotNone(sample)
+            self.assertEqual(sample["after_stage"], "stream_stop_start")
+            self.assertGreaterEqual(sample["sampled_ms"], 500)
+            stacks = {thread["thread_id"]: thread["stack"] for thread in sample["threads"]}
+            self.assertIn("blocked_native_stop", [frame["function"] for frame in stacks[worker.ident]])
+            self.assertNotIn("PRIVATE-PAYLOAD", str(sample))
+            self.assertTrue(all(set(frame) == {"file", "function", "line"}
+                                for stack in stacks.values() for frame in stack))
+            trace.mark("stream_stopped")
+            time.sleep(.04)
+            self.assertEqual(trace.snapshot()["slow_release"], sample, "watchdog must sample only once")
+        finally:
+            release.set()
+            worker.join(3)
+            trace.finish()
 
     @unittest.skipUnless(os.name == "posix", "uses POSIX usleep without releasing the GIL")
     def test_heartbeat_retains_native_stall_even_when_turn_finishes_first(self):

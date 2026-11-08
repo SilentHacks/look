@@ -142,16 +142,24 @@ class Microphone:
         return {"ok": True, "ready_ms": round((time.monotonic() - started) * 1000)}
 
     def stop(self, owner: str, timing=None, before_stop=None) -> tuple[bytes, float]:
+        if timing is not None:
+            timing.mark("mic_lock_wait")
         with self._lock:
+            if timing is not None:
+                timing.mark("mic_lock_acquired")
             if self._stream is None or self._owner != owner:
                 raise RuntimeError("Recording was cancelled or belongs to another tab")
             stream, self._stream = self._stream, None
             self._owner = None
             self._closing = True
+            if timing is not None:
+                timing.mark("pcm_lock_wait")
             with self._audio_lock:
                 self._accepting = False
                 audio, self._audio = self._audio, bytearray()
                 epoch, error = self._epoch, self._error
+            if timing is not None:
+                timing.mark("pcm_sealed")
         # No microphone lock while publishing: session binding takes the inbox lock
         # before cancelling capture. The close gate still excludes new native input.
         try:

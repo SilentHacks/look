@@ -169,23 +169,24 @@ as plain text. After compaction, resolving again captures the current cursor, no
 the historical target. `/gaze disconnect` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
 
-Release freezes browser evidence and seals PCM before transcription. The question is
-reserved/published before native stream stop/close, so a slow shutdown cannot delay
-the inbox's transcribing state. Publication holds neither the microphone state lock
-nor its short callback-buffer lock, so a concurrent Hermes-session rebind can cancel
-capture without lock inversion. New native input is refused until shutdown finishes.
-Sealing includes every callback buffer admitted before the seal, together with its
-device status; an error there invalidates capture. Callbacks strictly after sealing
-cannot append audio or invalidate the already sealed speech.
+Release freezes browser evidence and seals PCM before transcription. Expensive
+release work now waits for acknowledgement of that release's protected-frame
+capsule render (or Listening removal on a follow-up), not merely inbox publication.
+Gaze resolution, native stream stop/close and ASR therefore follow the first UI push.
+The wait and publication hold neither microphone nor callback-buffer locks; session
+rebind retains its safe lock order. New input is refused until shutdown finishes.
+Sealing retains every already-admitted callback buffer and its device status;
+callbacks after sealing cannot append or invalidate sealed speech. An unavailable
+release renderer fails capture after the five-second CDP window and still closes input.
 Hint persistence follows stop/reservation on the ordered intent worker. Capsule
 placement and visual design are unchanged. CoreML prewarm still runs one silent
 prediction before sharing the cached runner; models and fallbacks are unchanged.
 
-`/gaze timing` works without recording opt-in or a connected browser. It returns
-only monotonic milliseconds for the last eight releases, in memory: browser keyup
-(zero), evidence start/freeze/send; Python binding/worker receipt, PCM seal,
-capture reservation, native stop/close, ASR queue/start/model ready/inference/end,
-first protected-frame UI/processing push, injection and first matching text delta.
+`/gaze timing` works without recording opt-in or a connected browser. It retains
+the last eight releases in memory: browser keyup (zero), evidence start/freeze/send;
+Python binding/worker receipt, microphone/PCM lock waits and seal, release-render
+wait/start/acknowledgement, capture resolution, inbox/approval/publication stages,
+native stop/close, ASR lock/model/inference stages, injection and first matching delta.
 Browser and Python clocks are separate: subtract stages within their own group,
 never across groups. Missing stages have not happened (or that path was not used).
 The first UI push is a completed CDP render, not proof of a painted frame.
@@ -196,13 +197,20 @@ A 20 ms Python heartbeat runs only while releases are being measured, through th
 first delta or failure/completion. It retires after the final sample; disconnect and
 plugin unload stop unfinished measurements, and reload retires the previous worker.
 It reports each turn's maximum scheduling gap plus the maximum across measured
-releases in this process, not idle time before the first release.
-A large gap indicates Python could not schedule (GIL/native blocking, CPU pressure
-or machine sleep); a healthy heartbeat with slow UI instead points at a specific
-worker, transport or Chrome. Evidence duration isolates synchronous page-side
-capture; native stop and close have separate stages. Real-hardware confirmation
-found that publication before native shutdown removed the multi-second release
-freeze; the fake-device probes below verify ordering, not physical device latency.
+releases in this process, not idle time before the first release. At 500 ms the
+same worker takes one all-thread Python stack sample: file basenames, function
+names and line numbers only, at most 64 frames per thread. No locals, arguments,
+source lines or exception text are captured. `slow_release` includes the sample
+time, last observed/current stage, scheduling gap and whether completion preceded it.
+A native call retaining the GIL delays this Python watchdog too; a late sample
+must not be mistaken for the stack during the stall.
+
+A delayed-render plus two-second GIL-holding fake reproduced a 2,032 ms processing
+push before the render barrier and 105 ms after it. Ordinary blocked stop/close/ASR
+alone did not reproduce it. This establishes an ordering defect, not the cause of
+the user's physical-device freeze or a regression caused by `b569aec`. The first
+release update is protected; later GIL-held work can still stall Python interaction.
+See [the statement-order trace, lock analysis and hardware diagnostic limits](docs/RELEASE_FREEZE.md).
 
 Device-free synthetic 3-second PCM through the real, offline CoreML path on
 2026-11-08: first process load/transcription 29,834 ms, heartbeat max gap 19.8 ms;
