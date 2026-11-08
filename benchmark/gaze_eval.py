@@ -170,7 +170,7 @@ def extract_manifest(data: dict) -> dict:
 
 
 class EvalRidge(LandmarkEstimator):
-    """Shipped predictor and solver, with 9/16/25 targets for dataset experiments.
+    """Original iris/head baseline and solver, with 9/16/25 targets for experiments.
 
     Keep sample-count, movement and fit-quality checks; never install these fits.
     """

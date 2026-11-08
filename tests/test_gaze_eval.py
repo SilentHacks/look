@@ -16,7 +16,7 @@ from tests.test_webcam import observations, SCREEN
 
 
 class GazeEvaluationTests(unittest.TestCase):
-    def test_offline_baseline_is_numerically_the_shipped_regressor(self):
+    def test_offline_baseline_preserves_original_regressor(self):
         live, offline = LandmarkEstimator(), EvalRidge()
         a, b = live.calibrate(observations(), SCREEN), offline.calibrate(observations(), SCREEN)
         np.testing.assert_allclose(a["weights"], b["weights"], atol=1e-12)
