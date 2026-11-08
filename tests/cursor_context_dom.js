@@ -104,6 +104,7 @@ class MutationObserver {
   takeRecords() { const records = this.records; this.records = []; return records; }
 }
 const context = vm.createContext({ document, URL, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1, FILTER_SKIP: 3 },
+  performance,
   window: { listeners: {}, innerWidth: 1200, innerHeight: 800,
     addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
     removeEventListener(type, handler) { this.listeners[type] = (this.listeners[type] || []).filter(fn => fn !== handler); },

@@ -299,15 +299,43 @@
     const labels = ids.map(id => labelText(root.getElementById?.(id)));
     return labels.includes(null) ? null : labels.join(" ");
   }
+  // Capture-local only: never reuse privacy/layout facts after this synchronous release.
+  let captureReads = null;
+  function withCaptureReads(collect) {
+    const previous = captureReads;
+    captureReads = { sensitive: new WeakMap(), references: new WeakMap(), selectors: new WeakMap() };
+    try { return collect(); } finally { captureReads = previous; }
+  }
   function sensitive(el) {
+    if (!el) return false;
+    if (captureReads?.sensitive.has(el)) return captureReads.sensitive.get(el);
+    const result = sensitiveField(el);
+    captureReads?.sensitive.set(el, result);
+    return result;
+  }
+  function sensitiveField(el) {
     let field = el && (el.closest("input,textarea,select,[contenteditable]") || el.closest("label")?.control);
     for (let host = el?.getRootNode?.().host; !field && host; host = host.getRootNode?.().host)
       field = host.closest("input,textarea,select,[contenteditable]");
     if (!field) {
-      // ponytail: native ARIA-reference lookup per label; index per capture if large forms make it measurable.
-      for (let label = el; label?.nodeType === 1; label = label.parentElement)
-        if (label.id) for (const candidate of label.getRootNode().querySelectorAll(`[aria-labelledby~="${CSS.escape(label.id)}"]`))
+      for (let label = el; label?.nodeType === 1; label = label.parentElement) {
+        if (!label.id) continue;
+        const root = label.getRootNode();
+        let references = captureReads?.references.get(root);
+        if (captureReads && !references) {
+          references = new Map();
+          for (const field of root.querySelectorAll("input[aria-labelledby],textarea[aria-labelledby],select[aria-labelledby],[contenteditable][aria-labelledby]"))
+            for (const id of (field.getAttribute("aria-labelledby") || "").split(/\s+/)) {
+              if (!references.has(id)) references.set(id, []);
+              references.get(id).push(field);
+            }
+          captureReads.references.set(root, references);
+        }
+        const candidates = references ? references.get(label.id) || [] :
+          root.querySelectorAll(`[aria-labelledby~="${CSS.escape(label.id)}"]`);
+        for (const candidate of candidates)
           if (candidate.matches("input,textarea,select,[contenteditable]") && sensitive(candidate)) return true;
+      }
       return false;
     }
     const tokens = (field.getAttribute("autocomplete") || "").toLowerCase().split(/\s+/);
@@ -472,7 +500,11 @@
       rect_vp: [r.left, r.top, r.width, r.height],
       rect_doc: [r.left + scrollX, r.top + scrollY, r.width, r.height], block_ids: [] };
   }
-  function captureCursorContext() {
+  function captureCursorContext(timing = {}) {
+    return withCaptureReads(() => collectCursorContext(timing));
+  }
+  function collectCursorContext(timing) {
+    let phase = performance.now();
     if (!state.armed && typeof state.pointerX === "number" && !cursorOverHud)
       rememberHit(hitNode(state.pointerX, state.pointerY));
     clearActionConfirmation();
@@ -482,6 +514,9 @@
       page_title: String(document.title || "").slice(0, 160),
       history: cursorHistory.map(h => ({ ...h })), targets: [], blocks: [], controls: [], handles: {},
       lit: litIds.slice(0, 5) };
+    timing.cursor_history_ms = performance.now() - phase;
+    timing.cursor_targets_ms = 0;
+    phase = performance.now();
     let capturedMembers = 0;
     function handle(node) {
       const id = cursorId(node);
@@ -581,8 +616,10 @@
     for (const id of refs) {
       const el = cursorRefs.get(id);
       if (!el || !el.isConnected) { capture.targets.push({ id, available: false, reason: "historical node detached" }); continue; }
+      const metadataStart = performance.now();
       const target = cursorMetadata(el);
       capture.targets.push(target);
+      timing.cursor_targets_ms += performance.now() - metadataStart;
       if (!target.available) continue;
       handle(el);
       // A frame is the actual hit, not the page behind it. Never collect its page ancestors.
@@ -691,6 +728,8 @@
     }
     capture.targets.reverse();
     capture.blocks = [...blocks.values()].map(({ _rows, _cells, _allCells, _header, _seen, _rowIndex, ...block }) => block);
+    timing.cursor_blocks_ms = performance.now() - phase - timing.cursor_targets_ms;
+    phase = performance.now();
     // One bounded page-control pass per capture, never once per cell/mousemove.
     const controls = document.querySelectorAll('button,a,input,select,[role=button]');
     for (let i = 0; i < controls.length && i < 120 && capture.controls.length < 12; i++) {
@@ -702,6 +741,7 @@
       if (top && el.contains(top)) { handle(el); capture.controls.push(cursorMetadata(el)); }
     }
     capture.omitted_controls = Math.max(0, controls.length - capture.controls.length);
+    timing.cursor_controls_ms = performance.now() - phase;
     identities.actionUrl = location.href;
     identities.actionRevoked = false;
     snapshots.set(snapshotId, identities);
@@ -2034,10 +2074,16 @@
     isListening = false;
     resetMic();
     // Freeze evidence at release, before transcription and before routing can change it.
-    litIds = rec ? rec.targets.map(t => t.hit ? cursorId(t.hit) : null).filter(Boolean) : [];
+    litIds = rec ? rec.targets.map(t => {
+      const node = t.hit || t.anchor;
+      if (!node) return null;
+      const id = cursorId(node);
+      cursorRefs.set(id, node);
+      return id;
+    }).filter(Boolean) : [];
     const timing = {keyup_received: 0, evidence_start: performance.now() - releasedAt};
     const intent = { type: "record_stop", mode: state.mode, item_id: follow?.id || "", subject: rec?.subject,
-      ...(state.mode === "hover" ? { cursor_context: captureCursorContext() } : captureNoisyContext()) };
+      ...(state.mode === "hover" ? { cursor_context: captureCursorContext(timing) } : captureNoisyContext(undefined, timing)) };
     timing.evidence_frozen = performance.now() - releasedAt;
     intent.release_timing = timing;
     litIds = [];
@@ -2396,14 +2442,20 @@
     api.pointSoft(s.x_vp, s.y_vp);
     return true;
   }
-  function captureNoisyContext(radius = state.candidateRadiusPx || 380) {
+  function captureNoisyContext(radius = state.candidateRadiusPx || 380, timing = {}) {
+    return withCaptureReads(() => collectNoisyContext(radius, timing));
+  }
+  function collectNoisyContext(radius, timing) {
+    const phase = performance.now();
     const usable = state.mode !== "webcam" || freshWebcam();
     const locked = state.mode !== "webcam" && state.armed && state.lockedX !== null;
     const x = locked ? state.lockedX : state.pointerX, y = locked ? state.lockedY : state.pointerY;
-    return {page_url: location.origin + location.pathname,
+    const evidence = {page_url: location.origin + location.pathname,
       pointer: {x_vp: x, y_vp: y, scroll_x: scrollX, scroll_y: scrollY},
-      fixations: usable ? state.ringBuffer.slice(-25) : [],
-      candidates: usable ? extractCandidatesNear(x, y, radius) : []};
+      fixations: usable ? state.ringBuffer.slice(-25) : []};
+    timing.noisy_history_ms = performance.now() - phase;
+    evidence.candidates = usable ? extractCandidatesNear(x, y, radius, timing) : [];
+    return evidence;
   }
   function onWindowMouseMove(e) {
     if (!e.isTrusted) return;
@@ -2769,6 +2821,7 @@
 
   function buildSelector(el) {
     if (!el || !el.tagName) return "";
+    if (captureReads?.selectors.has(el)) return captureReads.selectors.get(el);
     const parts = [];
     let node = el;
     while (node && node.nodeType === 1) {
@@ -2786,23 +2839,54 @@
       parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${siblings.indexOf(node) + 1})` : tag);
       node = node.parentElement;
     }
-    return parts.join(" > ");
+    const selector = parts.join(" > ");
+    captureReads?.selectors.set(el, selector);
+    return selector;
   }
 
-  function extractCandidatesNear(x, y, radiusPx) {
+  function extractCandidatesNear(x, y, radiusPx, timing = {}) {
+    if (!captureReads) return withCaptureReads(() => extractCandidatesNear(x, y, radiusPx, timing));
+    let phase = performance.now();
     const rad = radiusPx || 240;
     const selectors = "button, a, input, select, textarea, [role='button'], [data-gaze-target], table, tr, th, td, [role='grid'], [role='row'], [role='columnheader'], [role='cell'], [role='gridcell'], [role='rowheader'], [data-card], section, article, [data-metric], abbr";
-    const nodes = Array.from(document.querySelectorAll(selectors));
-    const directEl = typeof document.elementFromPoint === "function" && x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight
-      ? document.elementFromPoint(x, y) : null;
-    const directCandidate = directEl && !directEl.closest("#hermes-gaze-root")
-      ? directEl.closest(selectors) || directEl : null;
-    if (directCandidate && !nodes.includes(directCandidate)) nodes.unshift(directCandidate);
+    const directEl = hitNode(x, y);
+    const directCandidate = directEl ? directEl.closest(selectors) || directEl : null;
+    // Exact hits and lit identities precede optional neighbours, even at the end of a large page.
+    const priority = new Set([directCandidate, ...litIds.map(id => cursorRefs.get(id)),
+      ...state.ringBuffer.slice(-25).map(sample => hitNode(sample.x_vp, sample.y_vp))]
+      .filter(Boolean));
+    const neighbours = new Set();
+    for (const node of priority) {
+      let branch = node;
+      for (let depth = 0; branch && depth < 8; depth++, branch = branch.parentElement) {
+        if (branch === document.body) break;
+        if (branch.matches(selectors)) neighbours.add(branch);
+        let before = branch, after = branch;
+        for (let distance = 0; distance < 2; distance++) {
+          before = before?.previousElementSibling; after = after?.nextElementSibling;
+          for (const sibling of [before, after]) if (sibling?.matches(selectors)) neighbours.add(sibling);
+        }
+      }
+    }
+    const nodes = new Set([...priority, ...neighbours, ...document.querySelectorAll(selectors)]);
+    const controls = document.querySelectorAll("button,a,[role='button'],input[type='button'],input[type='submit']");
+    const actionCache = new Map();
+    timing.noisy_discovery_ms = performance.now() - phase;
+    timing.noisy_actions_ms = 0;
+    phase = performance.now();
 
     const results = [];
     const byElement = new Map();
-    const tableRows = (table) => Array.from(table.querySelectorAll("tr,[role='row']"));
-    const tableHeaders = (table) => Array.from(table.querySelectorAll("thead th, thead [role='columnheader'], [role='row'] [role='columnheader']"));
+    const rowsCache = new Map(), headersCache = new Map();
+    const tableRows = table => {
+      if (!rowsCache.has(table)) rowsCache.set(table, Array.from(table.querySelectorAll("tr,[role='row']")));
+      return rowsCache.get(table);
+    };
+    const tableHeaders = table => {
+      if (!headersCache.has(table)) headersCache.set(table,
+        Array.from(table.querySelectorAll("thead th, thead [role='columnheader'], [role='row'] [role='columnheader']")));
+      return headersCache.get(table);
+    };
     const containerFor = (el) => el.parentElement && el.parentElement.closest("table,[role='grid'],[data-card],article.card,section.panel,section,article");
     const shortText = (el, max = 120) => safeText(el, max);
     const contextLabel = (el) => {
@@ -2816,7 +2900,7 @@
     };
     const scopeId = (el) => buildSelector(el);
     const addCandidate = (el, {scope, id, selector, rect, summary, parent} = {}) => {
-      if (!el || sensitive(el) || el.closest("#hermes-gaze-root")) return null;
+      if (!el || sensitive(el) || !rendered(el) || el.closest("#hermes-gaze-root")) return null;
       const actualSelector = selector || buildSelector(el);
       if (!actualSelector) return null;
       const r = rect || el.getBoundingClientRect();
@@ -2861,13 +2945,19 @@
       return { row, table, header, value: shortText(cell), key: rowKey ? shortText(rowKey, 60) : "", col };
     };
 
+    let scanned = 0, nearbyCount = 0;
+    // ponytail: 12ms/4096-node optional scan; exact release hits/lit targets never spend this budget.
+    const deadline = performance.now() + 12;
     for (const el of nodes) {
+      const required = priority.has(el);
+      if (!required && (++scanned > 4096 || nearbyCount >= 64 || performance.now() > deadline)) break;
       if (el.closest("#hermes-gaze-root")) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 8 || r.height < 8) continue;
       const cx = Math.max(r.left, Math.min(x, r.right));
       const cy = Math.max(r.top, Math.min(y, r.bottom));
-      if (Math.hypot(x - cx, y - cy) > rad && el !== directCandidate) continue;
+      if (Math.hypot(x - cx, y - cy) > rad && !required) continue;
+      if (!required) nearbyCount++;
 
       const scopeCell = el.closest("th,td,[role='cell'],[role='gridcell'],[role='columnheader']");
       const context = scopeCell ? getCellContext(scopeCell) : null;
@@ -2936,24 +3026,22 @@
 
       const actionRoot = panel || table;
       if (actionRoot) {
-        const controls = Array.from(document.querySelectorAll("button,a,[role='button'],input[type='button'],input[type='submit']"));
-        for (const control of controls) {
-          const controlsTarget = control.getAttribute("aria-controls");
-          const explicitlyAssociated = controlsTarget && table && controlsTarget.split(/\s+/).includes(table.id);
-          const consequence = "";
-          const tableName = table && contextLabel(table);
-          const consequenceMatchesTable = Boolean(tableName && consequence.toLowerCase().includes(tableName.toLowerCase()));
-          if (sensitive(control) || control.closest("#hermes-gaze-root") || (table
-            ? !table.contains(control) && !explicitlyAssociated && !consequenceMatchesTable
-            : !actionRoot.contains(control))) continue;
-          const actionLabel = getAccessibleLabel(control);
-          const action = {
-            label: actionLabel, selector: buildSelector(control),
-            consequence: consequence || actionLabel,
-            is_destructive: /delete|remove|purge|drop|destroy|pay|revoke/i.test(actionLabel + " " + (control.className || "")),
-          };
-          if (action.selector && !candidate.actions.some((item) => item.selector === action.selector)) candidate.actions.push(action);
+        const actionStart = performance.now();
+        if (!actionCache.has(actionRoot)) {
+          const actions = [];
+          for (const control of controls) {
+            const associated = table && (control.getAttribute("aria-controls") || "").split(/\s+/).includes(table.id);
+            if (!actionRoot.contains(control) && !associated) continue;
+            if (sensitive(control) || !rendered(control) || control.closest("#hermes-gaze-root")) continue;
+            const label = getAccessibleLabel(control);
+            actions.push({label, selector: buildSelector(control), consequence: label,
+              is_destructive: /delete|remove|purge|drop|destroy|pay|revoke/i.test(label + " " + (control.className || ""))});
+            if (actions.length >= 12) break;
+          }
+          actionCache.set(actionRoot, actions);
         }
+        candidate.actions = actionCache.get(actionRoot).slice();
+        timing.noisy_actions_ms += performance.now() - actionStart;
       }
     }
 
@@ -2966,6 +3054,7 @@
         });
       }
     }
+    timing.noisy_candidates_ms = performance.now() - phase - timing.noisy_actions_ms;
     return results;
   }
 

@@ -18,7 +18,9 @@ class ReleaseTiming:
         self.lock = threading.Lock()
         self.stages = {"binding_received": 0.0}
         self.browser = {}
-        for key in ("keyup_received", "evidence_start", "evidence_frozen", "intent_sent"):
+        for key in ("keyup_received", "evidence_start", "evidence_frozen", "intent_sent",
+                    "cursor_history_ms", "cursor_targets_ms", "cursor_blocks_ms", "cursor_controls_ms",
+                    "noisy_history_ms", "noisy_discovery_ms", "noisy_candidates_ms", "noisy_actions_ms"):
             value = browser.get(key) if isinstance(browser, dict) else None
             if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 60000:
                 self.browser[key] = round(value, 2)

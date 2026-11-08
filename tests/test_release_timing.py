@@ -21,6 +21,9 @@ class ReleaseTimingTests(unittest.TestCase):
         self.addCleanup(timings.stop)
         for _ in range(12):
             trace = timings.begin({"keyup_received": 0, "evidence_frozen": 12.5,
+                                   "cursor_controls_ms": 3.25, "noisy_discovery_ms": 2,
+                                   "noisy_actions_ms": True, "cursor_blocks_ms": -1,
+                                   "noisy_candidates_ms": float("inf"),
                                    "intent_sent": float("nan"), "evidence_start": "secret",
                                    "audio": "secret", "page_url": "secret"})
             trace.mark("record_stop")
@@ -29,7 +32,9 @@ class ReleaseTimingTests(unittest.TestCase):
             self.assertEqual(trace.snapshot()["python_ms"]["record_stop"], first)
         state = timings.snapshot()
         self.assertEqual([turn["turn"] for turn in state["turns"]], list(range(5, 13)))
-        self.assertEqual(state["turns"][-1]["browser_ms"], {"keyup_received": 0, "evidence_frozen": 12.5})
+        self.assertEqual(state["turns"][-1]["browser_ms"],
+                         {"keyup_received": 0, "evidence_frozen": 12.5,
+                          "cursor_controls_ms": 3.25, "noisy_discovery_ms": 2})
         self.assertIsNone(timings.get(1))
         self.assertNotIn("secret", str(state))
 

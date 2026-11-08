@@ -1,5 +1,84 @@
 # Release freeze investigation — 2026-11-08
 
+## Measured evidence-capture stall and bounded collector — 2026-11-08
+
+The user's four real releases locate the freeze **inside synchronous browser
+evidence capture**, not native shutdown: evidence start to frozen took 1090,
+1218, 1589 and 1443 ms. This supersedes the uncertainty about the physical stall
+below; the earlier private-render race remains a separate finding.
+
+`fix/evidence-capture-stall` starts at `f3c2827`, also the tip of
+`fix/release-freeze-root`. No real devices, sites, Hermes instance or user Chrome
+were used for this change.
+
+The self-contained headless fixture in `tests/ui_review/probe_capture.py` has
+600 cards, 600 links and inline images, eight wrapper levels per card, a pointed
+control after the catalog, a separate earlier gaze identity, a sensitive
+ARIA-associated label, and pending layout. Final measurements, including the
+small wire serialization and mutation check:
+
+| Capture | Original `f3c2827` | Bounded collector |
+| --- | ---: | ---: |
+| Cursor | 31.8 ms | 10.2 ms |
+| Webcam/noisy | 1239.4 ms | 15.6 ms |
+
+The noisy path made 18,321 document selector queries before the fix, versus 47
+afterward; rectangle reads fell from 1358 to 168. Repeated page-wide ARIA-label
+lookups during privacy checks and repeated page-control scans dominated this
+fixture. The initial 2400-card stress case took 17,564.2 ms noisy / 86.4 ms cursor;
+the first bounded version took 19.7 / 18.4 ms respectively.
+
+Capture now owns short-lived privacy/reference/selector caches, discarded in
+`finally` before returning. ARIA references are indexed once per encountered DOM
+root, including shadow roots. No privacy facts are reused across releases.
+The noisy collector retains exact current, recent-gaze and lit identities before
+bounded structural neighbours and optional page candidates. The optional scan
+has a 12 ms / 4096-node / 64-neighbour ceiling; required identities bypass it.
+Control associations and table row/header collections are reused within that
+capture, and advisory actions are capped at 12 per root. These are work bounds,
+not a guarantee against a single expensive browser layout or selector operation.
+All browser reads still run synchronously at release; the returned evidence is
+plain data and later page edits do not update it.
+
+`/gaze timing` now accepts only finite, bounded numbers for
+`cursor_history_ms`, `cursor_targets_ms`, `cursor_blocks_ms`,
+`cursor_controls_ms`, `noisy_history_ms`, `noisy_discovery_ms`,
+`noisy_candidates_ms` and `noisy_actions_ms`. These are durations, not offsets;
+action time is excluded from candidate time, and target metadata time from block
+time. No text, URLs, identities, images or field values enter these diagnostics.
+They use the existing in-memory collector; no automatic persistence was added.
+
+Verification:
+
+- Baseline: `CAPTURE_BASELINE=f3c2827 SHOTS=/tmp/hermes-capture-stall
+  /Users/Abid/Projects/hermes-gaze/.venv/bin/python tests/ui_review/probe_capture.py`.
+- Current: same command without `CAPTURE_BASELINE`; both captures under 50 ms,
+  pointed evidence retained, sensitive label excluded, and an earlier exact gaze
+  identity retained in noisy mode. The baseline omitted that gaze identity.
+- `/Users/Abid/Projects/hermes-gaze/.venv/bin/python -m unittest discover -s tests -t .`:
+  **225 tests, 4.444 seconds, OK**.
+- `node --test tests/cursor_context_dom.js`: **27 passed, 0 failed**.
+- `node --check browser/overlay.js`: exit 0.
+- `tests/trust_boundaries_chrome.py`: all 14 PASS records; made headless to honor
+  the task's no-visible-Chrome boundary.
+- Local-only `tests/ui_review/probe_evidence.py`: **PASS F2/F3/F4/F6**,
+  including five lit identities, bounded context and immutable saved targets.
+
+### Safe stopping point: first-paint ordering is not implemented
+
+This change does **not** prove a released state paints before evidence capture,
+and does not implement a frame yield. An identity reference alone cannot freeze
+its text, bounds, visibility, associated secret-field labels or the page's
+scroll/route state. Reading any of these after yielding would change the
+evidence moment. A paint before all release-time DOM reads conflicts with exact
+release-time evidence.
+
+The safe alternative is a bounded synchronous raw-fact freeze at release,
+followed by a protected render/paint barrier and only pure processing of those
+frozen facts. That is a different boundary from “paint before capture”; it needs
+an explicit acceptance decision rather than a misleading paint guarantee.
+Existing release rendering and its native-shutdown barrier are unchanged.
+
 ## Finding and limits
 
 Inbox publication was not a protected-frame render barrier. The ordered service

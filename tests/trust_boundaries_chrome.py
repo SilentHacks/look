@@ -191,7 +191,7 @@ class LeakServer(http.server.BaseHTTPRequestHandler):
 
 with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
     chrome = subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '--remote-debugging-port=0', f'--user-data-dir={tmp}', '--no-first-run',
+        '--headless=new', '--remote-debugging-port=0', f'--user-data-dir={tmp}', '--no-first-run',
         '--no-default-browser-check', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     session = None
     try:
