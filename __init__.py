@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 
 from . import service
 from .browser.cdp_bridge import get_shared_session
-from .cli import _handle_slash_command, _run_cli, _setup_cli
+from .cli import _first_run_guide, _handle_slash_command, _run_cli, _setup_cli
 from .config import GazeConfig
 from .resolver.cursor_context import EVIDENCE_RULES, TOOL_RULES
 from .resolver.temporal_aligner import has_deictic_pronoun
@@ -104,8 +104,12 @@ def register(ctx: Any) -> None:
     turns = VoiceTurns(ctx, session)
     service.set_voice_turns(turns)
     answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
+    initialized_sessions: set[str] = set()
+    guide_shown = False
 
     def pre_llm_call(**kwargs: Any) -> Any:
+        if kwargs.get("session_id"):
+            initialized_sessions.add(kwargs["session_id"])
         with turns.lock:
             if turns.binding and turns.binding["session_id"] == kwargs.get("session_id"):
                 result = turns.pre(**kwargs)
@@ -134,6 +138,23 @@ def register(ctx: Any) -> None:
                                            body if body is not None else kwargs.get("assistant_response", ""))
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
+        nonlocal guide_shown
+        command = raw_args.strip().lower()
+        state = getattr(ctx, "state", None)
+        if command == "" and not guide_shown and state is not None:
+            try:
+                guide_shown = state.get("first_run_shown", False) is True
+            except (OSError, RuntimeError):
+                logger.debug("Could not read first-run guide state", exc_info=True)
+        if command == "setup" or command == "" and not guide_shown:
+            result = _first_run_guide(session, initialized=kwargs.get("session_id") in initialized_sessions)
+            guide_shown = True
+            if state is not None:
+                try:
+                    state.set("first_run_shown", True)
+                except (OSError, RuntimeError):
+                    logger.debug("Could not save first-run guide state", exc_info=True)
+            return result
         if raw_args.strip() in ("", "connect", "start"):
             result = _handle_slash_command("start")
             if not session.cdp.is_connected:
@@ -231,8 +252,8 @@ def register(ctx: Any) -> None:
     ctx.register_command(
         "gaze",
         handler=gaze_command,
-        description="Connect this Hermes session to Chrome voice, control pointing, or launch the demo.",
-        args_hint="[connect|start|disconnect|status|demo|mode|calibrate|tracker|resolve|listen|benchmark]",
+        description="Connect Chrome, reopen the first-run guide, or control pointing.",
+        args_hint="[setup|connect|start|disconnect|status|demo|mode|calibrate|tracker|resolve|listen|benchmark]",
     )
     ctx.register_cli_command(
         name="gaze",

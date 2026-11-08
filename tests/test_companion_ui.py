@@ -86,7 +86,6 @@ class Errors(unittest.TestCase):
             self.assertIn(want, sentence)
             self.assertNotIn("xyz", sentence)
             self.assertNotIn("provider", sentence)
-            self.assertEqual(sentence.count("."), 1 if want != "normal message" else 2)
 
 
 class Links(unittest.TestCase):
