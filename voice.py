@@ -33,7 +33,6 @@ import time
 import wave
 from typing import Any, Dict, List, Optional, Tuple
 
-from .release_timing import TIMINGS
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +121,6 @@ def prewarm() -> None:
     so a first utterance cannot race it. Only the primary backend is warmed;
     the 2.4 GB parakeet-mlx fallback stays lazy.
     """
-    TIMINGS.start()
     if sys.platform != "darwin":
         return
     threading.Thread(target=_get_coreml_runner, name="gaze-asr-prewarm", daemon=True).start()

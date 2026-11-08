@@ -779,6 +779,7 @@ class VoiceTurns:
         self._pump()
 
     def _disconnect(self):
+        TIMINGS.stop()
         tasks = getattr(self.session, "tasks", None)
         if tasks:
             tasks.stop()

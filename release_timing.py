@@ -5,6 +5,7 @@ from collections import deque
 import math
 import threading
 import time
+import weakref
 
 
 class ReleaseTiming:
@@ -41,34 +42,54 @@ class ReleaseTimings:
         self.turns = deque(maxlen=8)
         self.sequence = 0
         self.thread = None
+        self.stopped = threading.Event()
         self.max_gap = 0.0
 
-    def start(self):
-        with self.lock:
-            if self.thread is None:
-                self.thread = threading.Thread(target=self._heartbeat, name="gaze-timing", daemon=True)
-                self.thread.start()
-
     def begin(self, browser=None):
-        self.start()
         with self.lock:
             self.sequence += 1
             trace = ReleaseTiming(self.sequence, browser)
             self.turns.append(trace)
+            if self.thread is None:
+                self.stopped = threading.Event()
+                self.thread = threading.Thread(target=self._heartbeat,
+                                               args=(weakref.ref(self), self.stopped),
+                                               name="gaze-timing", daemon=True)
+                self.thread.start()
             return trace
 
-    def _heartbeat(self):
+    def stop(self):
+        with self.lock:
+            self.stopped.set()
+            thread, self.thread = self.thread, None
+            for trace in self.turns:
+                trace.finish()
+        if thread is not None:
+            thread.join()
+
+    @staticmethod
+    def _heartbeat(reference, stopped):
         last = time.monotonic()
-        while True:
-            time.sleep(.02)
+        while not stopped.wait(.02):
+            timings = reference()
+            if timings is None:
+                return
             now = time.monotonic()
             gap = (now - last) * 1000
-            with self.lock:
-                self.max_gap = max(self.max_gap, gap)
-                for trace in self.turns:
+            with timings.lock:
+                if stopped.is_set():
+                    return
+                timings.max_gap = max(timings.max_gap, gap)
+                active = False
+                for trace in timings.turns:
                     with trace.lock:
                         end = min(now, trace.finished or now)
                         trace.max_gap = max(trace.max_gap, (end - max(last, trace.started)) * 1000)
+                        active |= not trace.finished
+                if not active:
+                    timings.thread = None
+                    return
+            del timings  # Waiting must not retain an abandoned/replaced collector.
             last = now
 
     def get(self, turn):
@@ -81,4 +102,7 @@ class ReleaseTimings:
                     "turns": [trace.snapshot() for trace in self.turns]}
 
 
+# importlib.reload keeps this module dictionary; retire its previous worker first.
+if "TIMINGS" in globals():
+    TIMINGS.stop()
 TIMINGS = ReleaseTimings()

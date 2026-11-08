@@ -238,6 +238,67 @@ class TestSessionDelivery(unittest.TestCase):
                 release.set()
                 worker.join(3)
 
+    def test_session_rebind_during_release_does_not_invert_inbox_and_microphone_locks(self):
+        turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)
+        turns.bind(session_key="route", session_id="session")
+        self.addCleanup(turns.close)
+        inbox_held, reserving = threading.Event(), threading.Event()
+        errors, replies = [], []
+        mic = self.session.microphone
+
+        class BoundedLock:
+            # A regression must fail, not leave two deadlocked threads/cleanups.
+            def __init__(self):
+                self.lock = threading.RLock()
+
+            def __enter__(self):
+                if not self.lock.acquire(timeout=1):
+                    raise TimeoutError("microphone/inbox lock inversion")
+
+            def __exit__(self, *args):
+                self.lock.release()
+
+        mic._lock = BoundedLock()
+        mic._stream, mic._owner = mock.Mock(), "source:document"
+        mic._audio.extend(b"\x01\x00")
+        original = mic.stop
+
+        def stop(owner, *, before_stop, **kwargs):
+            def reserve():
+                if not inbox_held.wait(2):
+                    raise TimeoutError("rebind did not hold inbox")
+                reserving.set()
+                before_stop()
+            return original(owner, before_stop=reserve, **kwargs)
+
+        def rebind():
+            try:
+                with turns.lock:
+                    inbox_held.set()
+                    if not reserving.wait(2):
+                        raise TimeoutError("release did not reach reservation")
+                    turns.bind(session_key="new-route", session_id="new-session")
+            except Exception as exc:
+                errors.append(exc)
+
+        intent = {"type": "record_stop", "nonce": self.session._intent_nonce,
+                  "_browser_target": "source", "_browser_document": "document",
+                  "cursor_context": capture()}
+        with mock.patch.object(service, "_VOICE_TURNS", turns), \
+                mock.patch.object(mic, "stop", side_effect=stop), \
+                mock.patch("hermes_gaze.voice.transcribe_audio_buffer", return_value=("", [])):
+            binding = threading.Thread(target=rebind, daemon=True)
+            release = threading.Thread(target=service.handle_intent, args=(intent, replies.append), daemon=True)
+            binding.start()
+            release.start()
+            binding.join(4)
+            release.join(4)
+        self.assertFalse(binding.is_alive(), "session rebind deadlocked")
+        self.assertFalse(release.is_alive(), "release deadlocked")
+        self.assertEqual(errors, [])
+        self.assertFalse(any("lock inversion" in str(reply) for reply in replies), replies)
+        self.assertEqual(turns.binding["session_id"], "new-session")
+
     def test_slow_transcription_releases_intents_and_preserves_capture_order(self):
         import threading
         from hermes_gaze import voice

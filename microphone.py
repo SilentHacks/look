@@ -14,6 +14,9 @@ class Microphone:
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
+        # Callback-only PCM critical section: never native I/O, Chrome or inbox work.
+        self._audio_lock = threading.Lock()
+        self._closing = False
         self._stream = None
         self._owner = None
         self._audio = bytearray()
@@ -28,7 +31,7 @@ class Microphone:
         import sounddevice as sd
 
         with self._lock:
-            if self._stream is not None:
+            if self._stream is not None or self._closing:
                 return {"ok": False, "error": "Microphone is already in use"}
             try:
                 loss = check_loss()
@@ -36,31 +39,34 @@ class Microphone:
                 return {"ok": False, "error": "Could not check the focused Chrome tab; try again"}
             if loss:
                 return {"ok": False, "error": loss}
-            self._audio = bytearray()
-            self._error = ""
-            self._epoch = 0.
-            self._accepting = True
+            with self._audio_lock:
+                self._audio = bytearray()
+                self._error = ""
+                self._epoch = 0.
+                self._accepting = True
             first = threading.Event()
             started = time.monotonic()
 
             def receive(data, frames, clock, status):
-                if not self._accepting:
-                    return
-                if not self._epoch:
-                    self._epoch = time.time() - (clock.currentTime - clock.inputBufferAdcTime)
-                if status:
-                    self._error = str(status)
+                with self._audio_lock:
+                    if not self._accepting:
+                        return
+                    if not self._epoch:
+                        self._epoch = time.time() - (clock.currentTime - clock.inputBufferAdcTime)
+                    if status:
+                        self._error = str(status)
+                    if len(self._audio) + len(data) <= MAX_AUDIO_BYTES:
+                        self._audio.extend(data)
+                    else:
+                        self._error = "Recording exceeds maximum size"
+                    first.set()
+                # Meter computation cannot delay sealing an already accepted buffer.
                 if on_level is not None:
                     # Speech RMS sits near .03 to .1 of full scale; sqrt spreads that for the bars.
                     samples = array.array("h", bytes(data)[:len(data) & ~1])[::4]
                     if samples:
                         rms = math.sqrt(sum(s * s for s in samples) / len(samples)) / 32768
                         self._level = min(1., math.sqrt(rms) * 2.6)
-                if len(self._audio) + len(data) <= MAX_AUDIO_BYTES:
-                    self._audio.extend(data)
-                else:
-                    self._error = "Recording exceeds maximum size"
-                first.set()
             stream = sd.RawInputStream(samplerate=sample_rate, channels=1, dtype="int16", callback=receive)
             try:
                 stream.start()
@@ -141,10 +147,16 @@ class Microphone:
                 raise RuntimeError("Recording was cancelled or belongs to another tab")
             stream, self._stream = self._stream, None
             self._owner = None
-            self._accepting = False
+            self._closing = True
+            with self._audio_lock:
+                self._accepting = False
+                audio, self._audio = self._audio, bytearray()
+                epoch, error = self._epoch, self._error
+        # No microphone lock while publishing: session binding takes the inbox lock
+        # before cancelling capture. The close gate still excludes new native input.
+        try:
             if timing is not None:
                 timing.mark("record_stop")
-            audio = bytes(self._audio)
             try:
                 if before_stop is not None:
                     before_stop()
@@ -156,24 +168,27 @@ class Microphone:
                     if timing is not None:
                         timing.mark("stream_stopped")
                 finally:
-                    self._audio.clear()
                     if timing is not None:
                         timing.mark("mic_close_start")
                     stream.close()
                     if timing is not None:
                         timing.mark("mic_closed")
-            if self._error:
-                raise RuntimeError(self._error)
-            return audio, self._epoch
+            if error:
+                raise RuntimeError(error)
+            return bytes(audio), epoch
+        finally:
+            with self._lock:
+                self._closing = False
 
     def cancel(self, owner: str | None = None) -> None:
         with self._lock:
             if self._stream is not None and (owner is None or owner == self._owner):
                 stream, self._stream = self._stream, None
-                self._accepting = False
+                with self._audio_lock:
+                    self._accepting = False
+                    self._audio.clear()
                 self._owner = None
                 try:
                     stream.abort()
                 finally:
-                    self._audio.clear()
                     stream.close()

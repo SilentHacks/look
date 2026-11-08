@@ -923,6 +923,7 @@ class GazeSession:
 
 
     def close(self) -> None:
+        TIMINGS.stop()
         self.microphone.cancel()
         self.stop_webcam()
         self.tasks.stop()

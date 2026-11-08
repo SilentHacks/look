@@ -171,7 +171,12 @@ it does not cancel a Hermes turn already accepted by the host.
 
 Release freezes browser evidence and seals PCM before transcription. The question is
 reserved/published before native stream stop/close, so a slow shutdown cannot delay
-the inbox's transcribing state. New input still waits for shutdown to finish.
+the inbox's transcribing state. Publication holds neither the microphone state lock
+nor its short callback-buffer lock, so a concurrent Hermes-session rebind can cancel
+capture without lock inversion. New native input is refused until shutdown finishes.
+Sealing includes every callback buffer admitted before the seal, together with its
+device status; an error there invalidates capture. Callbacks strictly after sealing
+cannot append audio or invalidate the already sealed speech.
 Hint persistence follows stop/reservation on the ordered intent worker. Capsule
 placement and visual design are unchanged. CoreML prewarm still runs one silent
 prediction before sharing the cached runner; models and fallbacks are unchanged.
@@ -187,14 +192,17 @@ The first UI push is a completed CDP render, not proof of a painted frame.
 No audio, transcript, page data, coordinates or browser/request identifiers enter
 the trace, and it is never persisted or sent to Chrome/model providers.
 
-A 20 ms Python heartbeat reports each turn's maximum scheduling gap through its
-first delta or failure/completion, plus the process-wide maximum since startup.
+A 20 ms Python heartbeat runs only while releases are being measured, through their
+first delta or failure/completion. It retires after the final sample; disconnect and
+plugin unload stop unfinished measurements, and reload retires the previous worker.
+It reports each turn's maximum scheduling gap plus the maximum across measured
+releases in this process, not idle time before the first release.
 A large gap indicates Python could not schedule (GIL/native blocking, CPU pressure
 or machine sleep); a healthy heartbeat with slow UI instead points at a specific
 worker, transport or Chrome. Evidence duration isolates synchronous page-side
-capture; native stop and close have separate stages. The original hardware freeze
-is not yet reproduced: compare whether ordinary page typing/scrolling also freezes,
-or only the companion card/capsule stops updating.
+capture; native stop and close have separate stages. Real-hardware confirmation
+found that publication before native shutdown removed the multi-second release
+freeze; the fake-device probes below verify ordering, not physical device latency.
 
 Device-free synthetic 3-second PCM through the real, offline CoreML path on
 2026-11-08: first process load/transcription 29,834 ms, heartbeat max gap 19.8 ms;
