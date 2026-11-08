@@ -1,5 +1,67 @@
 # Third-party notices
 
+## Parakeet speech recognition
+
+- Preferred macOS model: **Parakeet TDT 0.6B v2**, NVIDIA's
+  [original v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/blob/ae9ad07059c7c739ffaf932226a8fe64ae2620b0/README.md),
+  converted to CoreML by **FluidInference**, **CC-BY-4.0** per the
+  [pinned conversion card](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/blob/ee09c569f73759e6d44c9bd16766f477b2b36d39/README.md).
+  The downloaded conversion is unmodified; FluidInference publishes it.
+  NVIDIA endorsement is not established.
+- macOS fallback: **mlx-community's MLX conversion** of NVIDIA Parakeet v2,
+  **CC-BY-4.0**, [revision and conversion attribution](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/blob/8ae155301e23d820d82aa60d24817c900e69e487/README.md).
+  The [parakeet-mlx runtime](https://github.com/senstella/parakeet-mlx) is Apache-2.0.
+- [CC-BY-4.0 terms](https://creativecommons.org/licenses/by/4.0/).
+  No training-data licence or catalog acceptance is established by these weight terms.
+- CoreML **v3 is unsupported**, not the default. Its
+  [card at `7dd20fe6b1797d35f5e3307e8b1732d9a178edfe`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml/blob/7dd20fe6b1797d35f5e3307e8b1732d9a178edfe/README.md)
+  contradicts itself: CC-BY-4.0 frontmatter, Apache 2.0 body. These notices do not
+  resolve that contradiction or infer weight terms from the FluidAudio code licence.
+
+`asr/parakeet_coreml.py` vendors silicon-asr 0.1.0's runner, windowing and types,
+adapted for pyobjc CoreML, decoded PCM input and pinned/verified v2-only loading.
+[Upstream MIT licence](https://github.com/WT-MM/silicon-asr/blob/e8f2e021007eab99031183bed484a82bdfc22a28/LICENSE):
+
+```text
+MIT License
+
+Copyright (c) 2026 WT-MM
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the \"Software\"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## faster-whisper English models
+
+- [SYSTRAN faster-whisper runtime](https://github.com/SYSTRAN/faster-whisper): MIT.
+- SYSTRAN's conversions of OpenAI Whisper:
+  [base.en](https://huggingface.co/Systran/faster-whisper-base.en/blob/3d3d5dee26484f91867d81cb899cfcf72b96be6c/README.md) and
+  [tiny.en](https://huggingface.co/Systran/faster-whisper-tiny.en/blob/0d3d19a32d3338f10357c0889762bd8d64bbdeba/README.md),
+  MIT per their cards. The selected repository tokenizer is mandatory and verified;
+  no separately downloaded OpenAI tokenizer is used. Tokenizer-specific legal
+  terms beyond the conversion cards were not independently established.
+
+Recognition and Phonon file revisions and SHA-256 expectations are in
+[`assets.json`](assets.json). Weight/embedding hashes derive from immutable
+publisher LFS metadata, not a claim that this release audit downloaded those weights.
+CoreML/MLX official-distribution acceptance under the Hermes catalog remains a
+maintainer decision; pinning alone is not catalog approval.
+
 ## Gradium Phonon read-aloud
 
 - Runtime: [`ptts` 0.6.0 / xn-ptts](https://github.com/gradium-ai/xn-ptts),

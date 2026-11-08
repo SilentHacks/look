@@ -1,22 +1,237 @@
-# Hermes Gaze ("Telepathy") 👁️🧠
+# Hermes Gaze ("Telepathy")
 
-> **Multimodal Deictic Reference Resolution & Gaze Tracking for Hermes Agent & Google Chrome**  
-> *"Neuralink at home: point with your eyes, command with your voice. Hermes knows what 'this' means."*  
-> Entry for the **Nous Research Hermes Agent Plugin Hackathon** (Nov 2026).
+Point or look at a page in Chrome, hold Space, wait for **Listening**, then ask.
+Hermes answers in a private card or uses guarded browser actions. Eye tracking is
+**beta**: a local, personally calibrated estimate of broad regions, not a precise pointer.
 
----
+## Install on Mac
+
+Supported lane for this beta: **Apple Silicon Mac, standard Google Chrome in
+Applications, one display, English**. Hermes Agent must already be installed and
+able to answer a normal message. Metadata requires Hermes `>=0.22.0` and Python
+`>=3.11,<3.15`; that is not a claim that every version has been tested. Intel Macs,
+Linux, alternate Chrome builds and multiple displays are outside this release lane.
+
+Until a catalogue listing is accepted, install the published GitHub release pin:
+
+```bash
+hermes plugins install https://github.com/SilentHacks/hermes-gaze --ref '<RELEASE_SHA>' --enable
+```
+
+**Replace `<RELEASE_SHA>` with the release's full forty-character commit SHA.**
+This is a clearly marked placeholder, not a published release or a catalogue
+availability claim. Do not substitute a branch or install an unreviewed moving head.
+Review Hermes's security and dependency prompts; consent to preparing the declared
+Python packages through Hermes PM. Do not bypass a dangerous security finding.
+If you decline dependencies, the plugin stays disabled; later run
+`hermes plugins enable hermes-gaze` and accept preparation. Noninteractive
+installs do not imply consent.
+
+If Hermes reports an out-of-sync environment, missing packages or a stale lock,
+quit Hermes and run this in the terminal that normally launches it:
+
+```bash
+hermes pm install
+hermes plugins enable hermes-gaze
+```
+
+Restart Hermes afterward. Do not `pip install` into an arbitrary Python or
+hand-edit the generated workspace lock. If preparation still fails, keep its
+exact error: installing the plugin and successfully enabling its dependencies
+are different steps.
+
+## First answer
+
+Launch Hermes from **Terminal or your usual terminal app**, with that app allowed
+under macOS **System Settings → Privacy & Security → Microphone** and, for
+optional eyes, **Camera**. Permission belongs to the launching app/process; do not
+assume granting a website permission fixes native capture. Restart that app after
+changing permissions. T3 Code's terminal is not a supported camera launcher.
+
+In the intended Hermes profile's `config.yaml`, merge these settings:
+
+```yaml
+plugins:
+  isolation: in_process
+  entries:
+    hermes-gaze:
+      allow_gateway_injection: true
+```
+
+This changes Hermes's plugin-isolation policy, not just Gaze's appearance. The
+guide never changes it silently. Restart Hermes after configuration changes.
+The shell `hermes gaze` command needs in-process isolation and does **not** bind
+your interactive conversation.
+
+In a new Hermes conversation:
+
+- Enter `/gaze` for the first-run checklist and explicit local recognition setup.
+  It discloses downloads without opening Chrome, the camera, microphone or speakers.
+  `/gaze setup` reopens it and retries preparation at any time.
+- Send a **normal first message**, such as `Reply only Ready.`, and wait for the
+  answer. The host cannot prepare a fresh conversation from a Chrome question;
+  connecting alone is not enough. No hidden warm-up message is sent for you.
+- Enter `/gaze connect` to open the separate companion Chrome. Later `/gaze`
+  reconnects without repeating the checklist.
+- Use `/gaze mode hover` for cursor mode. Open a page or enter `/gaze demo` for
+  the local practice dashboard. **Point at something. Hold Space. Wait for
+  Listening, then ask. Let go when you are done.**
+
+Plugin registration **never downloads models**. An already-cached CoreML model is
+checksum-verified and silently warmed in the background. The first `/gaze` guide,
+or `/gaze setup`, starts missing downloads and shows **Preparing local speech recognition**.
+Preparation can compile models; there is no fixed wait guarantee. Check `/gaze setup`
+for **Local speech recognition is ready**; hosts supporting plugin messages
+also receive a completion notice. Space is refused with a plain explanation until
+a model is ready, without opening the microphone or waiting on preparation.
+If recognition is preparing or your microphone is unavailable, **Right Option**
+opens protected typed questions. Text fields and **keyboard-focused controls**
+keep native Space: click ordinary page text before trying to talk. A tap scrolls.
+**Q** recalls answers; **Esc** stops or dismisses; holding Space on an answer asks
+a follow-up. Failure cards offer **Try again**, **Skip**, or **Continue with the rest**.
+
+Connected conversations use guarded browsing tools instead of raw terminal,
+code, generic browser or delegation tools. `/gaze disconnect` restores ordinary
+Hermes tools. Send, Buy, Delete and similar actions need your mouse click on the
+protected review card; speech and gaze cannot approve them. Stop does not undo
+typing or navigation already performed.
+
+### Try eyes, beta
+
+After a useful cursor answer, explicitly enter `/gaze mode webcam`, then
+`/gaze calibrate`. This opens the separate local camera window; follow its
+calibration, check and practice guidance. Move the pointer once in every page,
+and again after zooming or resizing. Use one display, good light and broad page
+regions; recalibrate after moving or changing camera, posture or glasses.
+No real-camera population accuracy has been established. `/gaze tracker stop`
+stops tracking and returns to cursor. See [webcam setup and limits](docs/WEBCAM_GAZE.md).
+
+### Optional read aloud
+
+Silent answers do not need speech-output assets. To download the pinned local
+Phonon voice, without playing sound, quit Hermes and run:
+
+```bash
+hermes gaze setup-speech
+```
+
+Restart Hermes, obtain an answer and choose **Read aloud** when you want sound.
+The model is approximately 65 MB plus its voice files; assets stay in
+`${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon`. Automatic reading starts off.
+Missing or unusable assets can select macOS `say` before any audio starts.
+See [offline read-aloud details](#offline-read-aloud-setup).
+
+## Privacy and limits
+
+Local camera does **not** mean local questions or page context. Live tracking
+keeps camera images and numeric eye features local and does not save video.
+Calibration is sensitive and saved locally. The separate development recorder
+can save video only when explicitly started; it is not part of this guide.
+The microphone opens only while talking. Recognition is local; model preparation
+can download assets. Failed recordings can remain in memory for transcription
+retry until the plugin exits. The macOS MLX recognition fallback writes a
+temporary WAV and normally deletes it after recognition; a crash or failed
+deletion can leave that audio in the operating system's temporary folder.
+
+Your transcribed or typed question and bounded page evidence go to the model
+configured in Hermes. **Hermes can retain page context in conversation history
+(`state.db`), even when plugin replay recording is off.** Provider retention
+depends on your provider. Optional early highlighting, when enabled with a
+TypeSafe key, also sends TypeSafe the question and static structural scope
+descriptions; extra page text is off by default. Details follow below.
+
+This is bounded page structure, not universal screen vision. Cross-origin
+frames, canvas and unknown custom widgets may be unavailable. Detached targets
+fail rather than being guessed. Eye estimates cannot replace precise controls
+or certify accessibility. The companion is a separate browser profile: existing
+Chrome sign-ins are not automatically shared.
+
+### Runtime downloads
+
+All sizes below are approximate decimal payload sizes from publisher metadata, not
+measured transfers; package installation, cache and compilation overhead are additional.
+ASR and Phonon inputs are pinned in [`assets.json`](assets.json), with a SHA-256 for
+every selected file. Setup verifies cached bytes before fetching only missing files;
+runtime loaders use local paths only and verify before native loading. A checksum
+failure stops preparation, not a silent fallback or automatic replacement.
+Small cached graph/config/tokenizer SHA-256 values were computed after matching the
+recorded immutable Git blob IDs; weight checksums come from publisher LFS metadata.
+
+| Download / publisher | Trigger | Immutable revision / integrity | Approximate size | Cache / licences |
+|---|---|---|---|---|
+| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit recognition setup; preferred macOS backend | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39); SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub; weights CC-BY-4.0, vendored runner MIT |
+| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Same explicit setup, only if CoreML unavailable on macOS | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487); SHA-256 manifest | 2.47 GB | Shared HF hub; weights CC-BY-4.0, runtime Apache-2.0 |
+| faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux, or after both macOS backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba); SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub; converted weights/runtime MIT |
+| Phonon-31M English q8, Gradium | Explicit `hermes gaze setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d); SHA-256 manifest | 65 MB | Plugin phonon cache; assets Apache-2.0, ptts MIT OR Apache-2.0 |
+| Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7); SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache; Apache-2.0 |
+| MediaPipe Tasks Vision JS/WASM, Google npm | Explicit optional webcam start or offline developer evaluation | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32); SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 23.6 MB unpacked; compressed size unverified | Plugin webcam cache; Apache-2.0 |
+| Face Landmarker, Google storage | Same explicit optional webcam setup | [float16 version 1](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task); SHA-256 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` | 3.76 MB | Plugin webcam cache; Apache-2.0 |
+
+The shared Hugging Face hub defaults to `${HF_HOME:-${XDG_CACHE_HOME:-~/.cache}/huggingface}/hub`;
+`HF_HUB_CACHE` (or legacy `HUGGINGFACE_HUB_CACHE`) overrides it. Downloads use the
+official `https://huggingface.co` endpoint and may follow publisher storage redirects.
+Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
+`webcam-0.10.32`. Warm model caches stay offline. Do not delete shared caches wholesale.
+
+`whisper_model` supports **base.en (default) and tiny.en only**; other aliases,
+arbitrary repositories and local custom models are unsupported and rejected before
+loading. Each includes a verified local tokenizer: there is no OpenAI tokenizer
+fallback download. Backend order remains CoreML v2 → MLX v2 → faster-whisper on Mac.
+Fallback preparation can add the listed sizes; recognition never downloads while
+holding or releasing Space.
+
+**CoreML v2 is the default, not v3.** V3 is unsupported: its publisher card labels
+CC-BY-4.0 in frontmatter but says Apache 2.0 in its body. That contradiction is
+unresolved; no v3 weight licence is asserted here. FluidInference publishes the
+conversion and references it in FluidAudio; it is not NVIDIA-hosted or evidence of
+NVIDIA endorsement. Catalog acceptance of converter-owned CoreML/MLX distributions
+still needs a maintainer ruling. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Chrome, ffmpeg, CoreML and installed macOS voices are existing local tools, not
+installed by this downloader. Python/native dependencies are prepared separately by
+Hermes PM; transitive wheel licences and dependency-internal network behavior have
+not been audited. The catalog entry PR must repeat these download/network disclosures.
+
+
+## Daily use, updates and removal
+
+Start Hermes in your permitted terminal app; initialize each new conversation
+with a normal message, then `/gaze` to reconnect. Eyes stay an explicit step.
+After a gaze-model change, recalibrate when asked; a saved profile is not proof
+of today's accuracy.
+
+`hermes plugins check-updates` checks for updates. A GitHub SHA install is
+intentionally pinned: `hermes plugins update hermes-gaze` will not move that pin.
+For a new published release, use the same install command with the new full SHA
+and add `--force` to replace the old checkout; review the new code and prompts
+before doing so. Once installed through an accepted catalogue entry,
+`hermes plugins update hermes-gaze` follows its reviewed pin. Restart Hermes and
+start a new conversation after updates. `hermes pm install` repairs/prepares
+Hermes's environment; it is not a plugin updater or a speech-asset downloader.
+
+Disconnect and quit Hermes before removal:
+
+```bash
+hermes plugins remove hermes-gaze
+```
+
+Removal is **not forgetting all data**. It does not erase Hermes history, provider
+records, shared Hugging Face recognition-model caches, local calibration
+(`${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`), downloaded
+Gaze assets under `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze`, or the companion's
+Chrome profile/sign-ins under Hermes `plugin-data` (standalone fallback:
+`~/.cache/hermes-gaze/chrome-profile`). Plugin first-run state also lives under
+Hermes `plugin-data`. Remove only the data you intend to forget; shared caches
+may serve other software. Manage Hermes history separately. No automatic purge
+or recursive deletion is performed by this plugin.
 
 ## Overview
 
-Hold Space, speak, and release: Hermes answers or uses guarded browser actions.
-Cursor (`hover`) mode remains a permanent option and uses exact captured DOM identities; webcam mode
-uses personally calibrated local left-eye appearance and iris features in a separate owned window.
-Both freeze evidence at release and align spoken referents with the pointing history.
-The model chooses semantic scope from the question, not from cursor proximity alone.
-
-Simulated and webcam gaze retain Bayesian resolution for noisy samples, with
-spatial scoring, temporal alignment, semantic reranking and the Semantic Lens.
-No real-camera accuracy number is established.
+Cursor (`hover`) mode uses exact captured page identities. Webcam beta uses
+personally calibrated local left-eye appearance and iris features. Both freeze
+evidence at release and align speech with pointing history. The model chooses
+semantic scope from the question. Simulated and webcam gaze retain Bayesian
+resolution for noisy samples. No real-camera accuracy number is established.
 
 ## Architecture
 
@@ -179,8 +394,8 @@ Sealing retains every already-admitted callback buffer and its device status;
 callbacks after sealing cannot append or invalidate sealed speech. An unavailable
 release renderer fails capture after the five-second CDP window and still closes input.
 Hint persistence follows stop/reservation on the ordered intent worker. Capsule
-placement and visual design are unchanged. CoreML prewarm still runs one silent
-prediction before sharing the cached runner; models and fallbacks are unchanged.
+placement and visual design are unchanged. Cached CoreML prewarm still runs one
+silent prediction before sharing the runner; uncached preparation is explicit.
 
 `/gaze timing` works without recording opt-in or a connected browser. It retains
 the last eight releases in memory: browser keyup (zero), evidence start/freeze/send;
@@ -191,7 +406,9 @@ Browser and Python clocks are separate: subtract stages within their own group,
 never across groups. Missing stages have not happened (or that path was not used).
 The first UI push is a completed CDP render, not proof of a painted frame.
 No audio, transcript, page data, coordinates or browser/request identifiers enter
-the trace, and it is never persisted or sent to Chrome/model providers.
+the trace. `/gaze timing` explicitly saves its full JSON to a private
+`~/.cache/hermes-gaze/release-timing.json` file and prints its path with a short
+summary; it is never sent to Chrome/model providers.
 
 A 20 ms Python heartbeat runs only while releases are being measured, through their
 first delta or failure/completion. It retires after the final sample; disconnect and
@@ -257,8 +474,9 @@ the first capture after loading is reported separately. Browser timestamps use
 
 This improves release feedback and first-use inference, not steady-state model
 speed. Cached-model process initialization measured 459 ms before and 467 ms after,
-including the new prediction warmup. Registration runs it on a daemon; a question
-arriving before warmup finishes can still wait on the loader lock. These runs
+including the new prediction warmup. Registration runs cached warmup on a daemon.
+Those historical runs allowed a question to wait on the loader lock; current Space
+admission refuses capture until readiness, rather than waiting. These runs
 did not measure an uncached model download/ANE compile, hardware close time, or
 live Hermes/provider TTFT. Native capture is already 16 kHz; raw PCM avoids
 ffmpeg and resampling. The measured worker and loader waits were uncontended.
@@ -314,21 +532,13 @@ compressed bytes as PCM.
 
 ### Offline read-aloud setup
 
-After bringing this feature into the installed plugin checkout, run these yourself
-(the implementation agent does not modify Hermes's environment):
-
-```bash
-HERMES_DISABLE_LAZY_INSTALLS=1 hermes plugins validate /Users/Abid/Projects/hermes-gaze --install-deps
-HERMES_DISABLE_LAZY_INSTALLS=1 hermes gaze setup-speech
-```
-
-The first command installs declared dependencies, including `ptts==0.6.0`, using
-Hermes's launcher. The second downloads the pinned q8 model (~65 MB) and Russell
-embedding once, without opening an audio device. It requires in-process plugin
-isolation, as does the companion. Alternatively, run `scripts/setup_speech.py`
-with the Hermes environment's Python; this standalone setup does not import Hermes.
-Assets live in `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon`; setup and Hermes
-must use the same OS user/cache root. Restart Hermes after installing.
+Run `hermes gaze setup-speech` from your permitted terminal app after installing
+and enabling the plugin through Hermes PM. It downloads the pinned q8 model
+(approximately 65 MB) and Russell embedding without opening an audio device.
+This shell command needs in-process plugin isolation, as does the companion.
+Alternatively, run the installed plugin's `scripts/setup_speech.py` with the
+Hermes environment's Python; that script does not import Hermes.
+Setup and Hermes must use the same OS user/cache root. Restart Hermes afterward.
 
 The plugin setting `tts_voice` defaults to `Russell`. To change it, first run
 `HERMES_DISABLE_LAZY_INSTALLS=1 hermes gaze setup-speech --voice NAME`, then set
@@ -386,21 +596,18 @@ retained in git history, not the installable tree. Current security/evidence
 regressions live in `tests/` and `tests/ui_review/`.
 
 
-## Quickstart
+## Development commands
 
-```bash
-# inside Hermes (slash command)
-/gaze demo                 # launch the companion Chrome on the benchmark dashboard + inject the HUD
-/gaze mode simulated       # noisy-gaze mode ('/gaze mode hover' for the exact Magic Pointer)
-/gaze mode webcam          # start the separate camera window (explicit user command only)
-/gaze calibrate            # local nine-point calibration; then move the pointer once per page
-/gaze tracker              # camera/sample/calibration status; '/gaze tracker stop' returns to cursor
-/gaze resolve what does this do
-/gaze benchmark            # reproducible accuracy table across noise levels
+The first-run route is above; simulated gaze and benchmarks are development
+tools, not steps a newcomer needs for a first answer.
+
+```text
+/gaze setup                Prepare pinned local recognition and show readiness
+/gaze demo                 Open the local dashboard in the companion
+/gaze mode simulated       Explore noisy-gaze simulation
+/gaze tracker              Inspect eye-tracking state
+/gaze benchmark            Run the simulated accuracy benchmark
 ```
-
-Webcam setup, privacy, coordinate-mapping limits and the real-camera checklist:
-[Webcam gaze](docs/WEBCAM_GAZE.md). The nine-point appearance model requires recalibration after moving or changing glasses. Its Chrome/fake-camera proof is deferred; reserved offline research is not live accuracy.
 
 ```bash
 # from the shell
@@ -409,9 +616,17 @@ hermes gaze benchmark
 python3 -m unittest discover -s tests -t .  # full suite; no Chrome needed
 ```
 
+Installation verification uses Hermes's real validator and package manager with
+temporary `HOME` and `HERMES_HOME`, a local Git commit pin, explicit dependency
+consent, and a fresh-process enabled-state check. This proves the local manager
+path, not a yet-unpublished GitHub release pin or catalogue acceptance.
+Private headless Chrome checks use fake devices and scripted answers; they do
+not prove macOS permission dialogs, physical audio, real-camera accuracy or a
+first live answer from a provider. Those remain user-operated release checks.
+
 ## Documentation
 
 - **[AGENTS.md](AGENTS.md)**: contributor guide for coding agents — module map, architecture invariants, test & lint commands, known limits.
-- **[docs/PLAN.md](docs/PLAN.md)**: original technical specification, math, and 6-day implementation roadmap (pre-refactor — see the header note inside).
-- **[docs/PRIOR_ART_AND_PITCH.md](docs/PRIOR_ART_AND_PITCH.md)**: competitive analysis of the Hermes catalog, open PRs, GitHub repos, academic papers (Bolt 1980, EyePoint 2007), and marketing strategy.
-- **[docs/DEMO_AND_SUBMISSION_PLAYBOOK.md](docs/DEMO_AND_SUBMISSION_PLAYBOOK.md)**: 85-second X video script, X post copy, and catalog PR submission template.
+- **[docs/PLAN.md](docs/PLAN.md)**: historical technical specification and roadmap; not a current release promise.
+- **[docs/PRIOR_ART_AND_PITCH.md](docs/PRIOR_ART_AND_PITCH.md)**: historical research and pitch; catalogue and accuracy claims are not release evidence.
+- **[docs/DEMO_AND_SUBMISSION_PLAYBOOK.md](docs/DEMO_AND_SUBMISSION_PLAYBOOK.md)**: historical demo/submission draft; not proof of catalogue availability.

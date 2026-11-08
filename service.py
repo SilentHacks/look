@@ -25,7 +25,7 @@ from .resolver.bayesian_fusion import CandidateElement, classify_utterance_inten
 from .resolver.cursor_context import EVIDENCE_RULES, build_context, cursor_result
 from .resolver.data_extractor import extract_structured_data, render_svg_scatter
 from .resolver.temporal_aligner import has_deictic_pronoun
-from .naming import safe_link
+from .naming import plain_error, safe_link
 from .voice import MAX_AUDIO_BYTES
 from .release_timing import TIMINGS
 
@@ -161,18 +161,22 @@ def resolve_now(
     if record_voice:
         from .voice import record_microphone, transcribe_audio_buffer
 
+        stage = "Microphone capture"
         try:
             audio_epoch = time.time()  # whisper word times are audio-relative; shift to wall-clock
             audio_pcm = record_microphone(duration_s=duration_s)
+            stage = "Page capture"
             if mode == "hover":
                 pushed = {"cursor_context": session.fetch_cursor_context()}
             else:
                 _, pushed = session.fetch_live_state_and_candidates()
+            stage = "Speech recognition"
             transcribed_text, word_ts = transcribe_audio_buffer(
                 audio_pcm, model_name=_whisper_model_name(), audio_epoch=audio_epoch
             )
         except Exception as exc:
-            return {"ok": False, "error": f"voice capture/transcription failed: {exc}"}
+            error = f"{stage} failed: {exc}"
+            return {"ok": False, "error": error, "plain_error": plain_error("failed", error)}
         if transcribed_text:
             raw_utterance = transcribed_text
             word_timestamps = word_ts
@@ -527,15 +531,20 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             owner = f"{target}:{document}"
             if itype == "record_start":
+                if not _voice.recognition_ready(_whisper_model_name()):
+                    message = _voice.recognition_status(_whisper_model_name())
+                    reply({"ok": False, "error": message, "plain_error": message})
+                    return
                 if _VOICE_TURNS is not None:
                     ready = _VOICE_TURNS.prepare_recording()
                     if not ready["ok"]:
-                        reply(ready)
+                        reply({**ready, "plain_error": plain_error("failed", ready.get("error", ""))})
                         return
                 def cancelled(error):
                     if _VOICE_TURNS is not None:
                         _VOICE_TURNS.capture_status("idle")
-                    reply({"type": "record_cancel", "ok": False, "error": error})
+                    reply({"type": "record_cancel", "ok": False, "error": error,
+                           **({"plain_error": plain_error("failed", error)} if "microphone" in error.lower() else {})})
                 result = {"ok": False}
                 try:
                     result = session.microphone.start(
@@ -547,7 +556,8 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 finally:
                     if _VOICE_TURNS is not None:
                         _VOICE_TURNS.capture_status("recording" if result.get("ok") else "failed")
-                reply(result)
+                reply({**result, **({"plain_error": plain_error("failed", result.get("error", ""))}
+                                    if not result.get("ok") else {})})
             elif itype == "record_cancel":
                 session.microphone.cancel(owner)
                 if _VOICE_TURNS is not None:
@@ -595,9 +605,10 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 try:
                     audio, epoch = session.microphone.stop(owner, timing=timing, before_stop=reserve)
                 except Exception as exc:
+                    error = f"Microphone capture failed: {exc}"
                     if reservation and reservation.get("ok"):
-                        turns.transcribed(reservation["request_id"], "", error=str(exc))
-                    raise
+                        turns.transcribed(reservation["request_id"], "", error=error)
+                    raise RuntimeError(error) from exc
                 finally:
                     if turns is not None and sealed:
                         turns.capture_status("idle")
@@ -630,9 +641,10 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                             timing.finish()
                         reply({**result, "text": text})
                     except Exception as exc:
-                        result = (turns.transcribed(reservation["request_id"], "", error=str(exc))
-                                  if reservation else {"ok": False, "error": str(exc)})
-                        reply(result)
+                        error = f"Speech recognition failed: {exc}"
+                        result = (turns.transcribed(reservation["request_id"], "", error=error)
+                                  if reservation else {"ok": False, "error": error})
+                        reply({**result, "plain_error": plain_error("failed", error)})
                         timing.mark("failed")
                         timing.finish()
                 if reservation:
@@ -803,6 +815,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
             if timing is not None:
                 timing.mark("failed")
                 timing.finish()
-        reply({"ok": False, "error": str(exc),
+        error = f"Microphone capture failed: {exc}" if itype == "record_start" else str(exc)
+        reply({"ok": False, "error": error, "plain_error": plain_error("failed", error),
                **({"resolution_id": intent.get("resolution_id"), "scope_id": intent.get("scope_id")}
                   if itype == "explain" else {})})

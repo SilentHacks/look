@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from .asset_cache import ASSETS, AssetIntegrityError, prepare
+
 MODEL_REPO = "gradium/phonon-31m-en"
 MODEL_REVISION = "8c64b55ec301728e2d1695bfea87a08a267d0c2d"
 VOICE_REPO = "gradium/phonon-voices"
@@ -23,22 +25,22 @@ def asset_root():
 
 def setup(voice="Russell"):
     """Explicit setup only: fetch immutable model and selected English voice assets."""
-    from huggingface_hub import hf_hub_download, snapshot_download
-
     root = asset_root()
-    model = root / MODEL_REVISION
-    snapshot_download(MODEL_REPO, revision=MODEL_REVISION,
-                      allow_patterns=[*MODEL_FILES, "README.md", "LICENSE*"], local_dir=model)
+    model = prepare(MODEL_REPO, download=True, local_dir=root / MODEL_REVISION)
     catalog = root / VOICE_REVISION
-    manifest = hf_hub_download(VOICE_REPO, "voices.jsonl", revision=VOICE_REVISION, local_dir=catalog)
-    records = [json.loads(line) for line in Path(manifest).read_text().splitlines() if line.strip()]
+    prepare(VOICE_REPO, download=True, names=["voices.jsonl", "README.md"], local_dir=catalog)
+    selected = _voice(catalog, voice)
+    prepare(VOICE_REPO, download=True, names=[selected["filename"]], local_dir=catalog)
+    print(f"Phonon ready offline: {model}; voice {selected['name']}")
+
+
+def _voice(catalog, voice):
+    records = [json.loads(line) for line in (catalog / "voices.jsonl").read_text().splitlines() if line.strip()]
     selected = next((r for r in records if voice.casefold() in
                      (r["name"].casefold(), r["voice_id"].casefold()) and r["language"] == "en"), None)
-    if selected is None:
-        raise ValueError(f"Unknown English catalogue voice: {voice}")
-    hf_hub_download(VOICE_REPO, selected["filename"], revision=VOICE_REVISION, local_dir=catalog)
-    hf_hub_download(VOICE_REPO, "README.md", revision=VOICE_REVISION, local_dir=catalog)
-    print(f"Phonon ready offline: {model}; voice {selected['name']}")
+    if selected is None or selected["filename"] not in ASSETS[VOICE_REPO]["files"]:
+        raise ValueError(f"Unknown pinned English catalogue voice: {voice}")
+    return selected
 
 
 class SpeechPlayback:
@@ -50,16 +52,10 @@ class SpeechPlayback:
     def load(self, voice):
         root = asset_root()
         model_dir, catalog_dir = root / MODEL_REVISION, root / VOICE_REVISION
-        for name in MODEL_FILES:
-            if not (model_dir / name).is_file():
-                raise FileNotFoundError("Phonon assets missing; run scripts/setup_speech.py")
-        # Only register downloaded embeddings. No hf:// URI can reach the runtime.
-        records = [json.loads(line) for line in (catalog_dir / "voices.jsonl").read_text().splitlines()
-                   if line.strip()]
-        selected = next((r for r in records if voice.casefold() in
-                         (r["name"].casefold(), r["voice_id"].casefold()) and r["language"] == "en"), None)
-        if selected is None or not (catalog_dir / selected["filename"]).is_file():
-            raise FileNotFoundError(f"Phonon voice {voice} missing; run scripts/setup_speech.py --voice {voice}")
+        prepare(MODEL_REPO, names=MODEL_FILES, local_dir=model_dir)
+        prepare(VOICE_REPO, names=["voices.jsonl"], local_dir=catalog_dir)
+        selected = _voice(catalog_dir, voice)
+        prepare(VOICE_REPO, names=[selected["filename"]], local_dir=catalog_dir)
         if self.model is None:
             import ptts
             model = ptts.TTS(str(model_dir), lang="en", quant="q8", voice_catalog=str(catalog_dir))
@@ -87,6 +83,9 @@ class SpeechPlayback:
                     return
                 output.start()  # Device-start errors still precede the first audio write.
                 stack.callback(output.abort)
+            except AssetIntegrityError as exc:
+                report("unavailable", "", str(exc))
+                return
             except Exception as exc:
                 stack.close()  # Stop native producers before selecting the fallback.
                 if not cancel.is_set():

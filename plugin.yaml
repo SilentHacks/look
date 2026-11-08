@@ -67,7 +67,7 @@ config_schema:
   whisper_model:
     type: str
     default: "base.en"
-    description: "Local faster-whisper model name for deictic speech alignment."
+    description: "Pinned English faster-whisper model: base.en or tiny.en only. Custom names, repositories and local paths are unsupported."
   tts_voice:
     type: str
     default: "Russell"

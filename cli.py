@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import time
+import platform
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,6 +21,69 @@ from .tools import handle_gaze_resolve
 
 def _config() -> GazeConfig:
     return service._CONFIG or GazeConfig()
+
+
+def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
+    """Explicit setup: disclose ASR downloads; never connect or open a device."""
+    from . import voice
+
+    supported = platform.system() == "Darwin" and platform.machine() == "arm64"
+    chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file()
+    modules = ("websockets", "numpy", "sounddevice", "faster_whisper", "parakeet_mlx", "CoreML",
+               "ptts", "huggingface_hub")
+    missing = [name for name in modules if importlib.util.find_spec(name) is None]
+    model_name = _config().whisper_model
+    disclosure = (
+        "Speech recognition setup uses Hugging Face: FluidInference Parakeet v2 CoreML (~465 MB) first on Mac; "
+        "if unavailable, mlx-community Parakeet v2 (~2.47 GB), then SYSTRAN faster-whisper "
+        f"({model_name}, ~78.1 MB for tiny.en or ~148 MB for base.en). "
+        "Only missing pinned files download; cached files are checksum-verified. "
+        "Preparation can compile local models. No download runs at plugin registration.")
+    voice.prepare_recognition(model_name, report=report)
+    recognition = voice.recognition_status(model_name)
+    return "\n".join((
+        "Hermes Gaze first run",
+        "Mac: Apple Silicon is supported." if supported else
+        "Mac: use an Apple Silicon Mac for this beta.",
+        "Chrome: standard Google Chrome is installed." if chrome else
+        "Chrome: install Google Chrome in Applications, then run /gaze setup again.",
+        "Dependencies: Python packages are present; this does not test audio devices." if not missing else
+        "Dependencies: missing " + ", ".join(missing) + ". Quit Hermes, run hermes pm install, then "
+        "hermes plugins enable hermes-gaze in your terminal and restart Hermes.",
+        disclosure,
+        recognition,
+        "Connection: Chrome is attached." if session.cdp.is_connected else
+        "Connection: Chrome is not attached. Run /gaze connect when you are ready to open the companion.",
+        "Hermes has received a normal message in this conversation." if initialized else
+        "Hermes readiness is not confirmed. Send a normal message here, such as Reply only Ready. "
+        "Wait for its answer, then run /gaze connect. Connecting alone cannot prepare a fresh conversation.",
+        "Before connecting, set plugins.isolation to in_process and "
+        "plugins.entries.hermes-gaze.allow_gateway_injection to true in Hermes config.yaml, then restart Hermes. "
+        "This changes plugin isolation for Hermes; the guide never changes it for you.",
+        "Launch Hermes from Terminal or another terminal app allowed in macOS System Settings, "
+        "Privacy & Security, Microphone and Camera. Camera is only needed for eyes. "
+        "Restart that app after changing permissions. Do not use T3 Code's terminal for camera setup.",
+        "Your question and captured page context go to the model configured in Hermes and can stay in Hermes history. "
+        "Local camera and speech recognition do not make the whole conversation local. "
+        "Optional TypeSafe highlighting also receives your question and scope descriptions when configured; "
+        "extra page text is off by default.",
+        "Failed speech can remain in memory for retry until the plugin exits. "
+        "A recognition fallback uses a temporary audio file, normally deleted afterward; "
+        "a crash or failed deletion can leave it in the system temporary folder.",
+        "Connected conversations use guarded browsing tools. /gaze disconnect restores ordinary Hermes tools.",
+        "First cursor question: run /gaze mode hover after connecting. Open a page, or /gaze demo for practice. "
+        "Point at something. Hold Space. Wait for Listening, then ask. Let go when you are done.",
+        "Text fields and keyboard-focused page controls keep Space. Click ordinary page text first. "
+        "A tap scrolls. Right Option opens typed questions without a microphone. "
+        "Q recalls answers; Esc stops or dismisses; hold Space on an answer to follow up.",
+        "Then try eye tracking, beta: /gaze mode webcam explicitly opens the separate camera window; "
+        "/gaze calibrate opens calibration. Follow its check and practice guidance before asking with your eyes. "
+        "Use one display and English; move the pointer once in each page and after resizing or zooming. "
+        "Broad areas only, not precise controls. /gaze tracker stop returns to cursor.",
+        "Read aloud is optional: quit Hermes and run hermes gaze setup-speech in your terminal to download "
+        "the local voice without playing sound, then restart Hermes. Automatic reading starts off.",
+        "No camera, microphone or sound was started by this guide. Check readiness again with /gaze setup.",
+    ))
 
 
 def _handle_slash_command(raw_args: str) -> str:
@@ -43,7 +108,11 @@ def _handle_slash_command(raw_args: str) -> str:
     if sub == "start":
         if not session.is_chrome_reachable():
             port = urlparse(session.cdp_http_url).port or 9333
-            launch_chrome_with_cdp("about:blank", port=port)
+            try:
+                launch_chrome_with_cdp("about:blank", port=port)
+            except OSError:
+                return ("Chrome could not start. Install Google Chrome in Applications, "
+                        "then run /gaze connect again. Use /gaze setup to check readiness.")
             for _ in range(40):
                 if session.is_chrome_reachable():
                     break
@@ -56,7 +125,7 @@ def _handle_slash_command(raw_args: str) -> str:
             except OSError:
                 pass
         return ("Chrome companion ready. Hold Space; wait for Listening, then speak."
-                if ready else "Chrome companion could not attach to a supported page.")
+                if ready else "Chrome could not attach. Open an ordinary page in the companion, then run /gaze connect again.")
 
     if sub == "demo":
         cfg = _config()

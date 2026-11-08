@@ -38,6 +38,18 @@ In a connected `/gaze` session use these operation schemas. If Hermes defers the
 
 ## Voice and followups
 
+The supported beta lane is Apple Silicon Mac, standard Google Chrome, one display,
+and English. First `/gaze` opens a passive checklist; `/gaze setup` reopens it
+without hardware or a hidden message. Send one normal Hermes message and wait for
+the answer, then `/gaze connect` opens the companion. Later `/gaze` reconnects
+quietly. Launch Hermes in a terminal app with macOS microphone permission (camera
+permission only for optional eyes). Text fields and keyboard-focused page controls
+keep native Space; click ordinary page text before holding to talk. Right Option
+opens protected typed questions while recognition prepares or audio is unavailable.
+Local camera/recognition do not mean local-only questions: Hermes's model receives
+question/page evidence and Hermes history may retain it. Optional TypeSafe
+highlighting also receives question/scope descriptions; extra page text is off by default.
+
 Run `/gaze` (or `/gaze connect`) in the intended Hermes TUI/desktop session to start the Chrome companion. Hold Space, wait for “Listening”, speak, and release. Native capture opens only during talk; microphone permission belongs to Hermes, not website origins. Focus/document loss cancels capture; same-document routes revoke action authority but do not cancel recording. The native 30-second cap cancels and discards even if a site suppresses keyup. Evidence freezes at recording stop, before transcription. Each question enters the browsing inbox immediately; one Hermes conversation answers in capture order. Questions carry unique item/request labels; answer the question, not the label.
 
 Open an item to read its conversation or explicitly follow up on it. Choose “New question at pointer” to capture another target. Follow-ups wait in the same queue. Saved evidence is reattached within the shared 6000-character budget; “the last one” is the preceding captured item, not the last answer to finish. The inbox survives tab changes and navigation, but not plugin restart. New answers mark unread without changing the selected item or speaking aloud. Failures preserve partial text and pause the queue; Retry retries the failed request, Skip discards it, Resume continues waiting work.
@@ -51,7 +63,7 @@ Without a connected/authorized Hermes session, Chrome can answer read-only one-s
 
 `simulated` keeps Bayesian noisy-gaze resolution for experiments. `gaze_choose(candidate_index=...)` only selects/recalibrates a Semantic Lens candidate; it never clicks or approves. Read-only results pin immediately. The scoring label `execute_safe` still means probability >=0.76 and margin >=0.26, not browser execution; ambiguous targets open the Lens. All input uses fresh `gaze_read` and the guarded verbs, with trusted-click review for consequential actions.
 
-`webcam` shares that fusion path with personally calibrated iris/head estimates, not cursor noise. Only the user can start its separate camera window with `/gaze mode webcam` and complete `/gaze calibrate`. The model's tools cannot open a camera. Move the pointer once in each page, and after zoom/resize, to measure its viewport origin. Gaze supplies read-only regional evidence, not button authority; explicit user action tasks use the same guarded DOM verbs. `/gaze tracker` reports samples/calibration, `/gaze tracker stop` returns to cursor. Missing/stale/off-display gaze fails honestly. Human gaze accuracy has not been measured.
+`webcam` beta shares that fusion path with personally calibrated left-eye appearance and iris estimates, not cursor noise. Only the user can start its separate camera window with `/gaze mode webcam` and complete `/gaze calibrate`; follow its check and practice guidance. The model's tools cannot open a camera. Move the pointer once in each page, and after zoom/resize, to measure its viewport origin. Gaze supplies read-only regional evidence, not button authority; explicit user action tasks use the same guarded DOM verbs. `/gaze tracker` reports samples/calibration, `/gaze tracker stop` returns to cursor. Missing/stale/off-display gaze fails honestly. Human population gaze accuracy has not been measured.
 
 ## Development
 
