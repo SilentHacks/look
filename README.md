@@ -517,6 +517,18 @@ Cards keep question/answer history, bounded scrolling, Retry/Skip/Resume and
 mouse-only approval. Answers take reading turns (12 seconds by default, longer
 for long text); hovering, selecting, scrolling or reading aloud holds the card.
 A new question can yield a settled card to its answer's first words, silently.
+New and recalled cards open at the conversation's beginning. Streaming never
+follows the bottom: manual scroll, selection and focus stay put, including when
+follow-ups or retries append to an open card.
+
+First-use layout waits for the protected frame's first measurement instead of
+showing a 64px placeholder. The frame observes settled layout too: measuring only
+inside render missed later frame-width/text-metric changes and left the host
+clipping a taller answer until another delta arrived. The former bottom-follow
+flag also moved the opening out of view on every streaming update.
+`HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python tests/ui_review/probe_first_answer.py`
+reproduces delayed frame readiness and delayed font metrics in private Chrome,
+then checks long streaming, manual reading, follow-up, Retry and Q recall.
 
 Read aloud uses local **Gradium Phonon-31M English**, catalogue voice **Russell**,
 through native streaming output. Stop, Esc, another read request and disconnect

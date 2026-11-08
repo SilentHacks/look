@@ -1548,7 +1548,7 @@
     const wasAny = !!S.view;
     S.view = "answer";
     S.cur = item.id;
-    S.dir = dir;
+    S.dir = dir || (!was ? "open" : null); // Reset reading only on an explicit reopen.
     S.note = null;
     S.compose = null;
     if (!S.shown.has(item.id)) {
@@ -1618,7 +1618,7 @@
     for (const [k] of lit) if (!keep.has(k) && !(S.hold?.targets || []).some(t => t.key === k) && !String(k).startsWith("confirm-")) dropRing(k);
   }
   function layout() {
-    if (!S.view) return;
+    if (!S.view || !S.ready || !S.sizes.cardH) return;
     const W = cardWidth();
     const {prevH, cardH, nextH} = S.sizes;
     const h = Math.max(cardH, 64);

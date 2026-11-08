@@ -307,7 +307,10 @@
   }
 
   // ---------- answer card ----------
-  let shownKey = null, turns = new Map(), body = null, stick = true, lastSig = '', lastMeasure = '', view = null;
+  let shownKey = null, turns = new Map(), body = null, lastSig = '', lastMeasure = '', view = null;
+  // Layout can settle after render (frame width, first fonts). Keep the plate in sync
+  // without waiting for another answer delta; only coarse sizes cross the binding.
+  const sizeObserver = new ResizeObserver(() => { if (view) { report(); clip(); } });
 
   function peekRow(kind, p) {
     const row = h('button', `peek ${kind}`);
@@ -350,6 +353,7 @@
   }
 
   function clearView() {
+    sizeObserver.disconnect();
     root.textContent = ''; shownKey = null; turns = new Map(); body = null; lastSig = ''; lastMeasure = ''; view = null;
   }
   function peeks(m) {
@@ -375,13 +379,10 @@
       head.append(h('div', 'title', m.item.subject));
       body = h('div', 'body');
       body.addEventListener('scroll', () => {
-        stick = body.scrollHeight - body.scrollTop - body.clientHeight < 12;
-        if (!stick) send({t: 'engaged'});
+        send({t: 'engaged'});
         clip();
       });
       body.id = 'hg-reply';
-      // Reading along follows the words. An answer that's already finished opens at its start.
-      stick = m.item.turns.some(t => t.status !== 'complete' && !t.error);
       const foot = h('div', 'foot');
       card.append(head, body, foot);
       root.append(card);
@@ -406,7 +407,6 @@
         body.append(el);
         node = {el, q, live: !swap};
         turns.set(t.id, node);
-        if (!swap) stick = true; // A new question in this card: follow it.
       }
       renderTurn(t, node);
     }
@@ -449,8 +449,9 @@
     }
     card.classList.toggle('failed', failed);
     body.style.maxHeight = `${Math.max(60, m.maxBody || 400)}px`;
-    if (stick) body.scrollTop = body.scrollHeight;
-    else if (swap && turns.size > 1) body.scrollTop = [...turns.values()].at(-1).el.offsetTop - body.offsetTop;
+    // A new/reopened card starts at the beginning. Updates, follow-ups and retries
+    // leave the reader alone, even when they have manually reached the bottom.
+    if (swap || m.dir === 'open') body.scrollTop = 0;
     clip();
   }
   function clip() {
@@ -614,6 +615,8 @@
       else if (m.view === 'lens') renderLens(m);
       else renderNote(m);
       report();
+      sizeObserver.observe(root);
+      if (body) sizeObserver.observe(body);
     },
     level(v) { voiceWant = Math.max(0, Math.min(1, Number(v) || 0)); startup = false; },
   };
