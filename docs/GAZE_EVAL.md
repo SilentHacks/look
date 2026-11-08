@@ -106,6 +106,57 @@ median3 + EMA reset on missing samples, >250 ms gaps and session boundaries. The
 never fill abstentions or read target labels for filtering. No live smoothing is
 changed.
 
+## Feature-only research with a reserved final phase
+
+The [personal-calibration research report](GAZE_TUNING_RESEARCH.md) records the
+frozen comparison, uncertainty and shipping recommendation; no live cutover.
+
+`research` reads an existing `features.json` only. It does not run Chrome, load
+images, access devices, fetch assets or install calibration profiles:
+
+```bash
+.venv/bin/python scripts/gaze.py research "$CACHE/owned-features/features.json" \
+  --out "$CACHE/owned-tuning/research" --stage select
+.venv/bin/python scripts/gaze.py research "$CACHE/owned-features/features.json" \
+  --out "$CACHE/owned-tuning/research" --stage report
+.venv/bin/python scripts/gaze.py research-safety "$CACHE/owned-features/features.json" \
+  --out "$CACHE/owned-tuning/research"
+```
+
+Selection uses fixed/moving/reading phases, excluding exact selected-calibration
+coordinates. Every `validation-end` frame is removed before the search. Fits and
+normalizers see only selected initial calibration frames. Optional 1/3/5-point
+bias refresh uses labelled `validation-start` locations, before screen rejection;
+those observations are a calibration cost, not test data. This is the only
+research exception to the standard evaluator's no-validation-refit rule.
+
+The finite hill-climb starts with eye/pose/appearance subsets, five ridge
+strengths, polynomial and RBF models. Top development candidates try Huber fitting,
+blink/openness rejection, causal EMA, limited off-screen tolerance and bias
+refresh. Choices are frozen separately for each point budget, protocol and
+eyewear stratum, plus a shared-eyewear choice. Selection optimizes equal-session,
+equal-3×3/4×4/5×5 hits; missing predictions and failed fits count as misses.
+No weights are pooled between sessions or eyewear states.
+
+`selection.json` pins feature-file and research-code hashes; selection cannot
+overwrite itself, and reporting rejects changed inputs/code. `development.json`
+is exploratory, **not** a held-out score. `final.json`, `final-summary.json` and
+`FINAL.md` contain aggregate end-validation results only, never per-frame traces,
+features or fitted weights. Each session has exact conditional mean/p95 error;
+summary p95 is explicitly the mean/range of session p95s, not a pooled quantile.
+`research-safety` evaluates fixed ablations of those same frozen choices with
+strict screen rejection, and the original baseline with 1/3/5-point bias refresh.
+It never reselects a model; aggregates go to `safety-ablations.json`.
+
+This is phase separation, not independent-session or independent-person
+validation. End probes are stationary and repeat some calibration coordinates;
+they do not establish moving-target accuracy. Eight sessions from one person
+cannot establish a population estimate or isolate eyewear from session order.
+9/16/25 subsets come from one distributed 25-point acquisition, not measured
+standalone live calibrations. Saved inference times plus new Python CPU/wall
+times exclude capture, camera scheduling, UI and full-process CPU. EMA reports
+its time constant and discrete low-frequency delay separately.
+
 ## Retained format and alignment
 
 `recording.json` version 2 contains pseudonym, eyewear, condition label and explicit
