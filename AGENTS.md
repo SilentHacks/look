@@ -359,6 +359,12 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   viewport origin, repeated after zoom/resize/chrome changes. Wrong-display, stale
   or absent gaze yields no fixation. No cursor fallback or gaze click authority.
   See `docs/WEBCAM_GAZE.md`; `tests/webcam_chrome.py` uses fake camera/microphone only.
+  `/gaze tracker` reports cumulative numeric per-reason `drops`, including missing
+  features, off-screen predictions, missing/changed page anchors, outside-page
+  mapping and absent foreground tabs. Never expose features/coordinates there.
+  Pointer advice appears only for missing/changed anchors, not every stale gaze.
+  The fake-camera probe covers an already-open tab and native focus; run headed
+  probes serially so another private Chrome process cannot steal that focus.
 - Binding replies are callback-style — `handle_intent(intent, reply)` returns
   `None`; assertions about results inspect the `reply` payload, not a return value.
 - `transcribe` intents reject base64 audio over ~16 MB before decoding — keep the

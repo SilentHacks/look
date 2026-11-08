@@ -105,6 +105,38 @@ devices prove plumbing only. The production choice remains the existing nine-poi
 7. `/gaze mode hover`: confirm the camera indicator goes off and exact cursor
    questions still work. `/gaze tracker stop` and `/gaze disconnect` also stop it.
 
+### When gaze is not fresh
+
+`/gaze tracker` includes cumulative numeric `drops` counters for this tracker
+instance, retained across stop/restart. Compare two readings while the companion
+page has focus; old counts from calibration or another application are normal.
+No coordinates, features, images or calibration values are included.
+
+- `no_features`: no usable face/eyes, including blinks.
+- `uncalibrated`, `calibrating`: waiting for a profile or collecting calibration;
+  these frames intentionally do not become predictions.
+- `offscreen`: the fitted estimator predicted outside the calibrated screen.
+  Estimates are still rejected, not clamped. `prediction_rejected` is the
+  corresponding generic rejection for a replacement estimator.
+- `no_foreground_tab`: no supported companion page has focus, including while
+  the separate calibration window or Hermes terminal is in front.
+- `no_page_anchor`, `viewport_changed`: move the pointer once inside the page.
+  These are the only cases that receive that on-page advice.
+- `unsupported_zoom`: reset pinch zoom. `wrong_display`: return to the calibrated
+  display or recalibrate there.
+- `outside_page`: a valid screen prediction landed outside the page viewport
+  (for example, over browser chrome). Moving the pointer is not a gaze fallback.
+- `page_mode_mismatch`, `mode_changed`: page/session mode differs from webcam.
+- `stale_sample`: expired, replayed or invalid observation timestamp.
+- `invalid_geometry`, `transport_error`, `transport_timeout`, `rejected_by_page`:
+  invalid viewport information, interrupted transport, a timed-out delivery, or
+  page-side refusal. Navigation/focus changes can interrupt a captured delivery.
+
+With a valid page anchor but no fresh delivery, the page says only
+“No fresh gaze. Check /gaze tracker.” A size change or pinch zoom gets its own
+instruction. Missing gaze still blocks talking; there is no cursor/center fallback.
+
+
 ## Reproducible fake-device proof
 
 ```bash
@@ -116,9 +148,12 @@ The probe uses `--use-fake-device-for-media-stream` and
 `--use-file-for-fake-video-capture`, a hash-pinned NASA public-domain portrait
 translated to nine positions, a stub microphone, and scripted answers. It uses
 only private Chrome profiles on allocated ports, never port 9222 or a live
-Hermes. It checks actual nine-point calibration/persistence, interruption and
-restart with the saved profile, hidden-tab samples, wall-clock ingestion,
-held-Space fusion/inbox delivery, foreground ownership and return to cursor.
+Hermes. It checks actual nine-point calibration/persistence, a direct return to an
+already-open page with native focus (no focus emulation), held-Space fusion/inbox
+delivery, specific missing/changed-anchor guidance, interruption and restart with
+the saved profile, hidden-tab samples, wall-clock ingestion, foreground ownership
+and return to cursor. Run it separately from other headed Chrome probes: those
+processes can steal native OS focus.
 Screenshots and a small results JSON go to the output directory; calibration and
 fake video are temporary and removed.
 

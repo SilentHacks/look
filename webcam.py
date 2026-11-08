@@ -78,6 +78,12 @@ class WebcamHost:
         self.error = ""
         self.state = "stopped"
         self.samples = self.predictions = self.delivered = self.hidden_samples = 0
+        self.drops = dict.fromkeys((
+            "stale_sample", "no_features", "uncalibrated", "calibrating", "offscreen", "prediction_rejected",
+            "no_foreground_tab", "no_page_anchor", "viewport_changed", "unsupported_zoom",
+            "wrong_display", "outside_page", "invalid_geometry", "page_mode_mismatch",
+            "mode_changed", "rejected_by_page", "transport_error", "transport_timeout",
+        ), 0)
         self.last_sample = 0.
         self._ready = threading.Event()
         self._stop = threading.Event()
@@ -95,6 +101,7 @@ class WebcamHost:
     def status(self) -> dict:
         return {"state": self.state, "calibrated": self.profile is not None, "samples": self.samples,
                 "predictions": self.predictions, "delivered": self.delivered, "hidden_samples": self.hidden_samples,
+                "drops": dict(self.drops),
                 "sample_age_seconds": round(time.time() - self.last_sample, 2) if self.last_sample else None,
                 "error": self.error, "model": self.estimator.model_id}
 
@@ -248,21 +255,35 @@ class WebcamHost:
         elif kind == "sample":
             t, f = data.get("t"), data.get("features")
             if not isinstance(t, (int, float)) or not math.isfinite(t) or not (self.last_sample < t <= time.time() + .2) or time.time() - t > 1:
+                self.drops["stale_sample"] += 1
                 return
             self.samples += 1; self.last_sample = t; self.hidden_samples += data.get("hidden") is True
             if not isinstance(f, list) or len(f) != self.estimator.feature_count or not all(isinstance(v, (int, float)) and math.isfinite(v) and abs(v) < 4 for v in f):
+                self.drops["no_features"] += 1
                 return  # Missing face/blink: never synthesize a center fixation.
             if self._calibration is not None:
+                self.drops["calibrating"] += 1
                 if data.get("calibration") == self._point_index and len(self._point_samples) < 30:
                     self._point_samples.append(f)
                 return
+            if self.profile is None:
+                self.drops["uncalibrated"] += 1
+                return
             point = self.estimator.predict(f, t)
-            if point is not None and self.profile is not None:
-                self.predictions += 1
-                try:
-                    self.delivered += self.on_point(point, self.profile["screen"]) is True
-                except (ConnectionError, TimeoutError):
-                    pass  # No foreground document is normal while using another application.
+            if point is None:
+                self.drops["offscreen" if isinstance(self.estimator, LandmarkEstimator) else "prediction_rejected"] += 1
+                return
+            self.predictions += 1
+            try:
+                result = self.on_point(point, self.profile["screen"])
+            except TimeoutError:
+                result = "transport_timeout"
+            except ConnectionError:
+                result = "transport_error"
+            if result is True:
+                self.delivered += 1
+            else:
+                self.drops[result if isinstance(result, str) and result in self.drops else "rejected_by_page"] += 1
 
     def _run(self) -> None:
         from websockets.sync.client import connect

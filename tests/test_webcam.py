@@ -33,9 +33,11 @@ class WebcamContracts(unittest.TestCase):
         self.assertEqual((sample["x_doc"], sample["y_doc"]), (417, 1100))
         self.assertEqual(sample["t"], p.t)
         self.assertAlmostEqual(sample["t_start"], p.t - .1)
-        for changed in ({"origin_x": 1000}, {"dpr": 0}, {"screen_left": 1440}, {"origin_y": math.nan}):
-            self.assertIsNone(screen_to_viewport(p, {**geometry, **changed}, SCREEN))
-        self.assertIsNone(screen_to_viewport(p, {}, SCREEN))
+        for changed, reason in (({"origin_x": 1000}, "outside_page"), ({"dpr": 0}, "invalid_geometry"),
+                                ({"screen_left": 1440}, "wrong_display"), ({"origin_y": math.nan}, "invalid_geometry")):
+            self.assertEqual(screen_to_viewport(p, {**geometry, **changed}, SCREEN), reason)
+        self.assertEqual(screen_to_viewport(p, {}, SCREEN), "invalid_geometry")
+        self.assertEqual(screen_to_viewport(p, {"drop_reason": "no_page_anchor"}, SCREEN), "no_page_anchor")
 
     def test_personal_calibration_predicts_unseen_position_and_loads_exactly(self):
         model = LandmarkEstimator()
@@ -182,6 +184,43 @@ class WebcamContracts(unittest.TestCase):
                 self.assertAlmostEqual(received[0].y, 630, delta=12)
                 self.assertEqual(json.loads(host.profile_path.read_text()), profile)
                 host.stop()
+
+    def test_drop_status_distinguishes_prediction_and_delivery_failures(self):
+        with tempfile.TemporaryDirectory() as directory:
+            results = iter(("no_page_anchor", "outside_page", "no_foreground_tab", False,
+                            ConnectionError(), TimeoutError(), True))
+            def deliver(*_):
+                result = next(results)
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            host = WebcamHost(deliver, profile_path=Path(directory) / "calibration.json")
+            profile = LandmarkEstimator().calibrate(observations(), SCREEN)
+            host.estimator.load(profile)
+            host._context, host._nonce = 8, "owned"
+            now = time.time()
+            def send(features, t=None):
+                nonlocal now
+                now += .001
+                host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+                    "executionContextId": 8, "payload": json.dumps({"type": "sample", "nonce": "owned",
+                    "t": now if t is None else t, "features": features})}})
+            features = [.3, .7, .06, .21, 1., -.4, .3, .1]
+            send(features)  # No profile is active yet.
+            host.profile = profile
+            send(None)
+            send([3.] * 8)  # Valid observations, but an off-screen estimate.
+            send(features, t=1.)
+            for _ in range(7):
+                send(features)
+            drops = host.status()["drops"]
+            self.assertEqual(host.delivered, 1)
+            for reason in ("uncalibrated", "no_features", "offscreen", "stale_sample", "no_page_anchor",
+                           "outside_page", "no_foreground_tab", "rejected_by_page", "transport_error", "transport_timeout"):
+                self.assertEqual(drops[reason], 1, reason)
+            self.assertTrue(all(type(count) is int for count in drops.values()))
+            drops["offscreen"] = 0
+            self.assertEqual(host.status()["drops"]["offscreen"], 1)
 
 
 if __name__ == "__main__":

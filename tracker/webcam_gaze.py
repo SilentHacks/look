@@ -95,30 +95,32 @@ class LandmarkEstimator:
         return ScreenPoint(s["left"] + xy[0] * s["width"], s["top"] + xy[1] * s["height"], t)
 
 
-def screen_to_viewport(point: ScreenPoint, geometry: dict, screen: dict, sigma_px: float = 120.) -> dict | None:
+def screen_to_viewport(point: ScreenPoint, geometry: dict, screen: dict, sigma_px: float = 120.) -> dict | str:
     """Map desktop logical pixels to page CSS pixels, including browser zoom.
 
     The viewport origin is measured from a trusted mouse event, not guessed from
     outerHeight-innerHeight (which fails with side panels, DevTools and zoom).
     A new tab/changed chrome needs one pointer movement to measure that origin.
     """
+    if geometry.get("drop_reason"):
+        return geometry["drop_reason"]
     try:
         values = [point.x, point.y, point.t, sigma_px] + [float(geometry[k]) for k in
                   ("origin_x", "origin_y", "dpr", "width", "height", "scroll_x", "scroll_y")]
         if not all(math.isfinite(v) for v in values) or sigma_px <= 0:
-            return None
+            return "invalid_geometry"
         if any(abs(float(geometry[k]) - float(screen[k])) > 1 for k in ("screen_width", "screen_height")):
-            return None
+            return "wrong_display"
         if geometry["screen_left"] != screen["screen_left"] or geometry["screen_top"] != screen["screen_top"]:
-            return None
+            return "wrong_display"
         zoom = geometry["dpr"] / screen["dpr"]
         if zoom <= 0:
-            return None
+            return "invalid_geometry"
         x, y = (point.x - geometry["origin_x"]) / zoom, (point.y - geometry["origin_y"]) / zoom
         if not (0 <= x < geometry["width"] and 0 <= y < geometry["height"]):
-            return None
+            return "outside_page"
         return {"x_vp": x, "y_vp": y, "x_doc": x + geometry["scroll_x"], "y_doc": y + geometry["scroll_y"],
                 "t": point.t, "t_start": point.t - .1, "duration_ms": 100., "sigma": sigma_px,
                 "source": "webcam"}
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        return None
+        return "invalid_geometry"

@@ -71,6 +71,11 @@ def run(out):
         rig.session.webcam = host
         camera = None
         try:
+            # Keep the companion page open through the real mode-switch/calibration sequence.
+            tab = rig.new_tab()
+            rig.cmd("Emulation.clearDeviceMetricsOverride", {}, tab)
+            rig.cmd("Emulation.setFocusEmulationEnabled", {"enabled": False}, tab)
+            rig.page("document.body.style.cssText='margin:0;height:200vh';document.body.innerHTML='<article id=planet style=\"padding:32px;height:85vh;background:#eef\"><h1>Jupiter storms</h1><p>The Great Red Spot is a persistent storm on Jupiter.</p></article>'")
             rig.session.configure(mode="webcam")
             status = host.start()
             assert status["state"] == "running", status
@@ -97,40 +102,26 @@ def run(out):
             assert camera.main("typeof __HERMES_WEBCAM__") == "undefined"
             assert camera.main("typeof __hermesGazeIntent") == "undefined"
             report["isolated_camera_context"] = True
-            # Stop midway through a second calibration, then reuse the saved profile.
-            until(lambda: camera.main("!document.body.classList.contains('calibrating')"))
-            saved_profile = host.profile_path.read_bytes()
-            bounds = camera.main("(()=>{const r=document.querySelector('button').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
-            for kind in ("mousePressed", "mouseReleased"):
-                camera.send("Input.dispatchMouseEvent", {"type": kind, "button": "left", "clickCount": 1, **bounds})
-            until(lambda: camera_state()["index"] == 0)
-            for kind in ("keyDown", "keyUp"):
-                camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
-            until(lambda: bool(host._point_samples))
-            rig.session.configure(mode="hover")
-            camera.ws.close()
-            rig.session.configure(mode="webcam")
-            before_predictions = host.predictions
-            assert host.start()["state"] == "running"
-            camera = tracker_tab(host); ctx = host._context
-            until(lambda: host.predictions > before_predictions)
-            assert host.profile_path.read_bytes() == saved_profile
-            report["interrupted_calibration_restart"] = True
-            # A genuine background tab in the owned tracker process.
-            until(lambda: camera.main("!document.fullscreenElement"))
-            request = urllib.request.Request(host.http_url + "/json/new?about:blank", method="PUT")
-            urllib.request.urlopen(request, timeout=3).read()
-            until(lambda: camera_state()["hidden"])
-            before = host.samples
-            time.sleep(2)
-            report["hidden_flow"] = {"samples_in_two_seconds": host.samples - before, "hidden_total": host.hidden_samples}
-            assert report["hidden_flow"]["samples_in_two_seconds"] >= 10
-            assert host.hidden_samples >= 10, (host.status(), camera_state())
 
-            tab = rig.new_tab()
-            rig.cmd("Emulation.clearDeviceMetricsOverride", {}, tab)
-            rig.page("document.body.style.cssText='margin:0;height:200vh';document.body.innerHTML='<article id=planet style=\"padding:32px;height:85vh;background:#eef\"><h1>Jupiter storms</h1><p>The Great Red Spot is a persistent storm on Jupiter.</p></article>'")
+            # Return directly from the first completed calibration: no restart, new tab,
+            # focus emulation or synthetic viewport geometry to hide a handoff defect.
+            until(lambda: host.drops["no_foreground_tab"] > 0)
+            rig.cmd("Page.bringToFront", {}, tab)
+            until(lambda: rig.page("document.hasFocus() && !document.hidden"))
+            assert rig.iso("window.__HERMES_GAZE_OVERLAY__.state.mode") == "webcam"
+            # Returning focus can itself produce a trusted mousemove; do not assume
+            # the anchor is still missing just because the probe hasn't moved yet.
+            report["native_focus_handoff"] = {"existing_tab": True, "focus_emulation": False}
             rig.move(400, 300)
+            # A measured page with no deliveries must not give irrelevant pointer advice.
+            with patch.object(host, "on_point", return_value="outside_page"):
+                time.sleep(1.1)
+                rig.space_down()
+                until(lambda: "No fresh gaze. Check /gaze tracker." in rig.text("pill"))
+                rig.space_up()
+                assert "pointer" not in rig.text("pill").lower()
+                assert rig.session.microphone._stream is None
+                report["anchored_no_gaze_message"] = True
             # Calibrated camera position 4 corresponds to display centre, inside this viewport.
             until(lambda: 16.4 < camera_state()["videoTime"] % 36 < 18., 45)
             until(lambda: rig.iso("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer.some(s=>s.source==='webcam')"))
@@ -168,10 +159,66 @@ def run(out):
             assert "Great Red Spot" in rig.turns.runs[0]["text"]
             report["held_space"] = {"fusion_calls": len(seen), "camera_sources_only": True,
                                     "scripted_answer": "Great Red Spot", "context_has_jupiter": True}
+            # Explicitly reset just the page's mode to exercise an unmeasured page,
+            # independently of OS-generated pointer events during native focus.
+            rig.iso("window.__HERMES_GAZE_OVERLAY__.Configure({mode:'hover'});"
+                    "window.__HERMES_GAZE_OVERLAY__.Configure({mode:'webcam'})")
+            until(lambda: host.drops["no_page_anchor"] > 0)
+            rig.space_down()
+            until(lambda: "Move the pointer once" in rig.text("pill"))
+            rig.space_up()
+            assert rig.session.microphone._stream is None
+            report["missing_anchor_blocks_capture"] = True
+            rig.shot("webcam-needs-page-anchor")
+            rig.move(400, 300)
+            # Changed geometry has a different diagnostic and recovers by remeasuring.
+            width, height, dpr = rig.page("[innerWidth,innerHeight,devicePixelRatio]")
+            rig.cmd("Emulation.setDeviceMetricsOverride",
+                    {"width": width - 80, "height": height, "deviceScaleFactor": dpr, "mobile": False})
+            until(lambda: host.drops["viewport_changed"] > 0)
+            time.sleep(.9)
+            rig.space_down()
+            until(lambda: "Page size changed" in rig.text("pill"))
+            rig.space_up()
+            rig.cmd("Emulation.clearDeviceMetricsOverride")
+            rig.move(400, 300)
+            report["changed_viewport_guidance"] = True
+            camera.send("Page.bringToFront", {})
+            # Stop midway through a second calibration, then reuse the saved profile.
+            until(lambda: camera.main("!document.body.classList.contains('calibrating')"))
+            saved_profile = host.profile_path.read_bytes()
+            bounds = camera.main("(()=>{const r=document.querySelector('button').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
+            for kind in ("mousePressed", "mouseReleased"):
+                camera.send("Input.dispatchMouseEvent", {"type": kind, "button": "left", "clickCount": 1, **bounds})
+            until(lambda: camera_state()["index"] == 0)
+            for kind in ("keyDown", "keyUp"):
+                camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
+            until(lambda: bool(host._point_samples))
+            rig.session.configure(mode="hover")
+            camera.ws.close()
+            rig.session.configure(mode="webcam")
+            before_predictions = host.predictions
+            assert host.start()["state"] == "running"
+            camera = tracker_tab(host); ctx = host._context
+            until(lambda: host.predictions > before_predictions)
+            assert host.profile_path.read_bytes() == saved_profile
+            report["interrupted_calibration_restart"] = True
+            # A genuine background tab in the owned tracker process.
+            until(lambda: camera.main("!document.fullscreenElement"))
+            request = urllib.request.Request(host.http_url + "/json/new?about:blank", method="PUT")
+            urllib.request.urlopen(request, timeout=3).read()
+            until(lambda: camera_state()["hidden"])
+            before = host.samples
+            time.sleep(2)
+            report["hidden_flow"] = {"samples_in_two_seconds": host.samples - before, "hidden_total": host.hidden_samples}
+            assert report["hidden_flow"]["samples_in_two_seconds"] >= 10
+            assert host.hidden_samples >= 10, (host.status(), camera_state())
             # Focus a different tab. Camera samples must reach that document, not A's history.
             other = rig.new_tab()
             rig.cmd("Emulation.clearDeviceMetricsOverride", {}, other)
             rig.page("document.body.innerHTML='<h1>Moon landing</h1>';document.body.style.height='100vh'")
+            # Restore native focus after the rig helper's default emulation.
+            rig.cmd("Emulation.setFocusEmulationEnabled", {"enabled": False}, other)
             rig.move(300, 250)
             until(lambda: rig.iso("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer.some(s=>s.source==='webcam')"), 45)
             saved = len(tab.eval_js("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer"))
@@ -187,6 +234,14 @@ def run(out):
             assert cursor["ok"] and cursor["mode"] == "hover" and "Moon" in cursor["context"], cursor
             report["cursor_after_switch"] = True
             report["tracker_final"] = host.status()
+        except BaseException:
+            print("Failed webcam probe:", json.dumps(host.status()), flush=True)
+            if rig.tab:
+                print("Companion state:", rig.iso("({focused:document.hasFocus(), hidden:document.hidden,"
+                      "mode:window.__HERMES_GAZE_OVERLAY__.state.mode,"
+                      "geometry:window.__HERMES_GAZE_OVERLAY__.webcamViewport(devicePixelRatio).drop_reason || 'measured'})"),
+                      flush=True)
+            raise
         finally:
             if camera:
                 camera.ws.close()

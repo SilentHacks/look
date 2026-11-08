@@ -750,15 +750,21 @@ class GazeSession:
     def webcam_status(self) -> dict:
         return self.webcam.status() if self.webcam is not None else {"state": "stopped", "calibrated": False}
 
-    def _accept_webcam_point(self, point, screen: dict) -> bool:
+    def _accept_webcam_point(self, point, screen: dict) -> bool | str:
+        from .companion import NoForegroundTab
         from ..tracker.webcam_gaze import screen_to_viewport
         if self.tracker.mode != "webcam":
-            return False
-        geometry = self._cdp.capture(
-            f"window.__HERMES_GAZE_OVERLAY__?.webcamViewport({float(screen['dpr'])})")
+            return "mode_changed"
+        try:
+            geometry = self._cdp.capture(
+                f"window.__HERMES_GAZE_OVERLAY__?.webcamViewport({float(screen['dpr'])})")
+        except NoForegroundTab:
+            return "no_foreground_tab"
         sample = screen_to_viewport(point, geometry, screen, self.tracker.sigma_px)
-        if sample is None or self.tracker.mode != "webcam":
-            return False
+        if isinstance(sample, str):
+            return sample
+        if self.tracker.mode != "webcam":
+            return "mode_changed"
         delivered = self._cdp.eval_js_once(
             f"window.__HERMES_GAZE_OVERLAY__?.acceptWebcamSample({json.dumps(sample)})",
             target=geometry.get("browser_target"), document=geometry.get("browser_document"),
@@ -766,7 +772,7 @@ class GazeSession:
         if delivered is True:
             self.ingest([sample])
             return True
-        return False
+        return "rejected_by_page"
 
     def inject_overlay(self, mode: Optional[str] = None, sigma_px: Optional[float] = None) -> bool:
         """Thin back-compat wrapper: configure() with stored defaults."""

@@ -1855,7 +1855,7 @@
   function holdStart() {
     S.keyArmed = false;
     if (state.mode === "webcam" && !freshWebcam()) {
-      coachLine("No fresh gaze. Check /gaze tracker; move the pointer once in this page.", 4000);
+      coachLine(webcamBlockMessage(), 4000);
       return;
     }
     clearTimeout(S.retreatTimer); S.retreatAt = 0;
@@ -2354,10 +2354,20 @@
   }
   let webcamAnchor = null, webcamAskedAt = null, lastWebcamAt = 0;
   function freshWebcam() { return performance.now() - lastWebcamAt < 800 && lastWebcamAt > 0; }
+  function webcamBlockMessage() {
+    const reason = webcamViewport(devicePixelRatio).drop_reason;
+    if (reason === "no_page_anchor") return "Move the pointer once in this page to position webcam gaze.";
+    if (reason === "viewport_changed") return "Page size changed. Move the pointer once in this page.";
+    if (reason === "unsupported_zoom") return "Reset pinch zoom before asking with your eyes.";
+    return "No fresh gaze. Check /gaze tracker.";
+  }
   function webcamViewport(screenDpr) {
+    if (state.mode !== "webcam") return {drop_reason: "page_mode_mismatch"};
+    if (visualViewport?.scale !== 1) return {drop_reason: "unsupported_zoom"};
     const a = webcamAnchor;
-    if (!a || a.dpr !== devicePixelRatio || a.width !== innerWidth || a.height !== innerHeight ||
-        a.outerWidth !== outerWidth || a.outerHeight !== outerHeight || visualViewport?.scale !== 1) return {};
+    if (!a) return {drop_reason: "no_page_anchor"};
+    if (a.dpr !== devicePixelRatio || a.width !== innerWidth || a.height !== innerHeight ||
+        a.outerWidth !== outerWidth || a.outerHeight !== outerHeight) return {drop_reason: "viewport_changed"};
     const zoom = devicePixelRatio / screenDpr;
     return {origin_x: a.sx - a.x * zoom + screenX - a.windowX,
       origin_y: a.sy - a.y * zoom + screenY - a.windowY,
@@ -2433,7 +2443,7 @@
     const text = (utterance || "").trim();
     if (!text) return false;
     if (state.mode === "webcam" && !freshWebcam()) {
-      coachLine("No fresh gaze. Check /gaze tracker; move the pointer once in this page.", 4000);
+      coachLine(webcamBlockMessage(), 4000);
       return false;
     }
     state.scopePending = false;

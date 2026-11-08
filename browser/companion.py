@@ -14,6 +14,10 @@ from .cdp_bridge import CdpSession
 logger = logging.getLogger(__name__)
 
 
+class NoForegroundTab(ConnectionError):
+    """No attached supported document currently owns native foreground focus."""
+
+
 class Companion:
     def __init__(self, http_url: str) -> None:
         self.http_url = http_url.rstrip("/")
@@ -246,7 +250,7 @@ class Companion:
                     return tab
             except Exception:
                 continue
-        raise ConnectionError("No supported Chrome page has focus")
+        raise NoForegroundTab("No supported Chrome page has focus")
 
 
     def eval_js(self, expression: str, timeout: float = 6.) -> Any:
