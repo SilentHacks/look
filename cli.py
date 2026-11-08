@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 from . import service
@@ -26,7 +28,17 @@ def _handle_slash_command(raw_args: str) -> str:
 
     if sub == "timing":
         from .release_timing import TIMINGS
-        return json.dumps(TIMINGS.snapshot(), indent=2)
+        snapshot = TIMINGS.snapshot()
+        path = Path.home() / ".cache" / "hermes-gaze" / "release-timing.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as handle:
+            json.dump(snapshot, handle, indent=2)
+        lines = [f"Saved full timing to {path}"]
+        for turn in snapshot["turns"]:
+            slow = " slow" if turn["slow_release"] else ""
+            lines.append(f"turn {turn['turn']}: max gap {turn['heartbeat_max_gap_ms']}ms{slow}")
+        return "\n".join(lines)
 
     if sub == "start":
         if not session.is_chrome_reachable():
