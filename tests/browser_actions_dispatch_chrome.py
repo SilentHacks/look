@@ -17,7 +17,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from benchmark.browser_actions_production import (
+from tests.browser_actions.browser_actions_production import (
     Fixtures, ProductionTools, FORM_ASK, MODEL, PROFILE, approve, count, oracle, run_turn, setup_home, until,
 )
 

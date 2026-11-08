@@ -24,7 +24,7 @@ import time
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 HERMES = Path.home() / '.hermes' / 'hermes-agent'
 MODELS = {'nous': 'reflection/beam-1.0-501b-a23b:free',
           'openrouter': 'nvidia/nemotron-3-ultra-550b-a55b:free'}
@@ -72,7 +72,7 @@ class Fixtures:
                 super().do_GET()
             def log_message(self, *_):
                 pass
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=str(ROOT / 'benchmark')))
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=str(Path(__file__).resolve().parent)))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.origin = 'http://127.0.0.1:' + str(self.server.server_port)

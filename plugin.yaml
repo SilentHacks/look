@@ -36,6 +36,9 @@ provides_hooks:
   - post_llm_call
   - on_session_end
   - pre_tool_call
+provides_middleware:
+  - llm_request
+  - tool_execution
 config_schema:
   mode:
     type: str

@@ -16,7 +16,7 @@ import types
 from unittest.mock import patch
 from urllib.parse import urlsplit, unquote
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 HERMES = Path.home() / '.hermes' / 'hermes-agent'
 MODEL = 'nvidia/nemotron-3-ultra-550b-a55b:free'
 PAGE = Path(__file__).with_name('browser_actions_page.html').as_uri()

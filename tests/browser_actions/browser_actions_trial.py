@@ -20,7 +20,7 @@ import threading
 import time
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests" / "ui_review"))
 os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"

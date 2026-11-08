@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "source_transcript": "browser_actions_results.json",
+  "record_commit": "f5ac5609e869b9713fc2e3861f0471b35a7549be",
+  "record_commit_date": "2026-11-07T15:11:29Z",
+  "base_commit": "45e1704f7f2db33dfa570a832880cb46b84485ae",
+  "paid_spend_usd": 0,
+  "model": "reflection/beam-1.0-501b-a23b:free",
+  "provider": "nous",
+  "per_fixture": {
+    "form": {
+      "successes": 5,
+      "attempts": 5,
+      "median_s": 10.897
+    },
+    "mail": {
+      "successes": 5,
+      "attempts": 5,
+      "median_s": 13.792
+    }
+  }
+}

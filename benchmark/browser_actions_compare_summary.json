@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "source_transcript": "browser_actions_compare_results.json",
+  "record_commit": "f93c186bab87458df2ca3d187ee3a1b20d1ae376",
+  "record_commit_date": "2026-11-07T16:32:41Z",
+  "base_commit": "f5ac560",
+  "paid_spend_usd": 0,
+  "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "provider": "openrouter",
+  "per_fixture": [
+    {
+      "approach": "A",
+      "scenario": "form",
+      "successes": 0,
+      "tasks": 3,
+      "runs": 5,
+      "median_s": 26.351,
+      "api_calls": 35,
+      "exposures": 4,
+      "confirmations": 5,
+      "content_and_navigation_ok": 4
+    },
+    {
+      "approach": "B",
+      "scenario": "form",
+      "successes": 5,
+      "tasks": 5,
+      "runs": 5,
+      "median_s": 13.148,
+      "api_calls": 24,
+      "exposures": 0,
+      "confirmations": 5,
+      "content_and_navigation_ok": 5
+    },
+    {
+      "approach": "A",
+      "scenario": "mail",
+      "successes": 2,
+      "tasks": 2,
+      "runs": 5,
+      "median_s": 40.009,
+      "api_calls": 42,
+      "exposures": 1,
+      "confirmations": 3,
+      "content_and_navigation_ok": 3
+    },
+    {
+      "approach": "B",
+      "scenario": "mail",
+      "successes": 0,
+      "tasks": 0,
+      "runs": 5,
+      "median_s": 17.028,
+      "api_calls": 35,
+      "exposures": 0,
+      "confirmations": 5,
+      "content_and_navigation_ok": 0
+    },
+    {
+      "approach": "A",
+      "scenario": "layout",
+      "successes": 0,
+      "tasks": 0,
+      "runs": 5,
+      "median_s": 24.109,
+      "api_calls": 34,
+      "exposures": 4,
+      "confirmations": 5,
+      "content_and_navigation_ok": 0
+    },
+    {
+      "approach": "B",
+      "scenario": "layout",
+      "successes": 5,
+      "tasks": 5,
+      "runs": 5,
+      "median_s": 14.493,
+      "api_calls": 20,
+      "exposures": 0,
+      "confirmations": 5,
+      "content_and_navigation_ok": 5
+    },
+    {
+      "approach": "A",
+      "scenario": "wizard",
+      "successes": 0,
+      "tasks": 0,
+      "runs": 5,
+      "median_s": 36.46,
+      "api_calls": 47,
+      "exposures": 5,
+      "confirmations": 2,
+      "content_and_navigation_ok": 0
+    },
+    {
+      "approach": "B",
+      "scenario": "wizard",
+      "successes": 5,
+      "tasks": 5,
+      "runs": 5,
+      "median_s": 18.415,
+      "api_calls": 37,
+      "exposures": 0,
+      "confirmations": 5,
+      "content_and_navigation_ok": 5
+    }
+  ]
+}

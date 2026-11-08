@@ -86,7 +86,7 @@ class BrowserTaskTests(unittest.TestCase):
         self.session.actions._inspect.assert_not_called()
 
     def test_provider_rejection_stops_the_trial_instead_of_looping_over_fixtures(self):
-        from hermes_gaze.benchmark.browser_actions_production import run_turn
+        from hermes_gaze.tests.browser_actions.browser_actions_production import run_turn
         agent = Mock(session_id='trial-session')
         agent._memory_store._system_prompt_snapshot = {'user': 'Alex Morgan alex@example.test'}
         agent.run_conversation.return_value = {'completed': False, 'final_response': 'HTTP 429 free-models-per-day'}
@@ -104,7 +104,7 @@ class BrowserTaskTests(unittest.TestCase):
                 run_turn(SimpleNamespace(), trial_tools, 'Fill this out', 'unused', 'http://fixture.test')
 
     def test_trial_auth_failure_stops_without_disclosing_credentials(self):
-        from hermes_gaze.benchmark.browser_actions_production import runtime_credentials
+        from hermes_gaze.tests.browser_actions.browser_actions_production import runtime_credentials
         auth = Mock()
         auth.resolve_nous_runtime_credentials.side_effect = RuntimeError('secret-token-in-provider-error')
         with patch.dict('sys.modules', hermes_cli=SimpleNamespace(auth=auth)):

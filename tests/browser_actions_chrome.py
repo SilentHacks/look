@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from benchmark.browser_actions_production import (PROFILE, SECRETS, approve,
+from tests.browser_actions.browser_actions_production import (PROFILE, SECRETS, approve,
     count, oracle, sensitive_unchanged, sync_tab, until)
 
 
@@ -429,7 +429,7 @@ def probe(rig, tools, fixtures):
     # Exercise actual inbox admission from both protected typing and fake native speech.
     from hermes_gaze import voice
     import threading
-    from benchmark.browser_actions_production import FORM_ASK
+    from tests.browser_actions.browser_actions_production import FORM_ASK
     admitted, errors = [], []
     done = threading.Event()
     def perform_inbox_task(wire):
@@ -505,7 +505,7 @@ def probe(rig, tools, fixtures):
 
 def main():
     # One implementation of lifecycle/isolation; this entrypoint selects deterministic mode.
-    from benchmark.browser_actions_production import main as trial_main
+    from tests.browser_actions.browser_actions_production import main as trial_main
     if '--offline' not in sys.argv:
         sys.argv.append('--offline')
     trial_main()

@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "source_transcript": "browser_actions_production_results.json",
+  "record_commit": "7cc66c18170a8822bfee36ff57d50ec0c4453248",
+  "record_commit_date": "2026-11-07T21:28:56Z",
+  "base_commit": "c48a9e7b9ca8b58a1f7b0f3274df0758e56fce8e",
+  "paid_spend_usd": 0,
+  "model": "reflection/beam-1.0-501b-a23b:free",
+  "provider": "nous",
+  "recorded_at_utc": "2026-11-07T21:27:47.440772+00:00",
+  "acceptance_passed": true,
+  "per_fixture": [
+    {
+      "scenario": "form",
+      "successes": 5,
+      "runs": 5,
+      "median_s": 11.678,
+      "api_calls": 29
+    },
+    {
+      "scenario": "mail",
+      "successes": 5,
+      "runs": 5,
+      "median_s": 17.93,
+      "api_calls": 36
+    },
+    {
+      "scenario": "layout",
+      "successes": 5,
+      "runs": 5,
+      "median_s": 9.533,
+      "api_calls": 21
+    },
+    {
+      "scenario": "wizard",
+      "successes": 5,
+      "runs": 5,
+      "median_s": 19.111,
+      "api_calls": 44
+    },
+    {
+      "scenario": "unseen",
+      "successes": 5,
+      "runs": 5,
+      "median_s": 10.319,
+      "api_calls": 27
+    }
+  ],
+  "superseded_beam_run": {
+    "model": "reflection/beam-1.0-501b-a23b:free",
+    "provider": "nous",
+    "acceptance_passed": false,
+    "per_fixture": [
+      {
+        "scenario": "form",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 12.479,
+        "api_calls": 25
+      },
+      {
+        "scenario": "mail",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 20.678,
+        "api_calls": 42
+      },
+      {
+        "scenario": "layout",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 13.167,
+        "api_calls": 33
+      },
+      {
+        "scenario": "wizard",
+        "successes": 3,
+        "runs": 5,
+        "median_s": 18.758,
+        "api_calls": 48
+      },
+      {
+        "scenario": "unseen",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 9.319,
+        "api_calls": 25
+      }
+    ]
+  },
+  "historical_pre_review": {
+    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "provider": "openrouter",
+    "per_fixture": [
+      {
+        "scenario": "form",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 12.446,
+        "api_calls": 15
+      },
+      {
+        "scenario": "mail",
+        "successes": 3,
+        "runs": 5,
+        "median_s": 12.121,
+        "api_calls": 21
+      },
+      {
+        "scenario": "layout",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 10.365,
+        "api_calls": 15
+      },
+      {
+        "scenario": "wizard",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 15.36,
+        "api_calls": 30
+      },
+      {
+        "scenario": "unseen",
+        "successes": 5,
+        "runs": 5,
+        "median_s": 9.351,
+        "api_calls": 15
+      }
+    ]
+  }
+}

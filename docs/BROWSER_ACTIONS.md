@@ -6,8 +6,9 @@ Form, alternate form, wizard, new-tab email and unseen layout each scored **5/5*
 Final gates: 183 unit tests, 27 DOM tests, seven JS syntax checks, 33 action checks,
 14 trust checks, seven recording checks, fake webcam and three dispatch ingresses passed.
 No-send-without-click and independent `browser_exec` isolation passed; paid spend **$0**.
-Per-run transcripts, superseded 23/25 Beam trial and fixes:
-[`browser_actions_production_results.json`](../benchmark/browser_actions_production_results.json), `beam_acceptance`.
+Scores and provenance: [`browser_actions_production_summary.json`](../benchmark/browser_actions_production_summary.json).
+Raw transcripts (including superseded runs) are retained in git history and locally
+under `~/.cache/hermes-gaze-dev/transcripts/`, not in the installable tree.
 
 ## Production policy and tools
 
@@ -178,7 +179,7 @@ the last clock check was 2026-11-07 20:23 UTC, before that reset.
 
 To repeat the full five-per-fixture trial, use the Hermes Python with
 `HERMES_DISABLE_LAZY_INSTALLS=1`:
-`python benchmark/browser_actions_production.py --provider nous --runs 5 --out /absolute/new/output`.
+`python tests/browser_actions/browser_actions_production.py --provider nous --runs 5 --out /absolute/new/output`.
 The default is Nous Beam; `--provider openrouter` explicitly selects free Nemotron.
 `--model` accepts only the matching free model. Neither route has a paid fallback.
 All config, memory and runtime state remain in a temporary Hermes home; only
@@ -194,8 +195,8 @@ The default `browser_exec` smoke launched an independent blank target with no CD
 override, not a companion tab. The installed Chrome executable stood in for an
 unavailable packaged Chromium; its profile and runtime were temporary.
 
-Machine-readable counts, failures, safety evidence and the quota blocker:
-[`browser_actions_production_results.json`](../benchmark/browser_actions_production_results.json).
+Machine-readable per-fixture scores and provenance:
+[`browser_actions_production_summary.json`](../benchmark/browser_actions_production_summary.json).
 Paid model API spend: **$0**.
 
 ### Independent review disposition
@@ -288,10 +289,10 @@ Final missing-detail check: **A and B both asked, phone blank in 2/2**. A: “I 
 ## Reproduction and boundaries
 
 ```sh
-HERMES_DISABLE_LAZY_INSTALLS=1 <hermes-python> benchmark/browser_actions_compare.py --out /tmp/gaze-compare --runs 5
-HERMES_DISABLE_LAZY_INSTALLS=1 <hermes-python> benchmark/browser_actions_compare.py --out /tmp/gaze-compare-offline --offline
+HERMES_DISABLE_LAZY_INSTALLS=1 <hermes-python> tests/browser_actions/browser_actions_compare.py --out /tmp/gaze-compare --runs 5
+HERMES_DISABLE_LAZY_INSTALLS=1 <hermes-python> tests/browser_actions/browser_actions_compare.py --out /tmp/gaze-compare-offline --offline
 # If the process was interrupted, preserve completed cases:
-HERMES_DISABLE_LAZY_INSTALLS=1 <hermes-python> benchmark/browser_actions_compare.py --out /tmp/gaze-compare --runs 5 --resume /tmp/gaze-compare/results.json
+HERMES_DISABLE_LAZY_INSTALLS=1 <hermes-python> tests/browser_actions/browser_actions_compare.py --out /tmp/gaze-compare --runs 5 --resume /tmp/gaze-compare/results.json
 ```
 
 Private Chrome profile, OS-assigned debug port, owned local files and fake `.test` recipients only. `BROWSER_CDP_URL` pins Browser Use to that private browser; isolated harness runtime/workspace directories live in the temporary home. Cleanup stops only owned harness daemons and owned Chrome. Native microphone access is replaced by a refusing stub; no webcam path runs. No user's browser, running Hermes, installed source/config or `~/.hermes` credentials are modified. Keys load at runtime from the repository `.env` (the common checkout's `.env` in this worktree); they are not exported to the harness or copied into temporary homes/results.
@@ -337,11 +338,11 @@ Five fresh conversations per approach × fixture, **40 attempts**, one free mode
 
 The correct recommendation is **B's architecture, not a claim that the product already “just works.”** Fix/measure the generic schema/new-tab failure and content-bound approval before a production build. A is not a safe same-browser shortcut, even though it succeeded on two email turns. Neither unrestricted A nor the current B prototype is a finished general-and-safe product; no production rollout is approved by this experiment.
 
-Structured evidence (all 40 rows, tool traces, memory questions, pilots, pricing and verification): [`benchmark/browser_actions_compare_results.json`](../benchmark/browser_actions_compare_results.json). Executable source: [`browser_actions_compare.py`](../benchmark/browser_actions_compare.py), [`browser_actions_compare.js`](../benchmark/browser_actions_compare.js), and the original/extra HTML fixtures alongside them. Raw run output remains in `/tmp/gaze-compare-primary/`; final deterministic checks in `/tmp/gaze-compare-final-offline/`.
+Structured scores and provenance: [`browser_actions_compare_summary.json`](../benchmark/browser_actions_compare_summary.json). Executable source: [`browser_actions_compare.py`](../tests/browser_actions/browser_actions_compare.py), [`browser_actions_compare.js`](../tests/browser_actions/browser_actions_compare.js), and the original/extra HTML fixtures alongside them. Full traces, memory questions and pilots remain in git history and locally under `~/.cache/hermes-gaze-dev/transcripts/`.
 
 ## Previous milestone (f5ac560)
 
-The previous typed-only experiment remains reproducible as `benchmark/browser_actions_trial.py`, `.js`, `browser_actions_page.html`, and `browser_actions_results.json`. Its primary results were 5/5 nine-field forms (10.897s median, 22 calls), 5/5 new-tab emails (13.792s median, 24 calls), 10/10 zero commits before approval and 10/10 trusted one-shot commits. Four turns initially omitted a commit handle and recovered. It used utterance-supplied personal details, specialized `open_mail`/`request_commit`, one page and Nous `reflection/beam-1.0-501b-a23b:free`; it was not an A/B or generality result. Its typing-side-effect counterexample remains an explicit warning, not a reason to require adapters under the newly agreed policy.
+The previous typed-only experiment remains reproducible as `tests/browser_actions/browser_actions_trial.py`, `.js`, and `browser_actions_page.html`; scores and provenance are in [`browser_actions_summary.json`](../benchmark/browser_actions_summary.json). Its primary results were 5/5 nine-field forms (10.897s median, 22 calls), 5/5 new-tab emails (13.792s median, 24 calls), 10/10 zero commits before approval and 10/10 trusted one-shot commits. Four turns initially omitted a commit handle and recovered. It used utterance-supplied personal details, specialized `open_mail`/`request_commit`, one page and Nous `reflection/beam-1.0-501b-a23b:free`; it was not an A/B or generality result. Its typing-side-effect counterexample remains an explicit warning, not a reason to require adapters under the newly agreed policy.
 
 ## Required verification
 
