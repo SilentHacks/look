@@ -531,6 +531,10 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 return
             owner = f"{target}:{document}"
             if itype == "record_start":
+                if not _voice.recognition_ready(_whisper_model_name()):
+                    message = _voice.recognition_status(_whisper_model_name())
+                    reply({"ok": False, "error": message, "plain_error": message})
+                    return
                 if _VOICE_TURNS is not None:
                     ready = _VOICE_TURNS.prepare_recording()
                     if not ready["ok"]:

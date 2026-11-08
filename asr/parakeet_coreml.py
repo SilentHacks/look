@@ -4,9 +4,9 @@ Vendored and adapted from silicon-asr 0.1.0 (``runners/parakeet_coreml.py``,
 ``windowing.py``, ``types.py``) — MIT licensed, Copyright (c) 2026 WT-MM.
 The adaptation replaces ``coremltools.models.CompiledMLModel`` with
 ``asr.coreml_model.CoremlModel`` (pyobjc over CoreML.framework), because
-coremltools ships no cp314 wheels; everything else is unchanged. We also drop
-``transcribe_file`` — voice.py decodes audio itself and always hands over
-numpy PCM.
+coremltools ships no cp314 wheels. Gaze uses only the pinned v2 conversion,
+verifies every file before loading and drops ``transcribe_file``: voice.py
+decodes audio itself and always hands over numpy PCM.
 
 The FastConformer encoder runs on the ANE (or GPU); the LSTM prediction
 network and joint run on CPU — the ANE has no LSTM kernel, and the fused
@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
+from ..asset_cache import COREML, prepare
 from .coreml_model import (
     COMPUTE_ALL,
     COMPUTE_CPU_AND_GPU,
@@ -145,16 +146,12 @@ class TdtVariant:
     model_id: str
     vocab_file: str
     blank_id: int  # = the joint's class count minus one; NOT always len(vocab)
-    fused_mel_encoder: bool  # v3 ships MelEncoder; v2 ships Melspectrogram + Encoder
 
 
 TDT_VARIANTS = {
-    "v3": TdtVariant(
-        "FluidInference/parakeet-tdt-0.6b-v3-coreml", "parakeet_v3_vocab.json", 8192, True
-    ),
     # v2's vocab json has stray entries past 1024; the model's blank is 1024.
     "v2": TdtVariant(
-        "FluidInference/parakeet-tdt-0.6b-v2-coreml", "parakeet_vocab.json", 1024, False
+        COREML, "parakeet_vocab.json", 1024
     ),
 }
 
@@ -180,30 +177,22 @@ def encoder_compute_units(name: str) -> int:
 class ParakeetCoreML:
     def __init__(
         self,
-        variant: str = "v3",
+        variant: str = "v2",
         compute_units: str = "auto",
         overlap_seconds: float = DEFAULT_OVERLAP_SECONDS,
     ) -> None:
+        if variant != "v2":
+            raise ValueError("Only pinned CoreML Parakeet v2 is supported; v3 has unresolved licence terms.")
         spec = TDT_VARIANTS[variant]
         self.name = f"parakeet-{variant}-coreml"
         units = encoder_compute_units(compute_units)
         self._overlap = int(overlap_seconds * SAMPLE_RATE)
 
-        files = ["Decoder.mlmodelc/*", "JointDecision.mlmodelc/*", spec.vocab_file]
-        files += (
-            ["MelEncoder.mlmodelc/*"]
-            if spec.fused_mel_encoder
-            else ["Melspectrogram_v2.mlmodelc/*", "Encoder.mlmodelc/*"]
-        )
-        root = download(spec.model_id, files)
+        root = prepare(spec.model_id)
 
         t0 = time.time()
-        if spec.fused_mel_encoder:
-            self._mel: Optional[CoremlModel] = None
-            self._encoder = CoremlModel(f"{root}/MelEncoder.mlmodelc", units)
-        else:
-            self._mel = CoremlModel(f"{root}/Melspectrogram_v2.mlmodelc", COMPUTE_CPU_ONLY)
-            self._encoder = CoremlModel(f"{root}/Encoder.mlmodelc", units)
+        self._mel = CoremlModel(f"{root}/Melspectrogram_v2.mlmodelc", COMPUTE_CPU_ONLY)
+        self._encoder = CoremlModel(f"{root}/Encoder.mlmodelc", units)
         # Decoder and joint pinned to CPU: no ANE LSTM kernel, and the tiny
         # per-step calls are fastest there.
         self._decoder = CoremlModel(f"{root}/Decoder.mlmodelc", COMPUTE_CPU_ONLY)
@@ -214,26 +203,18 @@ class ParakeetCoreML:
         logger.info("Loaded %s (%s encoder) in %.2fs", spec.model_id, compute_units, time.time() - t0)
 
     def _encode(self, audio: np.ndarray, n_valid: int) -> Tuple[np.ndarray, int]:
-        if self._mel is None:
-            out = self._encoder.predict(
-                {
-                    "audio_signal": audio[None, :].astype(np.float32),
-                    "audio_length": np.array([n_valid], dtype=np.int32),
-                }
-            )
-        else:
-            mel = self._mel.predict(
-                {
-                    "audio_signal": audio[None, :].astype(np.float32),
-                    "audio_length": np.array([n_valid], dtype=np.int32),
-                }
-            )
-            out = self._encoder.predict(
-                {
-                    "mel": mel["melspectrogram"].astype(np.float32),
-                    "mel_length": mel["melspectrogram_length"].astype(np.int32),
-                }
-            )
+        mel = self._mel.predict(
+            {
+                "audio_signal": audio[None, :].astype(np.float32),
+                "audio_length": np.array([n_valid], dtype=np.int32),
+            }
+        )
+        out = self._encoder.predict(
+            {
+                "mel": mel["melspectrogram"].astype(np.float32),
+                "mel_length": mel["melspectrogram_length"].astype(np.int32),
+            }
+        )
         return out["encoder"].astype(np.float32), int(out["encoder_length"][0])
 
     def _decoder_step(
@@ -297,14 +278,3 @@ class ParakeetCoreML:
         return TranscriptionResult(text=text, segments=tokens_to_segments(tokens), tokens=tokens)
 
 
-def download(model_id: str, patterns: List[str]) -> str:
-    """Fetch model files quietly; errors and warnings still reach the caller."""
-    from huggingface_hub import snapshot_download
-    from tqdm.auto import tqdm
-
-    class QuietProgress(tqdm):
-        def __init__(self, *args, **kwargs):
-            kwargs["disable"] = True
-            super().__init__(*args, **kwargs)
-
-    return snapshot_download(model_id, allow_patterns=patterns, tqdm_class=QuietProgress)

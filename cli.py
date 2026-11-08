@@ -23,8 +23,8 @@ def _config() -> GazeConfig:
     return service._CONFIG or GazeConfig()
 
 
-def _first_run_guide(session, *, initialized: bool = False) -> str:
-    """Passive checklist: no connection, model loading or device access."""
+def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
+    """Explicit setup: disclose ASR downloads; never connect or open a device."""
     from . import voice
 
     supported = platform.system() == "Darwin" and platform.machine() == "arm64"
@@ -32,14 +32,15 @@ def _first_run_guide(session, *, initialized: bool = False) -> str:
     modules = ("websockets", "numpy", "sounddevice", "faster_whisper", "parakeet_mlx", "CoreML",
                "ptts", "huggingface_hub")
     missing = [name for name in modules if importlib.util.find_spec(name) is None]
-    if voice._COREML_RUNNER is False:
-        recognition = ("The preferred speech recognition model could not prepare. "
-                       "A fallback will try on your first question and may need a download.")
-    elif voice._COREML_RUNNER is None:
-        recognition = ("Local speech recognition is preparing. The first download and preparation can take a while. "
-                       "You can type a question while you wait.")
-    else:
-        recognition = "Local speech recognition is ready."
+    model_name = _config().whisper_model
+    disclosure = (
+        "Speech recognition setup uses Hugging Face: FluidInference Parakeet v2 CoreML (~465 MB) first on Mac; "
+        "if unavailable, mlx-community Parakeet v2 (~2.47 GB), then SYSTRAN faster-whisper "
+        f"({model_name}, ~78.1 MB for tiny.en or ~148 MB for base.en). "
+        "Only missing pinned files download; cached files are checksum-verified. "
+        "Preparation can compile local models. No download runs at plugin registration.")
+    voice.prepare_recognition(model_name, report=report)
+    recognition = voice.recognition_status(model_name)
     return "\n".join((
         "Hermes Gaze first run",
         "Mac: Apple Silicon is supported." if supported else
@@ -49,6 +50,7 @@ def _first_run_guide(session, *, initialized: bool = False) -> str:
         "Dependencies: Python packages are present; this does not test audio devices." if not missing else
         "Dependencies: missing " + ", ".join(missing) + ". Quit Hermes, run hermes pm install, then "
         "hermes plugins enable hermes-gaze in your terminal and restart Hermes.",
+        disclosure,
         recognition,
         "Connection: Chrome is attached." if session.cdp.is_connected else
         "Connection: Chrome is not attached. Run /gaze connect when you are ready to open the companion.",
@@ -80,7 +82,7 @@ def _first_run_guide(session, *, initialized: bool = False) -> str:
         "Broad areas only, not precise controls. /gaze tracker stop returns to cursor.",
         "Read aloud is optional: quit Hermes and run hermes gaze setup-speech in your terminal to download "
         "the local voice without playing sound, then restart Hermes. Automatic reading starts off.",
-        "No camera, microphone or sound was started by this guide. Reopen it with /gaze setup.",
+        "No camera, microphone or sound was started by this guide. Check readiness again with /gaze setup.",
     ))
 
 

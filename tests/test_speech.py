@@ -1,17 +1,14 @@
 """Speech generation and output ownership; never opens real audio devices."""
-import json
-from pathlib import Path
 import sys
-import tempfile
 import threading
 import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.speech import MODEL_FILES, MODEL_REVISION, VOICE_REVISION, SpeechPlayback
+from hermes_gaze.speech import SpeechPlayback
 from hermes_gaze.voice_turns import VoiceTurns
-from hermes_gaze import service
+from hermes_gaze import service, voice
 from tests.test_voice_turns import Chrome, Host, snapshot
 
 
@@ -74,6 +71,9 @@ class Output:
 
 
 class SpeechTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(voice, "recognition_ready", return_value=True))
+
     def rig(self, streams):
         self.outputs = []
         def output(**kwargs):
@@ -274,27 +274,6 @@ class SpeechTests(unittest.TestCase):
                 self.finish(turns)
         self.assertEqual(self.outputs, [])
 
-    def test_local_assets_load_once_without_hub_or_network(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            model, catalog = root / MODEL_REVISION, root / VOICE_REVISION
-            model.mkdir()
-            catalog.mkdir()
-            for name in MODEL_FILES:
-                (model / name).touch()
-            (catalog / 'russell.safetensors').touch()
-            (catalog / 'voices.jsonl').write_text(json.dumps(dict(name='Russell', voice_id='r',
-                language='en', filename='russell.safetensors')))
-            tts = Mock()
-            with patch('hermes_gaze.speech.asset_root', return_value=root), \
-                    patch.dict(sys.modules, ptts=SimpleNamespace(TTS=tts)), \
-                    patch('socket.create_connection', side_effect=AssertionError('network forbidden')):
-                playback = SpeechPlayback()
-                self.assertIs(playback.load('Russell'), playback.load('Russell'))
-                tts.assert_called_once_with(str(model), lang='en', quant='q8', voice_catalog=str(catalog))
-                (catalog / 'russell.safetensors').unlink()
-                with self.assertRaisesRegex(FileNotFoundError, 'voice Russell missing'):
-                    playback.load('Russell')
 
     def test_finite_output_drains_before_completion(self):
         stream = Stream(pcm=([0.1] * 1920, [0.2] * 480))

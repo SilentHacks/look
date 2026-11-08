@@ -65,8 +65,9 @@ your interactive conversation.
 
 In a new Hermes conversation:
 
-- Enter `/gaze` for the first-run checklist. It checks without opening Chrome,
-  the camera, microphone or speakers. `/gaze setup` reopens it at any time.
+- Enter `/gaze` for the first-run checklist and explicit local recognition setup.
+  It discloses downloads without opening Chrome, the camera, microphone or speakers.
+  `/gaze setup` reopens it and retries preparation at any time.
 - Send a **normal first message**, such as `Reply only Ready.`, and wait for the
   answer. The host cannot prepare a fresh conversation from a Chrome question;
   connecting alone is not enough. No hidden warm-up message is sent for you.
@@ -76,9 +77,13 @@ In a new Hermes conversation:
   the local practice dashboard. **Point at something. Hold Space. Wait for
   Listening, then ask. Let go when you are done.**
 
-The local speech-recognition model starts preparing when the plugin loads.
-First use may download large models and compile them; there is no fixed wait
-guarantee. `/gaze setup` reports readiness without starting another download.
+Plugin registration **never downloads models**. An already-cached CoreML model is
+checksum-verified and silently warmed in the background. The first `/gaze` guide,
+or `/gaze setup`, starts missing downloads and shows **Preparing local speech recognition**.
+Preparation can compile models; there is no fixed wait guarantee. Check `/gaze setup`
+for **Local speech recognition is ready**; hosts supporting plugin messages
+also receive a completion notice. Space is refused with a plain explanation until
+a model is ready, without opening the microphone or waiting on preparation.
 If recognition is preparing or your microphone is unavailable, **Right Option**
 opens protected typed questions. Text fields and **keyboard-focused controls**
 keep native Space: click ordinary page text before trying to talk. A tap scrolls.
@@ -140,6 +145,53 @@ frames, canvas and unknown custom widgets may be unavailable. Detached targets
 fail rather than being guessed. Eye estimates cannot replace precise controls
 or certify accessibility. The companion is a separate browser profile: existing
 Chrome sign-ins are not automatically shared.
+
+### Runtime downloads
+
+All sizes below are approximate decimal payload sizes from publisher metadata, not
+measured transfers; package installation, cache and compilation overhead are additional.
+ASR and Phonon inputs are pinned in [`assets.json`](assets.json), with a SHA-256 for
+every selected file. Setup verifies cached bytes before fetching only missing files;
+runtime loaders use local paths only and verify before native loading. A checksum
+failure stops preparation, not a silent fallback or automatic replacement.
+Small cached graph/config/tokenizer SHA-256 values were computed after matching the
+recorded immutable Git blob IDs; weight checksums come from publisher LFS metadata.
+
+| Download / publisher | Trigger | Immutable revision / integrity | Approximate size | Cache / licences |
+|---|---|---|---|---|
+| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit recognition setup; preferred macOS backend | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39); SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub; weights CC-BY-4.0, vendored runner MIT |
+| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Same explicit setup, only if CoreML unavailable on macOS | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487); SHA-256 manifest | 2.47 GB | Shared HF hub; weights CC-BY-4.0, runtime Apache-2.0 |
+| faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux, or after both macOS backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba); SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub; converted weights/runtime MIT |
+| Phonon-31M English q8, Gradium | Explicit `hermes gaze setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d); SHA-256 manifest | 65 MB | Plugin phonon cache; assets Apache-2.0, ptts MIT OR Apache-2.0 |
+| Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7); SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache; Apache-2.0 |
+| MediaPipe Tasks Vision JS/WASM, Google npm | Explicit optional webcam start or offline developer evaluation | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32); SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 23.6 MB unpacked; compressed size unverified | Plugin webcam cache; Apache-2.0 |
+| Face Landmarker, Google storage | Same explicit optional webcam setup | [float16 version 1](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task); SHA-256 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` | 3.76 MB | Plugin webcam cache; Apache-2.0 |
+
+The shared Hugging Face hub defaults to `${HF_HOME:-${XDG_CACHE_HOME:-~/.cache}/huggingface}/hub`;
+`HF_HUB_CACHE` (or legacy `HUGGINGFACE_HUB_CACHE`) overrides it. Downloads use the
+official `https://huggingface.co` endpoint and may follow publisher storage redirects.
+Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
+`webcam-0.10.32`. Warm model caches stay offline. Do not delete shared caches wholesale.
+
+`whisper_model` supports **base.en (default) and tiny.en only**; other aliases,
+arbitrary repositories and local custom models are unsupported and rejected before
+loading. Each includes a verified local tokenizer: there is no OpenAI tokenizer
+fallback download. Backend order remains CoreML v2 → MLX v2 → faster-whisper on Mac.
+Fallback preparation can add the listed sizes; recognition never downloads while
+holding or releasing Space.
+
+**CoreML v2 is the default, not v3.** V3 is unsupported: its publisher card labels
+CC-BY-4.0 in frontmatter but says Apache 2.0 in its body. That contradiction is
+unresolved; no v3 weight licence is asserted here. FluidInference publishes the
+conversion and references it in FluidAudio; it is not NVIDIA-hosted or evidence of
+NVIDIA endorsement. Catalog acceptance of converter-owned CoreML/MLX distributions
+still needs a maintainer ruling. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+Chrome, ffmpeg, CoreML and installed macOS voices are existing local tools, not
+installed by this downloader. Python/native dependencies are prepared separately by
+Hermes PM; transitive wheel licences and dependency-internal network behavior have
+not been audited. The catalog entry PR must repeat these download/network disclosures.
+
 
 ## Daily use, updates and removal
 
@@ -342,8 +394,8 @@ Sealing retains every already-admitted callback buffer and its device status;
 callbacks after sealing cannot append or invalidate sealed speech. An unavailable
 release renderer fails capture after the five-second CDP window and still closes input.
 Hint persistence follows stop/reservation on the ordered intent worker. Capsule
-placement and visual design are unchanged. CoreML prewarm still runs one silent
-prediction before sharing the cached runner; models and fallbacks are unchanged.
+placement and visual design are unchanged. Cached CoreML prewarm still runs one
+silent prediction before sharing the runner; uncached preparation is explicit.
 
 `/gaze timing` works without recording opt-in or a connected browser. It retains
 the last eight releases in memory: browser keyup (zero), evidence start/freeze/send;
@@ -354,7 +406,9 @@ Browser and Python clocks are separate: subtract stages within their own group,
 never across groups. Missing stages have not happened (or that path was not used).
 The first UI push is a completed CDP render, not proof of a painted frame.
 No audio, transcript, page data, coordinates or browser/request identifiers enter
-the trace, and it is never persisted or sent to Chrome/model providers.
+the trace. `/gaze timing` explicitly saves its full JSON to a private
+`~/.cache/hermes-gaze/release-timing.json` file and prints its path with a short
+summary; it is never sent to Chrome/model providers.
 
 A 20 ms Python heartbeat runs only while releases are being measured, through their
 first delta or failure/completion. It retires after the final sample; disconnect and
@@ -420,8 +474,9 @@ the first capture after loading is reported separately. Browser timestamps use
 
 This improves release feedback and first-use inference, not steady-state model
 speed. Cached-model process initialization measured 459 ms before and 467 ms after,
-including the new prediction warmup. Registration runs it on a daemon; a question
-arriving before warmup finishes can still wait on the loader lock. These runs
+including the new prediction warmup. Registration runs cached warmup on a daemon.
+Those historical runs allowed a question to wait on the loader lock; current Space
+admission refuses capture until readiness, rather than waiting. These runs
 did not measure an uncached model download/ANE compile, hardware close time, or
 live Hermes/provider TTFT. Native capture is already 16 kHz; raw PCM avoids
 ffmpeg and resampling. The measured worker and loader waits were uncontended.
@@ -547,7 +602,7 @@ The first-run route is above; simulated gaze and benchmarks are development
 tools, not steps a newcomer needs for a first answer.
 
 ```text
-/gaze setup                Reopen the passive first-run checklist
+/gaze setup                Prepare pinned local recognition and show readiness
 /gaze demo                 Open the local dashboard in the companion
 /gaze mode simulated       Explore noisy-gaze simulation
 /gaze tracker              Inspect eye-tracking state

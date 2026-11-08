@@ -11,7 +11,7 @@ Three transcription backends behind one contract (``transcribe_audio_buffer``
   words.
 - ``parakeet-mlx`` Parakeet TDT 0.6B on Apple-silicon MLX (macOS only,
   ~180ms for a 3s clip) — in-process middle tier when the CoreML runner
-  cannot load (missing pyobjc, first-run model download failure).
+  cannot load. Downloads happen only during explicit preparation.
 - ``faster-whisper`` (tiny.en / base.en) — fallback on Linux or when both
   Parakeet paths fail to load.
 
@@ -33,6 +33,8 @@ import time
 import wave
 from typing import Any, Dict, List, Optional, Tuple
 
+from .asset_cache import AssetIntegrityError, AssetsMissing, COREML, MLX, WHISPER, prepare
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ _MODEL_LOCK = threading.Lock()
 
 # English-only Parakeet TDT 0.6B v2 on MLX — best English WER of the
 # parakeet family; v3 trades a little English accuracy for 24 languages.
-_PARAKEET_MODEL_REPO = "mlx-community/parakeet-tdt-0.6b-v2"
+_PARAKEET_MODEL_REPO = MLX
 _PARAKEET_MODEL: Any = None  # model | False (load attempted and failed)
 _PARAKEET_LOCK = threading.Lock()
 
@@ -50,6 +52,9 @@ _PARAKEET_LOCK = threading.Lock()
 # 0.6B v2 checkpoints as the MLX backend, converted for the Neural Engine.
 _COREML_RUNNER: Any = None  # ParakeetCoreML | False (load attempted and failed)
 _COREML_LOCK = threading.Lock()
+_PREPARE_LOCK = threading.Lock()
+_PREPARING = False
+_PREPARATION_ERROR = ""
 
 # Which backend served the most recent transcribe_audio_buffer call — the
 # overlay labels itself "local Whisper" otherwise, which lies whenever ANE
@@ -62,13 +67,16 @@ MAX_AUDIO_BYTES = 12 * 1024 * 1024
 
 def get_whisper_model(model_name: str = _DEFAULT_MODEL) -> Any:
     """Lazy per-name singleton loader for the local faster-whisper model."""
+    if model_name not in WHISPER:
+        raise ValueError("Supported speech models are base.en and tiny.en; custom repositories and paths are unsupported.")
     with _MODEL_LOCK:
         model = _WHISPER_MODELS.get(model_name)
         if model is None:
             from faster_whisper import WhisperModel
 
             logger.info("Loading faster-whisper model '%s' on CPU (int8)...", model_name)
-            model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            root = prepare(WHISPER[model_name])
+            model = WhisperModel(str(root), device="cpu", compute_type="int8", local_files_only=True)
             _WHISPER_MODELS[model_name] = model
         return model
 
@@ -84,7 +92,11 @@ def _get_parakeet_model() -> Any:
                 from parakeet_mlx import from_pretrained
 
                 logger.info("Loading parakeet-mlx model '%s'...", _PARAKEET_MODEL_REPO)
-                _PARAKEET_MODEL = from_pretrained(_PARAKEET_MODEL_REPO)
+                _PARAKEET_MODEL = from_pretrained(str(prepare(MLX)))
+            except AssetIntegrityError:
+                raise
+            except AssetsMissing:
+                return None
             except Exception as exc:
                 logger.warning("parakeet-mlx unavailable (%s); using faster-whisper", exc)
                 _PARAKEET_MODEL = False
@@ -107,23 +119,87 @@ def _get_coreml_runner() -> Any:
                 # Loading alone leaves the first encoder/decoder prediction cold.
                 runner.transcribe_array(np.zeros(16000, dtype=np.float32))
                 _COREML_RUNNER = runner
+            except AssetIntegrityError:
+                raise
+            except AssetsMissing:
+                return None
             except Exception as exc:
                 logger.warning("CoreML parakeet unavailable (%s); using parakeet-mlx", exc)
                 _COREML_RUNNER = False
         return _COREML_RUNNER or None
 
 
-def prewarm() -> None:
-    """Load and warm the CoreML/ANE runner on a daemon thread.
+def recognition_ready(model_name=_DEFAULT_MODEL):
+    """Constant-time capture gate: never take a model loader lock or touch disk."""
+    return (sys.platform == "darwin" and (
+        _COREML_RUNNER is not None and _COREML_RUNNER is not False or
+        _PARAKEET_MODEL is not None and _PARAKEET_MODEL is not False)
+        or model_name in _WHISPER_MODELS)
 
-    The first load can pay a one-time ANE compile (~31s on a fresh machine).
-    Warm prediction under the same loader lock before publishing the runner,
-    so a first utterance cannot race it. Only the primary backend is warmed;
-    the 2.4 GB parakeet-mlx fallback stays lazy.
-    """
+
+def recognition_status(model_name=_DEFAULT_MODEL):
+    if recognition_ready(model_name):
+        return "Local speech recognition is ready."
+    if _PREPARING or _COREML_LOCK.locked():
+        return "Preparing local speech recognition. You can type with Right Option while you wait."
+    if _PREPARATION_ERROR:
+        return _PREPARATION_ERROR
+    return "Local speech recognition is not ready. Run /gaze setup; use Right Option to type."
+
+
+def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
+    """Only explicit first-run setup may fetch; all heavy work stays off intent threads."""
+    global _PREPARING
+    with _PREPARE_LOCK:
+        if _PREPARING or recognition_ready(model_name):
+            return
+        _PREPARING = True
+
+    def work():
+        global _PREPARING, _PREPARATION_ERROR, _COREML_RUNNER, _PARAKEET_MODEL
+        try:
+            if model_name not in WHISPER:
+                raise ValueError("Supported speech models are base.en and tiny.en; custom models are unsupported.")
+            loaders = ([(COREML, _get_coreml_runner), (MLX, _get_parakeet_model)]
+                       if sys.platform == "darwin" else [])
+            loaders.append((WHISPER[model_name], lambda: get_whisper_model(model_name)))
+            for repo, load in loaders:
+                prepare(repo, download=True)
+                # An explicit retry may repair unavailable dependencies, not bypass checksums.
+                if repo == COREML and _COREML_RUNNER is False:
+                    _COREML_RUNNER = None
+                if repo == MLX and _PARAKEET_MODEL is False:
+                    _PARAKEET_MODEL = None
+                if load() is not None:
+                    break
+            _PREPARATION_ERROR = ""
+        except Exception as exc:
+            _PREPARATION_ERROR = (str(exc) if isinstance(exc, AssetIntegrityError) or model_name not in WHISPER else
+                                  "Local speech recognition could not prepare. Check internet, disk space and "
+                                  "dependencies, then run /gaze setup. Use Right Option to type.")
+            logger.warning("Speech recognition preparation stopped: %s", exc)
+        finally:
+            _PREPARING = False
+            if report is not None:
+                report(recognition_status(model_name))
+
+    threading.Thread(target=work, name="gaze-asr-prepare", daemon=True).start()
+
+
+def prewarm() -> None:
+    """Warm verified cached models only; plugin registration never downloads."""
     if sys.platform != "darwin":
         return
-    threading.Thread(target=_get_coreml_runner, name="gaze-asr-prewarm", daemon=True).start()
+
+    def warm():
+        global _PREPARATION_ERROR
+        try:
+            _get_coreml_runner()
+        except AssetIntegrityError as exc:
+            _PREPARATION_ERROR = str(exc)
+            logger.warning("Speech recognition preparation stopped: %s", exc)
+
+    threading.Thread(target=warm, name="gaze-asr-prewarm", daemon=True).start()
 
 
 def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[Dict[str, object]]:
@@ -356,8 +432,11 @@ def record_microphone(
 ) -> bytes:
     """Record through the same single-owner native device as the Chrome talk key."""
     from .browser.cdp_bridge import get_shared_session
-    from .service import _VOICE_TURNS
+    from .service import _VOICE_TURNS, _whisper_model_name
 
+    model_name = _whisper_model_name()
+    if not recognition_ready(model_name):
+        raise RuntimeError(recognition_status(model_name))
     microphone = get_shared_session().microphone
     if _VOICE_TURNS is not None:
         ready = _VOICE_TURNS.prepare_recording()

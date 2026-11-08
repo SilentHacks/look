@@ -87,6 +87,10 @@ def plain_error(status: str, error: str) -> str:
         if "already in use" in lower or "closing" in lower:
             return "Microphone busy. Let go of Space, wait, then hold again."
         return "Microphone failed. Check input and permission, then try again."
+    if "downloaded speech file changed" in lower:
+        return "A downloaded speech file changed. Preparation stopped; do not use this cache."
+    if "speech recognition is not ready" in lower or "preparing local speech recognition" in lower:
+        return "Local speech recognition is not ready. Run /gaze setup; use Right Option to type."
     if "speech model" in lower:
         return "Speech model unavailable. Check internet and disk space; restart Hermes."
     if any(word in lower for word in ("transcri", "recognition", "whisper", "parakeet", "asr")):

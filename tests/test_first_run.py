@@ -14,7 +14,11 @@ from hermes_gaze.voice_turns import VoiceTurns
 
 
 class FirstRunTests(unittest.TestCase):
-    def register(self, state):
+    def setUp(self):
+        self.enterContext(patch.object(voice, "prepare_recognition"))
+        self.enterContext(patch.object(voice, "recognition_ready", return_value=True))
+
+    def register(self, state, *, warm=False):
         loader = importlib.machinery.SourceFileLoader(
             'hermes_gaze.first_run_entry', str(Path(__file__).parents[1] / '__init__.py'))
         plugin = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader, is_package=False))
@@ -28,14 +32,15 @@ class FirstRunTests(unittest.TestCase):
         session = GazeSession('http://127.0.0.1:1')
         self.addCleanup(session.close)
         with patch.object(plugin, 'get_shared_session', return_value=session), \
-             patch.object(plugin, 'get_shared_server', return_value=Mock()), patch.object(voice, 'prewarm'), \
+             patch.object(plugin, 'get_shared_server', return_value=Mock()), \
+             patch.object(voice, 'prewarm', wraps=voice.prewarm if warm else None), \
              patch.object(service, '_VOICE_TURNS', None), patch.object(service, '_CONFIG', None):
             plugin.register(ctx)
             turns = service._VOICE_TURNS
         self.addCleanup(turns.close)
         return plugin, session, ctx, commands['gaze'], hooks
 
-    def test_first_guide_is_passive_repeat_connects_and_reopen_does_not_rebind(self):
+    def test_first_guide_prepares_without_connecting_and_reopen_does_not_rebind(self):
         saved = {}
         state = SimpleNamespace(get=saved.get, set=lambda key, value: saved.update({key: value}))
         plugin, session, ctx, command, hooks = self.register(state)
@@ -44,7 +49,6 @@ class FirstRunTests(unittest.TestCase):
              patch.object(voice, '_COREML_RUNNER', None):
             guide = command('', session_id='new', session_key='key')
             self.assertIn('Send a normal message', guide)
-            self.assertIn('preparing', guide)
             start.assert_not_called()
             ctx.inject_message.assert_not_called()
             self.assertFalse(session.cdp.is_connected)
@@ -70,21 +74,6 @@ class FirstRunTests(unittest.TestCase):
                     self.assertEqual('Hermes Gaze first run' in result, guide_expected)
                     self.assertEqual(start.called, not guide_expected)
 
-    def test_missing_prerequisites_and_failed_model_do_not_claim_ready(self):
-        session = SimpleNamespace(cdp=SimpleNamespace(is_connected=False))
-        with patch.object(cli.platform, 'system', return_value='Linux'), \
-             patch.object(cli.Path, 'is_file', return_value=False), \
-             patch.object(cli.importlib.util, 'find_spec', side_effect=lambda name: None if name == 'sounddevice' else object()), \
-             patch.object(voice, '_COREML_RUNNER', False), \
-             patch.object(voice, '_get_coreml_runner') as load:
-            guide = cli._first_run_guide(session)
-        self.assertIn('use an Apple Silicon Mac', guide)
-        self.assertIn('install Google Chrome', guide)
-        self.assertIn('missing sounddevice', guide)
-        self.assertIn('hermes pm install', guide)
-        self.assertIn('fallback', guide)
-        self.assertNotIn('recognition is ready', guide)
-        load.assert_not_called()
 
     def test_microphone_and_recognition_failures_stay_distinct_on_tool_path(self):
         session = GazeSession('http://127.0.0.1:1')

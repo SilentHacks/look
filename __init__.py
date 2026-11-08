@@ -13,6 +13,7 @@ not HTTP — the local demo server only serves the page + read-only status.
 
 from __future__ import annotations
 
+from contextvars import copy_context
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -82,8 +83,7 @@ def register(ctx: Any) -> None:
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
 
-    # Pre-warm the CoreML/ANE STT runner on a daemon thread — the first load
-    # pays a one-time ~31s ANE compile; better here than on the first utterance.
+    # Warm only verified cached CoreML assets; fetching requires explicit /gaze setup.
     from .voice import prewarm
 
     prewarm()
@@ -147,7 +147,13 @@ def register(ctx: Any) -> None:
             except (OSError, RuntimeError):
                 logger.debug("Could not read first-run guide state", exc_info=True)
         if command == "setup" or command == "" and not guide_shown:
-            result = _first_run_guide(session, initialized=kwargs.get("session_id") in initialized_sessions)
+            # Completion posts use the command's captured public session context.
+            # Hosts without plugin messages can read readiness with /gaze setup.
+            post = getattr(ctx, "post_message", None)
+            context = copy_context()
+            report = (lambda text: context.run(post, text)) if callable(post) else None
+            result = _first_run_guide(session, initialized=kwargs.get("session_id") in initialized_sessions,
+                                      report=report)
             guide_shown = True
             if state is not None:
                 try:
