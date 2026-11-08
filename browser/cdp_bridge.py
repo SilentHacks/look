@@ -69,13 +69,6 @@ def _overlay_source() -> str:
     return src
 
 
-def _guarded_inject(src: str) -> str:
-    # The overlay IIFE tears down and replaces any prior instance (preserving input
-    # state) — always re-run it so a stale api from an older build never survives an
-    # upgrade (e.g. one missing setIntentNonce).
-    return src
-
-
 def _fixation_from_wire(raw: Dict[str, Any], source: str = "hover") -> FixationSample:
     t_end = float(raw.get("t", raw.get("t_end", 0.0)) or 0.0)
     sigma = float(raw.get("sigma", raw.get("sigma_x", 24.0)) or 24.0)
@@ -88,24 +81,6 @@ def _fixation_from_wire(raw: Dict[str, Any], source: str = "hover") -> FixationS
         source=str(raw.get("source") or source),
     )
 
-
-def _candidate_from_wire(raw: Dict[str, Any]) -> CandidateElement:
-    """CandidateElement from the overlay's wire dict (prefers CandidateElement.from_wire)."""
-    from_wire = getattr(CandidateElement, "from_wire", None)
-    if callable(from_wire):
-        return from_wire(raw)
-    rvp = tuple(float(v) for v in (raw.get("rect_vp") or [0, 0, 40, 24]))
-    rdoc = tuple(float(v) for v in (raw.get("rect_doc") or rvp))
-    return CandidateElement(
-        id=str(raw.get("id") or "cand"), tag=str(raw.get("tag") or "div"),
-        role=str(raw.get("role") or "button"), label=str(raw.get("label") or ""),
-        selector=str(raw.get("selector") or ""),
-        rect_doc=rdoc, rect_vp=rvp,  # type: ignore[arg-type]
-        is_container=bool(raw.get("is_container", False)),
-        is_interactive=bool(raw.get("is_interactive", True)),
-        is_destructive=bool(raw.get("is_destructive", False)),
-        summary=str(raw.get("summary") or ""), consequence=str(raw.get("consequence") or ""),
-    )
 
 
 class CdpSession:
@@ -488,7 +463,7 @@ class CdpSession:
                     self._context_unique_id = await self._context_key(self._context_id)
                     src = _overlay_source()
                     if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
-                        await self._eval_coro(_guarded_inject(src), timeout=8.0)
+                        await self._eval_coro(src, timeout=8.0)
                     await self._init_ui()
                     await self._push_overlay_config()
                     self._ready = True
@@ -774,10 +749,6 @@ class GazeSession:
             return True
         return "rejected_by_page"
 
-    def inject_overlay(self, mode: Optional[str] = None, sigma_px: Optional[float] = None) -> bool:
-        """Thin back-compat wrapper: configure() with stored defaults."""
-        return self.configure(mode=mode, sigma_px=sigma_px)
-
     def ingest(self, samples: Any) -> List[FixationSample]:
         """One funnel for ALL fixation sources: dicts -> FixationSample, subtract the
         recalibrator bias offset, dedupe on a (t_end, x_doc, y_doc) watermark set."""
@@ -858,7 +829,7 @@ class GazeSession:
             return [], {}
         js = f"window.__HERMES_GAZE_OVERLAY__?.captureNoisyContext({float(radius_px)})"
         data = self._cdp.capture(js)
-        cands = [_candidate_from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
+        cands = [CandidateElement.from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
         return cands, data
 
     def new_resolution(self, res: ResolutionResult, evidence: Optional[dict] = None) -> int:

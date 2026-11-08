@@ -8,7 +8,7 @@ from hermes_gaze.voice_turns import VoiceTurns
 out={}
 def state(t,h):return {'paused':t.paused,'host_refused':t.host_refused,'pending':[{'status':r['status'],'question':r['utterance']} for r in t.pending],'active':t.active and t.active['utterance'],'injections':len(h.messages)}
 def rig():
- h=Host();t=VoiceTurns(h,Chrome());t.model_names=False;t.bind(session_key='k',session_id='s');return t,h
+ h=Host();t=VoiceTurns(h,Chrome());t.bind(session_key='k',session_id='s');return t,h
 # Exactly the build note's "I didn't catch that", then ask again with successful transcription.
 t,h=rig();a=t.capture(snapshot('first'),transcribing=True);t.transcribed(a['request_id'],'',error='No speech recognized');out['asr_failed']=state(t,h)
 b=t.capture(snapshot('second'),transcribing=True);t.transcribed(b['request_id'],'Explain the second topic',snapshot('second'));out['asked_again']=state(t,h)

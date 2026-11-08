@@ -70,15 +70,22 @@ class Rig:
         if headless: args[1:1]=['--headless=new','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36']
         self.chrome=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         active=Path(self.tmp)/'DevToolsActivePort'
-        until(active.exists,what='chrome')
-        port=int(active.read_text().splitlines()[0])
+        def ready_port():
+            lines = active.read_text().splitlines() if active.exists() else []
+            return int(lines[0]) if len(lines) >= 2 else None
+        try:
+            port=until(ready_port,what='chrome debugging port')
+        except BaseException:
+            self.chrome.terminate()
+            self.chrome.wait(8)
+            shutil.rmtree(self.tmp,ignore_errors=True)
+            raise
         time.sleep(.7)  # Let hostile fixture install page-world hooks BEFORE plugin attachment.
         self.session=GazeSession(f'http://127.0.0.1:{port}')
         assert self.session.cdp.connect()
         self.host=Host()
         self.ctx=SimpleNamespace(inject_message=self.host.inject_message)
         self.turns=VoiceTurns(self.ctx,self.session)
-        self.turns.model_names=False
         self.host.turns=self.turns
         self.turns.bind(session_key='k',session_id='s')
         self.session.cdp.set_intent_handler(service.handle_intent)

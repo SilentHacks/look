@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
 
-from hermes_gaze.benchmark.run_benchmark import build_synthetic_dashboard_candidates, run_benchmark_suite
-from hermes_gaze.resolver.bayesian_fusion import gaussian_box_integral, resolve_candidates
+from hermes_gaze.benchmark.run_benchmark import build_synthetic_dashboard_candidates
+from hermes_gaze.resolver.bayesian_fusion import resolve_candidates
 from hermes_gaze.resolver.data_extractor import extract_structured_data, render_svg_scatter
-from hermes_gaze.resolver.temporal_aligner import align_fixations_to_utterance, extract_deictic_anchors, has_deictic_pronoun
+from hermes_gaze.resolver.temporal_aligner import extract_deictic_anchors, has_deictic_pronoun
 from hermes_gaze.tracker.recalibrator import OnlineRecalibrator
-from hermes_gaze.tracker.simulated_gaze import FixationRingBuffer, FixationSample, SimulatedPointerTracker
+from hermes_gaze.tracker.simulated_gaze import FixationSample
 
 
 class TestHermesGazePlugin(unittest.TestCase):
@@ -176,23 +175,6 @@ class TestHermesGazePlugin(unittest.TestCase):
         self.assertIn("Campaign,Spend,ROAS", csv_out)
         svg = render_svg_scatter(["Campaign", "Spend", "ROAS"], [["Launch", "$4,200", "6.4x"], ["Dev", "$1,850", "5.1x"]])
         self.assertIn("<svg", svg)
-
-    def test_speech_recognition_and_word_alignment(self) -> None:
-        from hermes_gaze.voice import transcribe_audio_buffer
-        import wave
-
-        # Test with the synthesized speech file /tmp/test_speech.wav
-        wav_path = Path("/tmp/test_speech.wav")
-        if wav_path.is_file():
-            audio_bytes = wav_path.read_bytes()
-            text, words = transcribe_audio_buffer(audio_bytes, model_name="tiny.en")
-            self.assertTrue(len(text) > 0)
-            self.assertIn("press", text.lower())
-            self.assertTrue(any(w.get("word", "").strip().lower() == "this" for w in words))
-
-            anchors = extract_deictic_anchors(text, t_arm=10.0, word_timestamps=words)
-            self.assertTrue(len(anchors) >= 1)
-            self.assertEqual(anchors[0].word, "this")
 
 
 if __name__ == "__main__":

@@ -81,6 +81,9 @@ def run(out):
             assert status["state"] == "running", status
             assert not status["calibrated"], status
             camera = tracker_tab(host)
+            camera.send("Page.bringToFront", {})
+            until(lambda: camera.main("document.hasFocus() && !document.hidden"))
+            until(lambda: not rig.page("document.hasFocus()"))
             ctx = host._context
             def camera_state():
                 return camera.iso("globalThis.__HERMES_WEBCAM__.status()", ctx)
@@ -124,8 +127,13 @@ def run(out):
                 report["anchored_no_gaze_message"] = True
             # Calibrated camera position 4 corresponds to display centre, inside this viewport.
             until(lambda: 16.4 < camera_state()["videoTime"] % 36 < 18., 45)
-            until(lambda: rig.iso("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer.some(s=>s.source==='webcam')"))
-            data = rig.session.cdp.capture("window.__HERMES_GAZE_OVERLAY__.captureNoisyContext()")
+            # The timed camera wait can outlast an external app's focus change.
+            # Re-front only our owned page; retain native focus and ownership checks.
+            rig.cmd("Page.bringToFront", {}, tab)
+            until(lambda: rig.page("document.hasFocus() && !document.hidden"))
+            # History can contain pre-focus samples; wait for usable frozen evidence.
+            data = until(lambda: data if (data := rig.session.cdp.capture(
+                "window.__HERMES_GAZE_OVERLAY__.captureNoisyContext()")).get("fixations") else None)
             assert data["fixations"] and all(s["source"] == "webcam" for s in data["fixations"])
             age = time.time() - data["fixations"][-1]["t"]
             assert 0 <= age < 1, age

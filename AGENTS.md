@@ -11,21 +11,22 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | Path | What lives here |
 |---|---|
 | `plugin.yaml` | Plugin manifest: tools/hooks/skill declarations, config schema. Keep 1:1 with `register()`. |
-| `__init__.py` | Registration of fourteen tools, context/stream/final/turn-end hooks, connected-session tool restrictions, `/gaze` connection, CLI and skill. |
+| `__init__.py` | Registration of fourteen tools (the same fourteen in `plugin.yaml` and `tools.ALL_TOOLS`), context/stream/final/turn-end hooks, connected-session tool restrictions, `/gaze` connection, CLI and skill. |
 | `tools.py`, `browser_tasks.py` | Operation-specific captured-identity tools and exact user-turn action grants; bounded structure, batch fill/select, click, keys, tabs/navigation, scroll/wait and request-commit. |
 | `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
+| `early_highlight.py` | Asynchronous, read-only TypeSafe scope decision; 1.5-second deadline and post-answer fallback, never an inbox admission wait. |
 | `voice_turns.py`, `speech.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen evidence and exact turn matching. One speech worker owns cached local Phonon/Russell streaming, output cancellation and pre-audio macOS say fallback; `scripts/setup_speech.py` fetches pinned assets explicitly. |
 | `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
-| `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process, ~65ms) → `parakeet-mlx` (~180ms) → `faster-whisper` (the only backend on Linux). `record_microphone`, `MAX_AUDIO_BYTES`. |
+| `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process) → `parakeet-mlx` → `faster-whisper` (the only backend on Linux). Registration loads and warms one silent CoreML prediction on a daemon before sharing the runner. `record_microphone`, `MAX_AUDIO_BYTES`. Measured release stages and limits are in README. |
 | `asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
 | `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
 | `browser/webcam_host.js` | Camera/inference and plain nine-point UI in that separate process's isolated world. No website camera, audio, HTTP sample endpoint or image serialization. |
 | `browser/webcam_features.js` | Shared, version-ordered iris/head feature extraction for live and offline frames. |
-| `benchmark/gaze_eval.py`, `browser/gaze_eval.js` | Offline frame stepping through the same pinned WASM/features and `GazeEstimator`; no capture devices. |
-| `benchmark/gaze_record.py`, `browser/gaze_record.js` | Explicit private recorder in the owned tracker window; camera-only video and target timestamps cross its exact-context nonce binding into local 0700/0600 files. Never run real devices as an agent. |
+| `benchmark/gaze_eval.py`, `browser/gaze_eval.js` | Offline frame stepping through the same pinned WASM/features and `GazeEstimator`; no capture devices. `gaze_dataset.py` preserves recordings/import/export; `gaze_tuning.py` and `scripts/gaze.py` run local evaluation and tuning. |
+| `benchmark/gaze_record.py`, `browser/gaze_record.js` | Explicit private recorder in the owned tracker window; camera-only video and target timestamps cross its exact-context nonce binding into local 0700/0600 files. Default sessions are 102.6 seconds (72.6 without recalibration), with a settling hold at each reading line start; legacy protocols remain loadable. Never run real devices as an agent. |
 | `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
 | `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer; evidence, actions and non-inbox replies retain captured ownership. Opens validated links and brings a source tab forward. |
 | `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |
@@ -36,9 +37,9 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`, `webcam_gaze.py` (swappable estimator, personal ridge calibration and measured screen→viewport mapping). Same purity rule. |
-| `benchmark/` | `benchmark_page.html` (self-contained demo dashboard) + `run_benchmark.py` (accuracy suite). |
-| `tests/` | stdlib `unittest` only. `tests/__init__.py` registers a `hermes_gaze` package *shell* (no `__init__.py` exec) so tests can `from hermes_gaze.service import ...` exactly like Hermes's plugin loader. |
-| `docs/` | PLAN (original design — see its header note), prior art & pitch, demo playbook. |
+| `benchmark/` | Self-contained demo dashboard, simulated accuracy suite, saved browser-action summaries, and real-Hermes companion/prompt probes. Retired Phase 0/1 artifacts live only in git history. |
+| `tests/` | stdlib `unittest`, private-Chrome security/recording/webcam probes, `ui_review/probe_*.py` and browser-action acceptance fixtures. `tests/__init__.py` registers a `hermes_gaze` package shell (no `__init__.py` exec), matching Hermes's plugin loader. |
+| `docs/` | Webcam setup, recording/dataset/evaluation guides and browser-action results; also the historical PLAN, prior art/pitch and demo playbook. |
 | `skills/gaze-telepathy/SKILL.md` | Bundled skill for browser evidence, snapshot tools and session setup. Keep simulated decision names/thresholds in sync with `resolver/bayesian_fusion.py`. |
 
 ## Invariants (each with the WHY)
@@ -337,8 +338,8 @@ ruff check                                        # if ruff is installed
 .venv/bin/python tests/trust_boundaries_chrome.py    # private Chrome; includes the patched-API page
 .venv/bin/python tests/recording_hold_chrome.py
 # Named review regressions: private Chrome, scripted answers and the benchmark audio stub.
-# Run each probe_{security,space,evidence,queue,markdown,ownership,confirmation,input}.py:
-# GAZE_REVIEW_OUT=/absolute/existing/output-dir .venv/bin/python tests/ui_review/probe_evidence.py
+# Run every tests/ui_review/probe_*.py serially, including card_size, stack and speech.
+# GAZE_REVIEW_LOCAL_ONLY=1 GAZE_REVIEW_OUT=/absolute/existing/output-dir .venv/bin/python tests/ui_review/probe_evidence.py
 # whole flow on a real Hermes backend, serial, free model; run with the Hermes venv's Python:
 # HERMES_DISABLE_LAZY_INSTALLS=1 <venv>/bin/python benchmark/probe_companion_ui.py --out DIR --headless
 # accuracy table — benchmark has package-relative imports, so load the tests shell first:

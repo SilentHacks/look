@@ -8,13 +8,15 @@
 
 ## Overview
 
-Raw gaze/pointer tracking suffers from ~80–180 px of spatial jitter and drift—worse than the size of a standard web button.
+Hold Space, speak, and release: Hermes answers or uses guarded browser actions.
+Cursor (`hover`) mode remains a permanent option and uses exact captured DOM identities; webcam mode
+uses personally calibrated local iris/head landmarks in a separate owned window.
+Both freeze evidence at release and align spoken referents with the pointing history.
+The model chooses semantic scope from the question, not from cursor proximity alone.
 
-**Hermes Gaze** solves this by treating pointing not as a naive mouse replacement, but as one signal in a **Bayesian Reference Resolution** engine:
-1. **Temporal Eye-Voice Alignment:** Aligns a 10-second fixation buffer to speech word-timestamps (Parakeet TDT on CoreML/ANE in-process via pyobjc on macOS, `faster-whisper` elsewhere), capturing what you looked at right when saying *"this"*, *"these"*, or *"that"*.
-2. **Spatial Box-Integral:** Integrates 2D gaze covariance over candidate elements extracted from Chrome's live DOM & Accessibility tree via CDP.
-3. **Semantic Reranking:** Fuses intent verb priors with `ctx.llm` scoring and consequence estimation.
-4. **Semantic Lens:** When two candidates are ambiguous, pops out separated cards with action previews for instant gaze-dwell, voice, or keyboard selection.
+Simulated and webcam gaze retain Bayesian resolution for noisy samples, with
+spatial scoring, temporal alignment, semantic reranking and the Semantic Lens.
+No real-camera accuracy number is established.
 
 ## Architecture
 
@@ -157,9 +159,9 @@ Hold Space in Chrome, wait for **Listening**, speak and release. Native
 tabs while recording cancels it. macOS microphone permission belongs to the app
 hosting Hermes (for example Terminal), not Chrome or the website. Only your
 words become a normal user message; the matching session hook attaches frozen
-page context. Answers stream into Hermes and all supported Chrome tabs. The
-latest answer survives navigation in memory; highlights/actions never move to
-an unrelated tab or replacement document.
+page context. Answers stream into Hermes and the foreground supported Chrome tab.
+The inbox survives navigation in memory; highlights/actions never move to an
+unrelated tab or replacement document.
 Refreshing cursor evidence through a tool does not interrupt that turn's answer stream.
 Followups without a fresh capture use conversation history without reattaching old
 evidence or changing its epoch. A connected non-deictic utterance without a target is delivered
@@ -173,45 +175,67 @@ ahead of them on the ordered intent worker. Capsule placement samples only its
 candidate strip, without changing placement scores. CoreML prewarm loads and runs
 one silent prediction before sharing the cached runner; models and fallbacks are unchanged.
 
-Private-Chrome measurements (five captures per build, synthetic speech into a fake
-native input, real offline CoreML, scripted host with 50 ms thinking and 10 ms words):
+Private headless Chrome measurements against `d2f6657`, using synthesized
+“Explain this region” PCM in a fake native input, real offline CoreML, and a
+scripted host (50 ms thinking, 10 ms per word). Five warm captures per build;
+the first capture after loading is reported separately. Browser timestamps use
+`performance.timeOrigin + performance.now()`; Python uses wall-clock milliseconds.
 
 | Stage, milliseconds | Before | After |
 |---|---:|---:|
-| Evidence freeze, median duration | 0.7 | 0.8 |
-| Binding/intent queue, median duration | 37.7 | 0.6 |
-| Release → microphone closed, median | 38.9 | 1.6 |
-| Release → processing words in private renderer, median | 36.9 | 12.2 |
-| Release → ASR started, median | 43.4 | 19.7 |
-| PCM decode, median duration (16 kHz; no resampling) | 0.6 | 1.5 |
-| Cached runner lookup, median duration | 0.03 | 0.04 |
-| ASR inference, median duration | 99.8 | 107.7 |
-| Scope activation, median duration | 0.9 | 1.0 |
-| Release → host injection, median | 149.0 | 137.1 |
-| Release → first host text delta, median | 201.9 | 190.3 |
-| Release → first answer words in private renderer, median | 265.9 | 263.1 |
-| First speech inference after load | 182.5 | 107.7 |
-| First capture → answer words after load | 363.1 | 271.3 |
+| Evidence freeze, median duration | 0.2 | 0.4 |
+| Binding → intent worker, median | 31.4 | 0.1 |
+| Release → microphone closed, median | 32.4 | 1.3 |
+| Microphone stop/close, median duration (fake device) | 0.011 | 0.013 |
+| Release → processing words in private renderer, median | 27.8 | 10.6 |
+| Release → ASR started, median | 37.2 | 17.8 |
+| PCM decode, median duration (16 kHz; no resampling) | 0.6 | 1.0 |
+| Cached runner lookup, median duration | 0.002 | 0.003 |
+| ASR inference, median duration | 100.1 | 103.3 |
+| ASR worker startup, median | 0.09 | 0.14 |
+| First inbox delivery, median duration | 31.0 | 11.0 |
+| Scope activation, median duration | 0.9 | 0.8 |
+| Release → host injection, median | 142.7 | 127.5 |
+| Release → first host text delta, median | 197.8 | 182.4 |
+| Release → first answer words in private renderer, median | 299.4 | 285.3 |
+| First speech inference after load | 188.4 | 101.7 |
+| First capture → answer words after load | 404.2 | 289.1 |
 
-The steady-state answer-word difference is small; do not claim a large model-speed
-gain. First cached model initialization took 33,981 ms in a fresh process; subsequent
-process loads took 975 ms before and 706 ms after (including prediction warmup).
-Initialization stays on the registration daemon, but asking before it finishes still
-waits on its loader lock. ASR worker startup was 0.9/1.2 ms; native close used a fake
-stream (0.01/0.02 ms), not hardware. No end-to-end live Hermes/model TTFT is claimed.
-A blocked fake scope provider left injection at 113 ms and answer words observed at
-309 ms, before its deadline was observed at 1,642 ms; the 1.5-second decision is not
-an admission wait. FIFO, terminal-hook admission and source ownership are unchanged.
+This improves release feedback and first-use inference, not steady-state model
+speed. Cached-model process initialization measured 459 ms before and 467 ms after,
+including the new prediction warmup. Registration runs it on a daemon; a question
+arriving before warmup finishes can still wait on the loader lock. These runs
+did not measure an uncached model download/ANE compile, hardware close time, or
+live Hermes/provider TTFT. Native capture is already 16 kHz; raw PCM avoids
+ffmpeg and resampling. The measured worker and loader waits were uncontended.
+Inbox delivery performs foreground/document checks over CDP; discovery's 250 ms
+poll is only a retry/recall path, not normal streaming delivery. Input watchdog
+polls (100 ms) and voice-level updates (40 ms) are independent of release.
+The 80 ms stream-update cadence, bounded 500 ms title decision and existing
+card motion remain unchanged. FIFO, terminal-hook admission and source ownership
+are unchanged.
 
-Errata leaves vermilion proofing marks and temporary source-attached paper notes.
-Nothing remains idle except a bare unread count. **Q** recalls the answer index;
-**Right Alt** (or your configured lock shortcut) opens protected question entry.
-**Escape** or the cross dismisses a note; the double-arrow moves it aside.
-Recall a target and use its reply arrow for a follow-up. Notes keep question/answer
-history, bounded scrolling, queue counts, Retry/Skip/Resume and mouse-only Confirm/Cancel.
-They dock at the viewport edge when the captured source is offscreen or unavailable.
-Completed notes retreat after 12 seconds when neither hovered nor being edited;
-completion never changes selection or announces a new answer.
+A blocked fake scope provider still allowed injection at 24 ms and visible answer
+words by 202 ms; its deadline completed at 1,524 ms after release-command dispatch.
+The 1.5-second scope decision does not block admission. This isolated check used
+stub transcription and no provider network request.
+
+Consolidation verification used fake devices and serial private Chrome runs:
+199 unit tests, changed-JavaScript syntax, security and recording-hold regressions,
+webcam handoff/calibration, and all eleven UI probes (including card sizing) passed.
+One headless default recorder session completed at 102.6 seconds with every phase;
+its 252 reading frames included 48 settling frames across all four line starts.
+No real-camera accuracy, live provider timing or physical-device latency is claimed.
+
+The companion uses glass cards and text-free pointing rings, with nothing idle
+apart from a one-time first hint. **Q** recalls the answer stack; **Right Alt**
+(or your configured shortcut) opens protected question entry. **Escape** dismisses
+settled answers. On a card, or within 90 px of the last pointing anchor, hold Space
+to ask a follow-up; pointing elsewhere asks a new question.
+Cards keep question/answer history, bounded scrolling, Retry/Skip/Resume and
+mouse-only approval. Answers take reading turns (12 seconds by default, longer
+for long text); hovering, selecting, scrolling or reading aloud holds the card.
+A new question can yield a settled card to its answer's first words, silently.
 
 Read aloud uses local **Gradium Phonon-31M English**, catalogue voice **Russell**,
 through native streaming output. Stop, Esc, another read request and disconnect
@@ -221,10 +245,9 @@ a provider or website. Missing dependencies/assets or a model-load failure selec
 macOS `say` before audio starts; the card reports that fallback and its reason.
 There is no mid-answer voice switch. See [offline speech setup](#offline-read-aloud-setup).
 
-Georgia (roman and italic) and Courier New are system font references, not bundled
-or downloaded fonts; generic serif/monospace fallbacks cover other systems. No font
-assets or third-party font licences ship. Paper follows the source page's light/dark
-background. Reduced motion disables the rising note and animated ink.
+System sans-serif and monospace fonts are referenced, never bundled or downloaded.
+Glass follows the page's light/dark background; reduced motion disables movement,
+and reduced transparency uses a solid accessible surface.
 
 Without a connected session, read-only one-shot answers still appear, without
 saved conversations or actions. Action requests fail instead of using that fallback.
@@ -288,17 +311,14 @@ On macOS, prefix it with
 Development smoke: use Python from a Hermes environment:
 
 ```bash
-python benchmark/probe_sessions.py --output /tmp/gaze-sessions.json
-python benchmark/probe_phase1.py --output /tmp/gaze-dom.json
 python benchmark/probe_sessions.py --prompt-only --trials 10 --sources tui --require-pass --output /tmp/gaze-prompts-neutral.json
 python benchmark/probe_sessions.py --prompt-only --repo-folder --trials 10 --sources tui --require-pass --output /tmp/gaze-prompts-repo.json
 ```
 
-The session smoke uses private config/credential copies and private Chrome,
-substituting synthesized WAV before the real transcription binding. It exercises
-real TUI and desktop **backends**, not the native desktop renderer or physical microphone.
-It reuses installed dependencies without updating them and initializes lazy host
-agents with a normal control turn before injecting speech.
+The session harness's `--prompt-only` path checks real TUI and desktop **backends**,
+not the native desktop renderer or physical microphone, using private config,
+credential copies and Chrome. Its historical default voice flow targets the retired
+open-shadow HUD; use `benchmark/probe_companion_ui.py` for the current protected UI.
 Prompt-only mode uses fresh sessions and the configured model for headers, a cell,
 a button, a wider-scope followup, hostile page text, a synthetic stale cursor,
 pasted code and an explicit plugin question. `--repo-folder` enables project rules;
@@ -307,61 +327,9 @@ operations; `--plugin-root` can select an isolated committed baseline.
 Prompt-only questions remain the first user request in each fresh session.
 `--turn-interval 6` spaces submissions for free-model quotas. Provider errors and
 240-second terminal-response timeouts remain failed trials, not fallback answers.
-Historical Phase 0/1 measurements remain in `benchmark/*results.json`; the
-hardcoded `/gaze probe` experiment is removed.
-
-### Owner retest: combined companion branch
-
-Run these commands yourself; they change the main checkout only when requested.
-The plugin symlink `~/.hermes/plugins/hermes-gaze` already points at
-`/Users/Abid/Projects/hermes-gaze`, so no reinstall or relink is needed.
-
-1. Quit existing Hermes TUI/desktop processes. In Terminal:
-   ```bash
-   cd /Users/Abid/Projects/hermes-gaze
-   git switch feature/companion-core
-   ```
-2. `sounddevice>=0.4.6,<0.6.0` is already declared in `pyproject.toml`.
-   The owner's bootstrapped Hermes runtime was checked read-only and has
-   `sounddevice 0.5.6` and `websockets 15.0.1`; no new dependency install is
-   needed on this machine. On a machine missing plugin dependencies, use
-   the Hermes launcher, not Homebrew Python:
-   ```bash
-   hermes plugins validate /Users/Abid/Projects/hermes-gaze --install-deps
-   ```
-   This installs declared dependencies into Hermes's environment; validation
-   also runs catalog checks, so unrelated catalog failures are not mic errors.
-3. In Terminal, still in that checkout:
-   ```bash
-   hermes
-   ```
-   Use a new conversation, send `Reply only Ready.`, and wait for the answer.
-   Then enter `/gaze connect`. Expect `Chrome companion ready` and
-   `Chrome voice connected to this Hermes session`. It opens a separate
-   CDP Chrome profile on the configured port (default 9333), not the everyday
-   Chrome profile. Use the newly opened window; no manual Chrome flags needed.
-   Existing setup must use `plugins.isolation: in_process` and
-   `plugins.entries.hermes-gaze.allow_gateway_injection: true` as above.
-4. In that Chrome window, navigate normally to a public page or a deal list.
-   Hover a deal title, hold Space, wait for **Listening**, then say:
-   “Summarize this deal, its price and savings, and give its exact link.”
-   Release Space. On first capture macOS may ask for microphone access for
-   Terminal (when Hermes is launched there), or the responsible host app if
-   launched elsewhere; it is not a Chrome website-permission prompt.
-   Allow that host in System Settings → Privacy & Security → Microphone if
-   previously denied, then restart Hermes and repeat step 3. The exact macOS
-   label depends on the launch chain; permission prompting was not triggered
-   during the integration check.
-5. Expect the pointed highlight, answer text and captured HTTP(S) deal URL.
-   The intended scope should widen before the answer (post-answer on fallback). Scroll: the outline
-   must stay on the same element, disappear offscreen and return with it.
-6. Ask once more, then switch supported tabs while Hermes is answering
-   (after releasing Space). The reply should finish in the newly focused
-   tab and remain available when returning. It must not move the deal's
-   highlight onto another page. A background source retains its pointer
-   highlight; automatic scope changes require the source to be foreground.
-   Reload the source: the latest answer should return, but old pins must not.
-   Closing Hermes ends this in-memory answer retention.
+Obsolete Phase 0/1 raw results and the open-shadow `probe_phase1.py` harness are
+retained in git history, not the installable tree. Current security/evidence
+regressions live in `tests/` and `tests/ui_review/`.
 
 
 ## Quickstart
