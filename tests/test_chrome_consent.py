@@ -81,17 +81,17 @@ class FakeChrome:
         if self.denied:
             return connection.respond(403, "Connection rejected")
 
-    def emit(self, session, method, params):
+    def emit(self, session, method, params, *, ws=None):
         message = dict(method=method, params=params)
         if session:
             message["sessionId"] = session
-        self.ws.send(json.dumps(message))
+        (ws or self.ws).send(json.dumps(message))
 
-    def reply(self, message, result):
+    def reply(self, message, result, *, ws=None):
         response = dict(id=message["id"], result=result)
         if "sessionId" in message:
             response["sessionId"] = message["sessionId"]
-        self.ws.send(json.dumps(response))
+        (ws or self.ws).send(json.dumps(response))
 
     def handle(self, ws):
         self.ws = ws
@@ -135,7 +135,7 @@ class FakeChrome:
                     context = {"main": 7, "card": 8, "pill": 9}[name]
                     # Deliberately collide both numeric AND unique context IDs between targets.
                     self.emit(session, "Runtime.executionContextCreated", dict(context=dict(
-                        id=context, uniqueId="document-" + name, name="hermes-gaze")))
+                        id=context, uniqueId="document-" + name, name="hermes-gaze")), ws=ws)
                     result = dict(executionContextId=context)
                 elif method == "DOM.describeNode":
                     result = dict(node=dict(frameId=params["objectId"]))
@@ -152,7 +152,7 @@ class FakeChrome:
                         result = dict(result=dict(objectId=expression.rsplit(".", 1)[1]))
                     else:
                         result = dict(result=dict(value=True))
-                self.reply(message, result)
+                self.reply(message, result, ws=ws)
         except Exception:
             pass  # Deliberate client cancellation/loss is part of these scenarios.
 

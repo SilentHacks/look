@@ -5,8 +5,8 @@ Run with the Hermes environment's Python, because it needs tui_gateway's depende
   HERMES_DISABLE_LAZY_INSTALLS=1 <hermes venv>/bin/python benchmark/probe_companion_ui.py --out DIR
 
 Isolated: temporary HERMES_HOME and Chrome profile, own debugging port. Hermes's own auth is
-copied into that temporary home with 0600 and deleted with it. TYPESAFE_API_KEY, when wanted for
-early highlights, is read from --env-file at runtime and passed only in the backend's environment.
+copied into that temporary home with 0600 and deleted with it. Optional early-highlight
+credentials are resolved by Hermes; this probe never imports a TypeSafe key file.
 Audio is a stub sounddevice that plays synthesized speech; the real microphone is not exercised.
 Serial by design: the configured free model is quota-limited.
 """
@@ -279,10 +279,6 @@ def run(args):
         (temp / "stub" / "sounddevice.py").write_text(STUB)
         env = {**os.environ, "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1", "HERMES_IGNORE_RULES": "1",
                "PYTHONPATH": f"{temp / 'stub'}:{home / 'hermes-agent'}", "GAZE_FAKE_SPEECH": str(temp / "speech.pcm"), "GAZE_CWD": str(temp)}
-        if args.env_file and args.env_file.exists():
-            for line in args.env_file.read_text().splitlines():
-                if line.startswith("TYPESAFE_API_KEY="):
-                    env["TYPESAFE_API_KEY"] = line.split("=", 1)[1].strip().strip("\"'")
         sys.path.insert(0, str(ROOT))
         import tests  # Register the plugin package shell without executing registration.
         from tests.owned_chrome import private_session
@@ -555,7 +551,6 @@ def make_recording(tab, out):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--env-file", type=Path, default=Path.home() / "Projects" / "hermes-gaze" / ".env")
     parser.add_argument("--settings", default="{}", help="JSON of extra plugin settings")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--keep-log", action="store_true")

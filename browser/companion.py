@@ -73,7 +73,8 @@ class Companion:
         with self._lifecycle:
             if self.source == "owned" and (self.is_connected or self._thread and self._thread.is_alive()):
                 raise OwnershipError("Stop Look before changing browser source.")
-            if self._consent_worker and self._consent_worker.is_alive():
+            if (self._consent_worker and self._consent_worker.is_alive()
+                    and self.chrome.state not in ("disconnected", "failed")):
                 return self.connection_status
             if self.source == "existing" and self.chrome.live:
                 return self.connection_status
@@ -86,16 +87,18 @@ class Companion:
             def run():
                 try:
                     chrome.start(timeout=timeout)
-                    if chrome is self.chrome and chrome.live:
+                    with self._lifecycle:
+                        if chrome is not self.chrome or not chrome.live:
+                            return
                         self.connect()
-                        while chrome is self.chrome and chrome.live and not self._stop.is_set():
-                            if self.is_connected:
-                                # Stop and binding cannot pass each other after a late Allow.
-                                with self._lifecycle:
-                                    if chrome is self.chrome and chrome.live and not self._stop.is_set() and on_ready:
-                                        on_ready()
-                                break
-                            self._stop.wait(.1)
+                    while chrome is self.chrome and chrome.live and not self._stop.is_set():
+                        if self.is_connected:
+                            # Stop and binding cannot pass each other after a late Allow.
+                            with self._lifecycle:
+                                if chrome is self.chrome and chrome.live and not self._stop.is_set() and on_ready:
+                                    on_ready()
+                            break
+                        self._stop.wait(.1)
                 except (OSError, ValueError):
                     pass  # Sanitized error/state belongs to this attempt, read by status.
             self._consent_worker = threading.Thread(target=run, name="look-chrome-approval", daemon=True)

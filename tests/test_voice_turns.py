@@ -467,7 +467,7 @@ class VoiceTurnsTests(unittest.TestCase):
                     "handles": {h: {} for h in handles},
                     "scope_bundles": {"none": [], "pointed": [name], "row": [name + "-row"]}}
 
-        with patch.dict("os.environ", TYPESAFE_API_KEY=""):
+        with patch.dict("sys.modules", {"agent.secret_scope": SimpleNamespace(get_secret=lambda _: None)}):
             self.turns.submit("first", saved("@a", "doc", ["@a", "@a-row"]))
             self.turns.submit("Compare this row with the previous one",
                               saved("@b", "doc", ["@a", "@a-row", "@b", "@b-row"]))

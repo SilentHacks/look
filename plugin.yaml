@@ -79,6 +79,12 @@ config_schema:
     type: bool
     default: false
     description: "Development only: write local replay evidence. May contain sensitive page text; never audio."
+  typesafe_api_key:
+    type: secret
+    label: "TypeSafe API key"
+    env: TYPESAFE_API_KEY
+    required: false
+    description: "Optional key for early highlights. Leave unset to use the post-answer model."
   early_highlight:
     type: bool
     default: true

@@ -77,9 +77,8 @@ def register(ctx: Any) -> None:
     )
     service.set_runtime(cfg, llm=getattr(ctx, "llm", None))
 
-    # The CDP intent handler and the demo HTTP server run on bare threads serving
-    # machine-scoped resources (owned Chrome and the :9111 demo page) — they read no
-    # per-profile Hermes state at runtime, so no profile binding is needed.
+    # Transport threads own machine-scoped resources. VoiceTurns separately retains
+    # the connecting command's profile context for optional secret resolution.
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
 
@@ -166,6 +165,7 @@ def register(ctx: Any) -> None:
                 command.split()[1:] in (["--existing"], ["--existing", "--accept"], ["--separate"])):
             if not kwargs.get("session_id") or not kwargs.get("session_key"):
                 return "Run /look start in a live Hermes conversation."
+            secret_context = copy_context()
             with turns.lock:
                 generation = turns.binding_generation
             native = None
@@ -231,7 +231,7 @@ def register(ctx: Any) -> None:
                         turns.connecting_native = None
                         if native is not None:
                             native.on_disconnect = turns.native_disconnected
-                        turns.bind("connect", native_input=native, **kwargs)
+                        turns.bind("connect", native_input=native, _secret_context=secret_context, **kwargs)
                         return bool(turns.binding and turns.binding["session_id"] == kwargs["session_id"]
                                     and turns.binding["session_key"] == kwargs["session_key"]
                                     and turns.native_input is native)

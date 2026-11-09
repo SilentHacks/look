@@ -334,7 +334,7 @@ def explain_element(utterance: str, context: str, llm: Any = None) -> str:
     return text
 
 
-def start_question_highlight(session, snapshot, *, read_only=False, display=True):
+def start_question_highlight(session, snapshot, *, read_only=False, display=True, secret_context=None):
     """Activate only on user acceptance, never when an old queued answer is admitted."""
     from .early_highlight import EarlyHighlight
 
@@ -356,7 +356,8 @@ def start_question_highlight(session, snapshot, *, read_only=False, display=True
             saved = snapshot
     else:
         saved = snapshot
-    state = EarlyHighlight(session, saved, _CONFIG or GazeConfig(), highlight_answer_scope)
+    state = EarlyHighlight(session, saved, _CONFIG or GazeConfig(), highlight_answer_scope,
+                           secret_context=secret_context)
     saved["early_highlight"] = state
     snapshot["early_highlight"] = state
 

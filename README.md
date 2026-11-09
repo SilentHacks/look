@@ -537,8 +537,9 @@ independently of plugin replay recording.
 #### Technical disclosure: early-highlight network use
 
 `early_highlight` defaults to `true`, with `highlight_model: "jev-1.14.0"`.
-With `TYPESAFE_API_KEY` in the Hermes process environment, one HTTPS request goes
-directly to `https://api.typesafe.ai/v1/systemone` per accepted hover question.
+With an optional `TYPESAFE_API_KEY` resolved through Hermes's profile-scoped
+`agent.secret_scope.get_secret`, one HTTPS request goes directly to
+`https://api.typesafe.ai/v1/systemone` per accepted hover question.
 It sends the question (which can itself contain sensitive text), native pointer
 role, referent count, available semantic scopes and frozen static descriptions.
 `highlight_include_page_text` defaults to `false`: no independently collected
@@ -546,16 +547,29 @@ page text, titles, values, URLs, handles, geometry or pointer timestamps are sen
 Opting in adds the existing escaped, bounded (≤6000-character) captured evidence
 packet, including page text/values, sanitized URLs and short evidence handles.
 No audio, cookies, credentials or live DOM identities are sent in the payload.
-The API key is read only from the environment and used in the Authorization header.
+The key is used only in the Authorization header, never in page evidence or inbox state.
 The 1.5-second decision deadline never waits on answer generation. Returned labels
 map locally to frozen handle arrays and can only highlight, never authorize actions.
 There is no second decision provider. Failure uses the existing configured Hermes
 model and its existing evidence flow; provider retention is not established here.
 
-Hermes loads `~/.hermes/.env`, not this repository's `.env`. To use a key kept only
-in the repository without moving or copying it, export `TYPESAFE_API_KEY` from that
-file into the launching shell's environment, without printing it, and start a new
-Hermes process from that shell. Existing Hermes processes do not inherit later exports.
+Set the optional **TypeSafe API key** in Hermes Desktop → Settings → Plugins →
+hermes-gaze. The manifest declares `typesafe_api_key` as `type: secret`, with
+`env: TYPESAFE_API_KEY`; Hermes owns credential storage, not plugin settings.
+There is no `requires_env` gate or install-time key prompt. Disabled early
+highlighting does not read the key or call TypeSafe. Missing keys, unavailable
+secret APIs, unbound scopes and request failures use the existing post-answer
+Hermes selector. A successful `none` decision does not invoke that fallback.
+For this credential, the plugin never reads files or looks up the process environment.
+Browser callbacks retain the connecting command's profile context; keys are
+resolved per decision, not cached in snapshots or copied to the browser. Stop
+and native binding revocation clear that context; a new connection captures its
+own. Late transcription cannot acquire a new connection's key.
+This optional integration uses stock Hermes only; no host patch or TypeSafe key
+is needed to start Look or ask questions.
+See Hermes's [secret settings contract](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins#settings-form-in-the-desktop)
+and [catalog rules 6/11](https://github.com/NousResearch/hermes-agent/blob/main/plugin-catalog/README.md#admission-policy).
+An optional schema secret is not a required `capabilities.requires_env` entry.
 
 
 Run `node tests/cursor_context_dom.js` and

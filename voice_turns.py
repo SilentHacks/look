@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from contextvars import copy_context
 import json
 import logging
 import re
@@ -50,6 +51,7 @@ class VoiceTurns:
         self.lock = threading.RLock()
         self.injection_lock = threading.RLock()
         self.binding = None
+        self._secret_context = None
         self.binding_generation = 0
         self.owner_session = ""
         self.pending = []
@@ -85,7 +87,8 @@ class VoiceTurns:
         with self.lock:
             return self.binding is not None and not self.closed
 
-    def bind(self, raw_args="", *, session_key="", session_id="", platform="", native_input=None, **_) -> str:
+    def bind(self, raw_args="", *, session_key="", session_id="", platform="", native_input=None,
+             _secret_context=None, **_) -> str:
         with self.lock:
             if self.closed:
                 return "Look is unloaded. Restart Hermes before connecting."
@@ -105,6 +108,7 @@ class VoiceTurns:
                 return "A Look question still has an unresolved outcome. Reconnect its original conversation."
             if (native_input is not None and self.connected and self.binding["session_id"] == session_id and
                     self.binding["session_key"] == session_key and self.native_input is native_input):
+                self._secret_context = _secret_context if _secret_context is not None else copy_context()
                 return "Look is connected."
             if self.owner_session and self.owner_session != session_id:
                 self._disconnect()
@@ -118,6 +122,7 @@ class VoiceTurns:
             self.binding = dict(session_key=session_key, session_id=session_id, platform=platform,
                                 native_input=native_input)
             self.native_input = native_input
+            self._secret_context = _secret_context if _secret_context is not None else copy_context()
             self.publish()
             return "Look is connected."
 
@@ -226,6 +231,8 @@ class VoiceTurns:
     def _start_highlight(self, run):
         from .service import start_question_highlight
 
+        if not self.connected or run["binding_generation"] != self.binding_generation:
+            return  # A late ASR result cannot acquire another connection's secret.
         if run.get("snapshot", {}).get("early_highlight"):
             return
         item = self._item(run["item_id"])
@@ -245,7 +252,8 @@ class VoiceTurns:
                     snapshot["scope_bundles"][name] = handles
                     snapshot["decision_referents"] = 2
         start_question_highlight(self.session, snapshot, read_only=True,
-                                 display=run["sequence"] == self.sequence)
+                                 display=run["sequence"] == self.sequence,
+                                 secret_context=self._secret_context)
         run["snapshot"] = snapshot
 
     def capture(self, snapshot, *, transcribing=False, item_id="", timing=None):
@@ -922,6 +930,7 @@ class VoiceTurns:
             if item:
                 item["unread"] = True
         self.binding = None
+        self._secret_context = None
         if self.connecting_native is not None:
             self.connecting_native.close()
             self.connecting_native = None

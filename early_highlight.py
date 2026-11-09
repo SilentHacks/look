@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import urllib.request
 
@@ -42,13 +41,23 @@ def request_payload(snapshot, config):
 
 class EarlyHighlight:
     """One decision, one deadline, optionally one post-answer fallback; shared across copies."""
-    def __init__(self, session, snapshot, config, fallback):
+    def __init__(self, session, snapshot, config, fallback, *, secret_context=None):
         self.session, self.snapshot, self.fallback = session, snapshot, fallback
         self.lock = threading.Lock()
         self.status, self.answer = 'pending', ''
-        key = os.environ.get('TYPESAFE_API_KEY', '')
         self.superseded = False
-        if not config.early_highlight or not key:
+        if not config.early_highlight:
+            self.status = 'failed'
+            return
+        try:
+            from agent.secret_scope import get_secret
+            # CDP/ASR threads use the connecting command's profile, never their ambient scope.
+            key = (secret_context.copy().run(get_secret, 'TYPESAFE_API_KEY')
+                   if secret_context is not None else get_secret('TYPESAFE_API_KEY'))
+        except Exception:
+            # Optional API/scope; exceptions may contain credentials.
+            key = None
+        if not isinstance(key, str) or not key:
             self.status = 'failed'
             return
         payload = request_payload(snapshot, config)
