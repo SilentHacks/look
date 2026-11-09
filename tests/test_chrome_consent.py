@@ -106,7 +106,9 @@ class FakeChrome:
                 if method == "Browser.getVersion":
                     result = dict(product=self.product)
                 elif method == "Target.getBrowserContexts":
-                    result = dict(browserContextIds=["private"], defaultBrowserContextId=self.default_context)
+                    result = dict(browserContextIds=["private"])
+                    if self.default_context is not None:
+                        result["defaultBrowserContextId"] = self.default_context
                 elif method == "Target.getTargets":
                     result = dict(targetInfos=list(self.targets.values()))
                 elif method == "Target.getTargetInfo":
@@ -233,6 +235,7 @@ class ConsentWire(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.fake.upgrades, 1)
 
     async def test_one_approval_precedes_all_page_access_and_stop_cleans_sessions(self):
+        self.fake.product = "Chrome/145.0.7578.0"
         self.fake.allow.clear()
         attempt = asyncio.create_task(self.start())
         await asyncio.to_thread(self.fake.requested.wait, 2)
@@ -398,14 +401,23 @@ class ConsentWire(unittest.IsolatedAsyncioTestCase):
             other.close()
 
     async def test_missing_context_and_old_version_fail_before_target_attachment(self):
-        for context, product in ((None, "Chrome/156.0.8078.81"), ("private", "Chrome/156.0.8078.81"),
+        for context, product in ((None, "Chrome/156.0.8078.81"), ("", "Chrome/156.0.8078.81"),
+                                 ("private", "Chrome/156.0.8078.81"), ("regular", "Chrome/144.0.7559.135"),
                                  ("regular", "Chrome/143.0.1")):
-            root = ConsentChrome(metadata_path=self.fake.metadata, lease_dir=Path(self.directory) / "look")
-            self.fake.default_context, self.fake.product = context, product
-            with self.assertRaises(OwnershipError):
-                await asyncio.to_thread(root.start)
-            root.close()
-        self.assertFalse(any(c["method"] == "Target.attachToTarget" for c in self.fake.commands))
+            with self.subTest(context=context, product=product):
+                root = ConsentChrome(metadata_path=self.fake.metadata, lease_dir=Path(self.directory) / "look")
+                self.addCleanup(root.close)
+                self.fake.default_context, self.fake.product = context, product
+                self.fake.commands.clear()
+                with self.assertRaises(OwnershipError):
+                    await asyncio.to_thread(root.start)
+                self.assertEqual(root.state, "failed")
+                self.assertFalse(root.live)
+                self.assertEqual(root.default_context, "")
+                self.assertFalse(any(c["method"] == "Target.getTargets" or
+                                     c["method"].startswith(("Runtime.", "Page.", "Target.attach"))
+                                     for c in self.fake.commands))
+                root.close()
 
 
 class Integration(unittest.TestCase):

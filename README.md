@@ -145,7 +145,7 @@ auxiliary inference. Questions/evidence may persist in Hermes history.
 
 ### Use my existing Chrome
 
-1. In your ordinary stable Chrome 144+, enter `chrome://inspect/#remote-debugging`
+1. In your ordinary stable Chrome 145+, enter `chrome://inspect/#remote-debugging`
    and enable **Allow remote debugging for this browser instance**. Look never
    launches, restarts or navigates your existing browser during setup.
 2. Run `/look start --existing`, read the disclosure, then
@@ -156,8 +156,11 @@ auxiliary inference. Questions/evidence may persist in Hermes history.
    and failure. Startup failures also appear as Hermes notices when supported
    by the frontend. Open an ordinary HTTP(S) tab in the authorized profile.
    No local-file tabs, private/guest contexts or unidentifiable profiles.
-   Chrome must expose a provable
-   regular-context identity; some older 144+ builds may require an update.
+   Look requires `Target.getBrowserContexts.defaultBrowserContextId`, introduced
+   in [Chrome 145.0.7578.0](https://github.com/chromium/chromium/commit/48591f824fad6d80f621b3f2905c12b6f5a75d1b).
+   Chrome's native approval feature starts at 144, but 144 is insufficient for
+   Look. If Chrome cannot provide a safe regular-profile identity, Look refuses
+   the connection; update Chrome. Look never guesses the context.
 4. `/look stop` removes Look's overlays/scripts/sessions and cancels capture,
    output and action approvals. Chrome, tabs and data remain. Remote debugging
    may still be enabled: turn it off in Chrome at the address above. Root loss,

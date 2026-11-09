@@ -21,7 +21,7 @@ DISCLOSURE = (
     "The bounded page evidence you ask about goes to your configured model and may stay in Hermes history. "
     "Approve only the Chrome request you just started. Stop disconnects Look, not Chrome's remote-debugging setting."
 )
-PREPARE = "In Chrome 144+, enter chrome://inspect/#remote-debugging and enable remote debugging."
+PREPARE = "In Chrome 145+, enter chrome://inspect/#remote-debugging and enable remote debugging."
 
 
 def discovery_port(path: Path) -> int:
@@ -197,12 +197,12 @@ class ConsentChrome:
                 self._reader.start()
             self.product = self.command("Browser.getVersion").get("product", "")
             version = re.fullmatch(r"(?:Chrome|HeadlessChrome)/(\d+)\.[0-9.]+", self.product)
-            if not version or int(version[1]) < 144:
-                raise OwnershipError("Existing Chrome requires Chrome 144+ with native approval.")
+            if not version or int(version[1]) < 145:
+                raise OwnershipError("Look requires Chrome 145+ with native approval and regular-profile identification. Update Chrome.")
             contexts = self.command("Target.getBrowserContexts")
             context = contexts.get("defaultBrowserContextId")
             if not isinstance(context, str) or not context or context in contexts.get("browserContextIds", []):
-                raise OwnershipError("Chrome cannot identify its regular profile safely. Update Chrome; private/multiple profiles are unsupported.")
+                raise OwnershipError("Chrome did not provide a safe regular-profile identity (Target.getBrowserContexts.defaultBrowserContextId). Update to stable Chrome 145+; private/multiple profiles are unsupported.")
             self.default_context = context
             self.command("Target.getTargets")  # Capability check before any Runtime/page access.
             with self._lock:
