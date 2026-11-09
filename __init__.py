@@ -156,13 +156,26 @@ def register(ctx: Any) -> None:
                 if speech_worker.is_alive():
                     result += "\nRead aloud is still stopping."
             return result
-        if command in ("", "connect", "start"):
+        if (command in ("", "connect", "start") or
+                command.split()[:1] in (["start"], ["connect"]) and
+                command.split()[1:] in (["--existing"], ["--existing", "--accept"], ["--separate"])):
             if not kwargs.get("session_id") or not kwargs.get("session_key"):
                 return "Run /look start in a live Hermes conversation."
-            result = _handle_slash_command("start")
-            if not session.cdp.is_connected:
-                return result
-            turns.bind("connect", **kwargs)
+            requested_source = ("existing" if "--existing" in command else
+                                "owned" if "--separate" in command else session.cdp.source)
+            with turns.lock:
+                generation = turns.binding_generation
+            def ready():
+                with turns.lock:
+                    if (not turns.closed and turns.binding_generation == generation
+                            and session.cdp.source == requested_source):
+                        turns.bind("connect", **kwargs)
+            result = (_handle_slash_command(command, on_ready=ready)
+                      if "--existing" in command else _handle_slash_command(command or "start"))
+            if (command.endswith("--existing") or session.cdp.source != requested_source
+                    or not session.cdp.is_connected):
+                return result  # Disclosure/refused source changes never bind the old browser.
+            ready()
             if not initialized:
                 result += "\nSend a normal message in Hermes and wait for its answer before asking in Chrome."
             from .voice import recognition_ready, recognition_status

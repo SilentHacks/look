@@ -50,6 +50,7 @@ class VoiceTurns:
         self.lock = threading.RLock()
         self.injection_lock = threading.RLock()
         self.binding = None
+        self.binding_generation = 0
         self.owner_session = ""
         self.pending = []
         self.active = None
@@ -105,6 +106,7 @@ class VoiceTurns:
                 self.selected = ""
                 self.paused = False
             self.owner_session = session_id
+            self.binding_generation += 1
             self.binding = dict(session_key=session_key, session_id=session_id, platform=platform)
             self.publish()
             return "Look is connected."
@@ -816,6 +818,7 @@ class VoiceTurns:
         self._pump()
 
     def _disconnect(self):
+        self.binding_generation += 1  # Invalidate delayed connection callbacks before teardown.
         TIMINGS.stop()
         tasks = getattr(self.session, "tasks", None)
         if tasks:

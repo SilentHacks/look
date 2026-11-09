@@ -104,8 +104,52 @@ In a new Hermes conversation:
    fresh conversation from a Chrome question; no hidden warm-up turn is sent.
 2. Run `/look setup` once to prepare local speech recognition. Downloads are explicit;
    setup never opens devices. Questions and page context still go to your Hermes model.
-3. Run `/look` (or `/look start`) to open the companion Chrome.
+3. Choose a browser: `/look start --existing` explains **Use my Chrome** before
+   any discovery-file read; `/look start --separate` uses the separate Look Chrome.
+   Bare `/look` keeps the current process's source (separate Chrome by default).
    Point at something. Hold Space. Wait for **Listening**, then ask. Release to finish.
+
+### Use my existing Chrome
+
+1. In your ordinary stable Chrome 144+, enter `chrome://inspect/#remote-debugging`
+   and enable **Allow remote debugging for this browser instance**. Look never
+   launches, restarts or navigates your existing browser during setup.
+2. Run `/look start --existing`, read the disclosure, then
+   `/look start --existing --accept`. Approve only the Chrome request you just
+   initiated. One connection serves all supported tabs; approval can take up to
+   120 seconds. `/look stop` cancels; cancel any remaining native prompt too.
+3. `/look status` distinguishes waiting, connecting, ready and failure. Open an
+   ordinary HTTP(S) tab in the authorized profile. No local-file tabs, private/
+   guest contexts or unidentifiable profiles. Chrome must expose a provable
+   regular-context identity; some older 144+ builds may require an update.
+4. `/look stop` removes Look's overlays/scripts/sessions and cancels capture,
+   output and action approvals. Chrome, tabs and data remain. Remote debugging
+   may still be enabled: turn it off in Chrome at the address above. Root loss,
+   denial and timeout never trigger background consent retries.
+
+Chrome grants **broad debugger authority**, including signed-in pages and browser
+data, not a read-only/pointed-element permission or authenticated Look identity.
+Look instruments supported background web tabs to follow focus, but only the
+foreground protected frame receives inbox content. Bounded question evidence
+goes to your configured model and may remain in Hermes history (see Privacy).
+Other authorized debuggers/local software are outside the website isolation
+boundary. No extension, relay, MCP, copied profile, new dependency or raw
+debugger tools are added. Only Chrome's narrowly validated discovery file is
+read, after explicit acceptance; no personal profile stores are read by discovery.
+
+Support lane: stable Chrome at its standard macOS location, one provable regular
+context. Multiple signed-in profiles, incognito/guest, custom data roots and
+managed policy behavior are not verified. Unknown/different contexts are
+excluded; new-tab operations pin and validate the source context or fail.
+There is no silent fallback to separate Chrome. After Stop, use
+`/look start --separate` explicitly to change source.
+
+Verification: fake-server consent/denial/cancellation/routing and disposable
+Chrome 156.0.8078.81 flattened renderer/Stop/context-navigation checks pass.
+The disposable wire probe uses an independently token-verified owned browser;
+it does **not** prove native human approval. Native Allow/deny/revoke and the
+user-operated existing signed-in session trial remain release gates. No real
+devices or personal browser/account were accessed by these probes.
 
 ### Commands
 
@@ -129,8 +173,8 @@ undo typing/navigation or cancel a Hermes turn already accepted by the host.
 Start reconnects in cursor mode; eye tracking always needs an explicit start.
 Closing companion tabs alone does not stop the separate camera. `/look status`
 reports camera activity even without an attached page; `/look stop` releases both.
-Stop leaves Chrome's local debugging port live until that Chrome process exits.
-It keeps the dedicated profile and sign-ins; it never kills a browser process.
+In separate-Chrome mode, Stop leaves its local debugging port live until Chrome
+exits. It keeps that dedicated profile and sign-ins; it never kills a browser.
 Start can reuse that verified browser, including after a Hermes process restart.
 
 **Compatibility:** `/gaze` and `hermes gaze` remain aliases. `connect` means `start`,
@@ -139,8 +183,9 @@ Start can reuse that verified browser, including after a Hermes process restart.
 The plugin/install/config key is still `hermes-gaze`; Python packages, `gaze_*`
 tool schemas, caches, Chrome profile, calibration and bundled skill identifiers
 are unchanged. Existing configuration and saved calibration need no migration.
-The old first-run marker is no longer used: bare `/look` and `/gaze` always start;
-only explicit `setup` prepares downloads. Detailed tracker counters moved from
+Bare `/look` and `/gaze` keep the chosen source for this process; an existing
+Chrome reconnect requires explicit acceptance again. Only explicit `setup`
+prepares downloads. Detailed tracker counters moved from
 ordinary `tracker`/`status` output to `diagnostics`.
 
 After updating the installed plugin, quit Hermes, run `hermes gateway stop`, then
@@ -236,8 +281,9 @@ descriptions; extra page text is off by default. Details follow below.
 This is bounded page structure, not universal screen vision. Cross-origin
 frames, canvas and unknown custom widgets may be unavailable. Detached targets
 fail rather than being guessed. Eye estimates cannot replace precise controls
-or certify accessibility. The companion is a separate browser profile: existing
-Chrome sign-ins are not automatically shared.
+or certify accessibility. Separate Look Chrome does not share existing sign-ins.
+Use the explicitly disclosed existing-Chrome connection above to work in signed-in
+ordinary web tabs; it carries broad debugger authority, not a reduced permission.
 
 ### Runtime downloads
 

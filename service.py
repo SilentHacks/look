@@ -463,7 +463,10 @@ def _show_source(session: Any, item_id: str, here: Any) -> dict:
     url = safe_link(item.get("source_url"))
     if not url:
         return {"ok": False, "error": "That page can’t be reopened."}
-    session.cdp.open_url(url)
+    if session.cdp.source == "existing":
+        session.cdp.open_url(url, target=snapshot.get("browser_target"), document=snapshot.get("browser_document"))
+    else:
+        session.cdp.open_url(url)
     return {"ok": True, "item_id": item_id, "shown": "reopened"}
 
 

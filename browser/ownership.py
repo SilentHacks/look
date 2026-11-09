@@ -35,6 +35,24 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         raise OwnershipError("Chrome discovery redirected. Refusing this debugging endpoint.")
 
 
+def acquire_runtime_lease(profile: Path):
+    """Lock Look's own runtime directory, never a borrowed Chrome profile."""
+    if profile.is_symlink():
+        raise OwnershipError("Look's companion profile must not be a symlink.")
+    profile.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if profile.stat().st_uid != os.getuid():
+        raise OwnershipError("Look's companion profile belongs to another OS user.")
+    profile.chmod(0o700)
+    fd = os.open(profile / ".look-runtime.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    lease = os.fdopen(fd, "r+")
+    try:
+        fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lease.close()
+        raise OwnershipError("Another Look runtime owns the companion. Stop Look in that Hermes process first.") from None
+    return lease
+
+
 class OwnedChrome:
     def __init__(self, http_url: str, profile_dir: Path | None = None) -> None:
         self.http_url = local_cdp_url(http_url)
@@ -54,20 +72,7 @@ class OwnedChrome:
     def _acquire(self) -> None:
         if self._lease is not None:
             return
-        if self.profile.is_symlink():
-            raise OwnershipError("Look's companion profile must not be a symlink.")
-        self.profile.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.profile.stat().st_uid != os.getuid():
-            raise OwnershipError("Look's companion profile belongs to another OS user.")
-        self.profile.chmod(0o700)
-        fd = os.open(self.profile / ".look-runtime.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        lease = os.fdopen(fd, "r+")
-        try:
-            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            lease.close()
-            raise OwnershipError("Another Look runtime owns the companion. Stop Look in that Hermes process first.") from None
-        self._lease = lease
+        self._lease = acquire_runtime_lease(self.profile)
 
     def _read_token(self) -> str:
         try:

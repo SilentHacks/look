@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from .cdp_bridge import CdpSession
+from .consent import ConsentChrome
 from .ownership import OwnedChrome, OwnershipError
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,10 @@ class NoForegroundTab(ConnectionError):
 class Companion:
     def __init__(self, http_url: str, *, profile_dir=None) -> None:
         self.chrome = OwnedChrome(http_url, profile_dir)
+        self._owned_chrome = self.chrome
+        self.source = "owned"
+        self.on_disconnect = None
+        self._consent_worker = None
         self._lifecycle = threading.RLock()
         self.overlay_config: dict = {}
         self.intent_nonce = ""
@@ -35,7 +40,7 @@ class Companion:
 
     @property
     def http_url(self) -> str:
-        return self.chrome.http_url
+        return self._owned_chrome.http_url
 
     @property
     def is_connected(self) -> bool:
@@ -46,6 +51,9 @@ class Companion:
         self._handler = handler
 
     def start(self, url: str = "about:blank") -> bool:
+        if self.source == "existing":
+            self.chrome.attach()  # Never launch or obtain new consent implicitly.
+            return self.is_connected
         with self._lifecycle:
             try:
                 self.chrome.start(url)
@@ -53,6 +61,64 @@ class Companion:
             except Exception:
                 self.close()
                 raise
+
+    @property
+    def connection_status(self) -> dict:
+        if self.source == "existing":
+            return dict(source=self.source, state=self.chrome.state, error=self.chrome.error)
+        return dict(source=self.source, state="connected" if self.is_connected else "stopped", error="")
+
+    def start_existing(self, *, metadata_path=None, timeout=120, on_ready=None) -> dict:
+        """Explicit disclosed action only; return immediately so Stop can cancel consent."""
+        with self._lifecycle:
+            if self.source == "owned" and (self.is_connected or self._thread and self._thread.is_alive()):
+                raise OwnershipError("Stop Look before changing browser source.")
+            if self._consent_worker and self._consent_worker.is_alive():
+                return self.connection_status
+            if self.source == "existing" and self.chrome.live:
+                return self.connection_status
+            self.close()
+            self.source = "existing"
+            chrome = ConsentChrome(metadata_path=metadata_path, lease_dir=self._owned_chrome.profile)
+            self.chrome = chrome
+            chrome.on_loss = lambda: self._consent_lost(chrome)
+
+            def run():
+                try:
+                    chrome.start(timeout=timeout)
+                    if chrome is self.chrome and chrome.live:
+                        self.connect()
+                        while chrome is self.chrome and chrome.live and not self._stop.is_set():
+                            if self.is_connected:
+                                # Stop and binding cannot pass each other after a late Allow.
+                                with self._lifecycle:
+                                    if chrome is self.chrome and chrome.live and not self._stop.is_set() and on_ready:
+                                        on_ready()
+                                break
+                            self._stop.wait(.1)
+                except (OSError, ValueError):
+                    pass  # Sanitized error/state belongs to this attempt, read by status.
+            self._consent_worker = threading.Thread(target=run, name="look-chrome-approval", daemon=True)
+            self._consent_worker.start()
+            return self.connection_status
+
+    def use_owned(self) -> None:
+        with self._lifecycle:
+            if self.source == "existing":
+                if self.chrome.live or self._consent_worker and self._consent_worker.is_alive():
+                    raise OwnershipError("Stop Look before changing browser source.")
+                self.close()
+                self.chrome = self._owned_chrome
+                self.source = "owned"
+
+    def _consent_lost(self, chrome) -> None:
+        if self.chrome is chrome:
+            self._stop.set()  # Wake startup before its lifecycle lock is available.
+        with self._lifecycle:
+            if self.chrome is chrome:
+                self._stop.set()
+                if self.on_disconnect:
+                    self.on_disconnect()
 
     def connect(self) -> bool:
         with self._lifecycle:
@@ -78,9 +144,39 @@ class Companion:
         if tab is not None:
             tab.push_level(level)
 
-    def open_url(self, url: str) -> None:
-        """Open a validated http(s) destination beside the current tab; the URL is never fetched here."""
-        self.chrome.command("Target.createTarget", {"url": url})
+    def open_url(self, url: str, *, target: str | None = None, document: str | None = None) -> None:
+        """Open beside an exact source, never Chrome's mutable last-used profile."""
+        source = None
+        if self.source == "existing":
+            if target:
+                with self._lock:
+                    source = self._tabs.get(target)
+                if source is None or not document or source._context_unique_id != document:
+                    raise OwnershipError("The source profile cannot be proved. Open the page yourself.")
+            else:
+                source = self._target()
+        self._create_target(url, source)
+
+    def _create_target(self, url: str, source: CdpSession | None = None) -> str:
+        params = {"url": url}
+        if self.source == "existing":
+            self.chrome.attach()
+            if source is None or not source.is_connected:
+                raise OwnershipError("The source profile cannot be proved. Open the page yourself.")
+            context = self.chrome.command("Target.getBrowserContexts").get("defaultBrowserContextId")
+            info = self.chrome.command("Target.getTargetInfo", {"targetId": source._target_id})["targetInfo"]
+            if (context != self.chrome.default_context or info.get("browserContextId") != context
+                    or info.get("targetId") != source._target_id):
+                raise OwnershipError("Chrome's profile changed. Stop Look and connect again explicitly.")
+            if not url.startswith(("http://", "https://")):
+                raise OwnershipError("Existing Chrome supports ordinary web pages only.")
+            params["browserContextId"] = context
+        target = self.chrome.command("Target.createTarget", params)["targetId"]
+        if self.source == "existing":
+            info = self.chrome.command("Target.getTargetInfo", {"targetId": target})["targetInfo"]
+            if info.get("targetId") != target or info.get("browserContextId") != params["browserContextId"]:
+                raise OwnershipError("New tab profile could not be verified; outcome unknown. Do not repeat the action.")
+        return target
 
     def show_document(self, target: str | None, document: str | None) -> bool:
         """Bring a captured source tab forward only if that exact document still exists."""
@@ -121,6 +217,8 @@ class Companion:
     def open_start_page(self, valid) -> dict:
         """Explicit fallback only. Never navigate an existing, unrelated tab."""
         from pathlib import Path
+        if self.source == "existing":
+            raise OwnershipError("Open an ordinary web page in your Chrome, then return to it. Look will not open a local setup file there.")
         if not valid():
             raise ConnectionError("Setup connection changed. Start setup again in Hermes.")
         if self._return_tab(self._start_owner) is not None:
@@ -187,8 +285,8 @@ class Companion:
         tab = self._owned_tab(owner)
         old_document = tab._context_unique_id
         if new_tab:
-            target = self.chrome.command("Target.createTarget", {"url": url})["targetId"]
-            tab._submit(tab._send_cmd("Target.activateTarget", {"targetId": target}, timeout=2.), 3.)
+            target = self._create_target(url, tab)
+            self.chrome.command("Target.activateTarget", {"targetId": target})
         else:
             result = tab._submit(tab._send_cmd("Page.navigate", {"url": url}, timeout=5.), 6.)
             if result.get("errorText"):
@@ -257,14 +355,24 @@ class Companion:
         while not self._stop.is_set():
             try:
                 targets = self.chrome.command("Target.getTargets")["targetInfos"]
+                if self.source == "existing":
+                    context = self.chrome.command("Target.getBrowserContexts").get("defaultBrowserContextId")
+                    if context != self.chrome.default_context:
+                        self.chrome.abort()
+                        raise OwnershipError("Chrome's profile changed. Connect again explicitly.")
                 targets = [dict(t, id=t["targetId"]) for t in targets]
                 pages = {str(t["id"]): t for t in targets
                          if t.get("type") == "page"
-                         and str(t.get("url", "")).startswith(("http://", "https://", "file://", "about:blank"))}
+                         and str(t.get("url", "")).startswith(
+                             ("http://", "https://") if self.source == "existing"
+                             else ("http://", "https://", "file://", "about:blank"))
+                         and (self.source != "existing" or t.get("browserContextId") == self.chrome.default_context)}
                 # Navigation can temporarily clear a listed target's URL. It is not a closed tab.
                 # Keep the pinned transport; only eligible URLs admit new attachments below.
                 with self._lock:
-                    removed = [self._tabs.pop(key) for key in set(self._tabs) - {str(t["id"]) for t in targets}]
+                    retained = {str(t["id"]) for t in targets if self.source != "existing"
+                                or t.get("browserContextId") == self.chrome.default_context}
+                    removed = [self._tabs.pop(key) for key in set(self._tabs) - retained]
                 for tab in removed:
                     tab.close()
                 for key, page in pages.items():
@@ -303,7 +411,17 @@ class Companion:
                     self._last_foreground = self._start_owner = None
                 for tab in tabs:
                     tab.close()
+                if self.source == "existing":
+                    self.chrome.abort()
+                    self.chrome.close()
+                    break  # No new authorization from discovery/reconnect loops.
             self._stop.wait(.25)
+        if self.source == "existing":
+            with self._lock:
+                tabs, self._tabs = list(self._tabs.values()), {}
+            for tab in tabs:
+                tab.close()
+            self.chrome.close()
 
     def _attach(self, tab: CdpSession) -> None:
         """A page that won't load must not hold up every other tab; retry it now and then."""
@@ -467,8 +585,11 @@ class Companion:
                 tab.push_overlay_config()
 
     def close(self) -> None:
+        self._stop.set()
+        if (self.source == "existing" and self._consent_worker and self._consent_worker.is_alive()
+                and self.chrome.state in ("idle", "discovering", "waiting")):
+            self.chrome.close()  # Cancel the handshake before waiting for startup.
         with self._lifecycle:
-            self._stop.set()
             if self._thread:
                 self._thread.join()
             with self._lock:

@@ -19,6 +19,8 @@ from .tools import handle_gaze_resolve
 
 
 HELP = """/look · /look start     Start in Chrome
+/look start --existing   Use my Chrome (shows disclosure first)
+/look start --separate   Use separate Look Chrome
 /look stop              Stop Look; keep browser tabs
 /look status            Show current state
 /look calibrate         Set up eye tracking
@@ -104,7 +106,7 @@ def _tracker_summary(session) -> str:
     return "Eye tracking is on."
 
 
-def _handle_slash_command(raw_args: str) -> str:
+def _handle_slash_command(raw_args: str, *, on_ready=None) -> str:
     argv = (raw_args or "").strip().split()
     sub = argv[0].lower() if argv else "start"
     tail = [arg.lower() for arg in argv[1:]]
@@ -145,6 +147,28 @@ def _handle_slash_command(raw_args: str) -> str:
             lines.append(f"turn {turn['turn']}: max gap {turn['heartbeat_max_gap_ms']}ms{slow}")
         return "\n".join(lines)
 
+    if sub in ("start", "connect") and (tail or session.cdp.source == "existing"):
+        from .browser.consent import DISCLOSURE, PREPARE
+        if tail == ["--separate"]:
+            try:
+                session.cdp.use_owned()
+            except OSError as exc:
+                return str(exc)
+            return _handle_slash_command("start")
+        if tail not in ([], ["--existing"], ["--existing", "--accept"]):
+            return "Usage: /look start --existing [--accept] | --separate"
+        if platform.system() != "Darwin" or platform.machine() != "arm64":
+            return "Existing Chrome is supported on Apple Silicon Mac only."
+        if tail != ["--existing", "--accept"]:
+            if session.cdp.source == "existing" and session.cdp.is_connected:
+                return "Look is ready in your Chrome."
+            return DISCLOSURE + "\\n" + PREPARE + "\\nTo connect: /look start --existing --accept"
+        try:
+            session.cdp.start_existing(on_ready=on_ready)
+        except OSError as exc:
+            return str(exc)
+        return _existing_status(session)
+
     if sub in ("start", "connect") and not tail:
         if platform.system() not in ("Darwin", "Linux"):
             return platform_notice()
@@ -165,9 +189,13 @@ def _handle_slash_command(raw_args: str) -> str:
         session.close()
         session.configure(mode="hover")
         get_shared_server().stop()
-        return "Look stopped. Browser tabs are still open."
+        return ("Look disconnected; Chrome and tabs remain. Remote debugging may still be enabled. "
+                "Turn it off at chrome://inspect/#remote-debugging."
+                if session.cdp.source == "existing" else "Look stopped. Browser tabs are still open.")
 
     if sub == "status" and not tail:
+        if session.cdp.source == "existing":
+            return _existing_status(session)
         if not session.cdp.is_connected:
             state = session.webcam_status()["state"]
             if state in ("preparing", "starting", "loading", "camera", "running", "stopping", "failed"):
@@ -229,6 +257,17 @@ def _handle_slash_command(raw_args: str) -> str:
     if sub in ("listen", "voice") and not tail:
         return handle_gaze_resolve({"record_voice": True, "duration_s": 2.8})
     return "Unknown command or option. /look help shows commands; /look help advanced shows more."
+
+
+def _existing_status(session) -> str:
+    status = session.cdp.connection_status
+    if session.cdp.is_connected:
+        return "Look is ready in your Chrome. Point and ask."
+    if status["state"] in ("idle", "discovering", "waiting"):
+        return "Waiting for Chrome approval (up to 120 seconds). Approve only your request. /look stop to cancel."
+    if status["state"] in ("connecting", "connected"):
+        return "Connecting to your Chrome. Open an ordinary web page; /look status checks readiness, /look stop cancels."
+    return status["error"] or "Chrome disconnected. /look start --existing to connect again explicitly."
 
 
 def _setup_cli(subparser: argparse.ArgumentParser) -> None:

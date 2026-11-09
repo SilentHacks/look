@@ -41,9 +41,13 @@ In a connected `/look` session use these operation schemas. If Hermes defers the
 The supported beta lane is Apple Silicon Mac, standard Google Chrome, one display,
 and English. Explicit `/look setup` prepares local recognition without opening
 hardware or sending a hidden message. Send one normal Hermes message and wait for
-the answer, then `/look` or `/look start` opens the companion. `/look stop` releases
-capture, camera, read-aloud and overlay without closing browser tabs. Launch Hermes
-in a terminal app with microphone permission (camera only for optional eyes). Text fields and keyboard-focused page controls
+the answer. `/look start --existing` discloses broad debugger access; only explicit
+`/look start --existing --accept` reads discovery and requests Chrome's own Allow.
+Never automate native consent. `/look start --separate` selects the owned companion;
+never switch sources after failure. `/look stop` releases
+capture, camera, read-aloud and overlay without closing browser tabs. In existing
+Chrome it does not turn remote debugging off; use chrome://inspect/#remote-debugging.
+Launch Hermes in a terminal app with microphone permission (camera only for optional eyes). Text fields and keyboard-focused page controls
 keep native Space; click ordinary page text before holding to talk. Right Option
 opens protected typed questions while recognition prepares or audio is unavailable.
 Local camera/recognition do not mean local-only questions: Hermes's model receives

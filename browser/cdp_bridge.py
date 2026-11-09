@@ -24,6 +24,7 @@ from collections import deque
 from ..resolver.cursor_context import stamp_resolution
 from ..release_timing import TIMINGS
 from ..config import local_cdp_url
+from .consent import ConsentChrome, TargetChannel
 
 try:
     from plugins.plugin_utils import lazy_singleton
@@ -97,6 +98,7 @@ class CdpSession:
         self._ws: Any = None
         self._pump_task: Optional[asyncio.Task] = None
         self._pending: Dict[int, asyncio.Future] = {}
+        self._script_id: Optional[str] = None
         self._msg_id = 0
         self._target_id: Optional[str] = None
         self._main_frame_id: Optional[str] = None
@@ -190,7 +192,8 @@ class CdpSession:
     @property
     def is_connected(self) -> bool:
         """True only when a websocket is already live — never attempts a connection."""
-        return self._ws is not None and self._ready
+        return (self._ws is not None and self._ready
+                and (not isinstance(self._ws, TargetChannel) or self._ws.live))
 
     def push_overlay_config(self) -> None:
         """Push stored overlay config + intent nonce into the live overlay (post-inject)."""
@@ -212,8 +215,14 @@ class CdpSession:
 
     async def _shutdown_overlay(self) -> None:
         try:
-            if self._ws is not None and self._context_unique_id:
-                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.destroy();true", timeout=2.)
+            if self._ws is not None:
+                if self._script_id:
+                    await self._send_cmd("Page.removeScriptToEvaluateOnNewDocument",
+                                         {"identifier": self._script_id}, timeout=2.)
+                    self._script_id = None
+                if self._context_unique_id:
+                    await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.destroy();true", timeout=2.)
+                await self._send_cmd("Runtime.removeBinding", {"name": _INTENT_BINDING}, timeout=2.)
         finally:
             await self._drop_ws()
 
@@ -228,7 +237,7 @@ class CdpSession:
         except ImportError:
             logger.warning("websockets package is not installed; CDP transport unavailable")
             return False
-        await self._drop_ws()
+        await self._shutdown_overlay()
         tab = self.tab
         if tab is None:
             return False
@@ -239,10 +248,13 @@ class CdpSession:
         target = self._target_id
         if not target or not all(c.isalnum() or c == "-" for c in target):
             raise ConnectionError("Invalid Chrome target identity")
-        self._ws = await websockets.connect(
-            self.http_url.replace("http://", "ws://") + "/devtools/page/" + target,
-            max_size=32 * 1024 * 1024, proxy=None,
-            host="127.0.0.1", port=int(self.http_url.rsplit(":", 1)[1]))
+        if isinstance(self._owner, ConsentChrome):
+            self._ws = await self._owner.channel(target)
+        else:
+            self._ws = await websockets.connect(
+                self.http_url.replace("http://", "ws://") + "/devtools/page/" + target,
+                max_size=32 * 1024 * 1024, proxy=None,
+                host="127.0.0.1", port=int(self.http_url.rsplit(":", 1)[1]))
         if self._closed:
             await self._drop_ws()
             return False
@@ -250,7 +262,8 @@ class CdpSession:
         try:
             if self._owner is None:
                 raise ConnectionError("Chrome transport has no verified companion owner")
-            self._owner.verify_arguments(await self._send_cmd("Browser.getBrowserCommandLine", {}, timeout=3.))
+            if not isinstance(self._owner, ConsentChrome):
+                self._owner.verify_arguments(await self._send_cmd("Browser.getBrowserCommandLine", {}, timeout=3.))
             for method, params in (
                 ("Runtime.enable", {}),
                 ("Page.enable", {}),
@@ -259,12 +272,18 @@ class CdpSession:
                 await self._send_cmd(method, params, timeout=5.0)
             src = _overlay_source()
             if src:
-                await self._send_cmd("Page.addScriptToEvaluateOnNewDocument",
-                                     {"source": src, "worldName": _WORLD}, timeout=5.0)
+                if isinstance(self._owner, ConsentChrome):
+                    src = "if (location.protocol === 'http:' || location.protocol === 'https:') {\n" + src + "\n}"
+                script = await self._send_cmd("Page.addScriptToEvaluateOnNewDocument",
+                                              {"source": src, "worldName": _WORLD}, timeout=5.0)
+                self._script_id = script["identifier"]
             if not await self._on_new_context(force=True):
                 raise ConnectionError("Isolated Chrome overlay did not initialize")
         except Exception:
-            await self._drop_ws()
+            if self._script_id or self._context_unique_id:
+                await self._shutdown_overlay()
+            else:
+                await self._drop_ws()  # Never issue page cleanup against an unverified owned socket.
             raise
         return True
 
@@ -384,6 +403,7 @@ class CdpSession:
         self._ui_context_id = None
         self._ui_context_unique_id = None
         self._ui_frames = {}
+        self._script_id = None
         self._contexts.clear()
         self._fail_pending(ConnectionError("CDP connection reset"))
         task, self._pump_task = self._pump_task, None
@@ -424,10 +444,14 @@ class CdpSession:
         finally:
             if self._ws is ws:
                 self._ws = None
+                self._ready = False
+                self._context_id = self._context_unique_id = None
+                self._ui_frames = {}
+                self._contexts.clear()
                 self._fail_pending(ConnectionError("CDP websocket closed"))
 
     def _handle_event(self, method: str, params: Dict[str, Any]) -> None:
-        if self._closed:
+        if self._closed or isinstance(self._ws, TargetChannel) and not self._ws.live:
             return
         if method == "Runtime.bindingCalled" and params.get("name") == _INTENT_BINDING:
             context = params.get("executionContextId")
@@ -447,7 +471,8 @@ class CdpSession:
         elif method == "Runtime.executionContextCreated":
             context = params.get("context") or {}
             if context.get("name") == _WORLD and context.get("uniqueId"):
-                self._contexts[context["id"]] = context["uniqueId"]
+                prefix = self._ws.document_prefix if isinstance(self._ws, TargetChannel) else ""
+                self._contexts[context["id"]] = prefix + context["uniqueId"]
         elif method == "Runtime.executionContextsCleared":
             self._context_id = None
             self._context_unique_id = None
@@ -488,6 +513,12 @@ class CdpSession:
                     return False
                 try:
                     tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
+                    if isinstance(self._ws, TargetChannel) and not str(
+                            tree["frameTree"]["frame"].get("url", "")).startswith(("http://", "https://")):
+                        self._ready = False
+                        self._context_id = self._context_unique_id = None
+                        self._ui_frames = {}
+                        return False
                     frame_id = tree["frameTree"]["frame"]["id"]
                     self._main_frame_id = frame_id
                     world = await self._send_cmd("Page.createIsolatedWorld",
@@ -555,7 +586,8 @@ class CdpSession:
                 logger.debug("onIntentResult reply failed: %s", exc)
 
         def run() -> None:
-            if self._closed or self._context_unique_id != context_id:
+            if (self._closed or self._ws is None or self._context_unique_id != context_id
+                    or isinstance(self._ws, TargetChannel) and not self._ws.live):
                 return
             try:
                 handler(intent, reply)
@@ -572,6 +604,12 @@ class CdpSession:
     async def _send_cmd(self, method: str, params: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         if self._ws is None:
             raise ConnectionError("CDP websocket is not connected")
+        prefix = self._ws.document_prefix if isinstance(self._ws, TargetChannel) else ""
+        if prefix and "uniqueContextId" in params:
+            context = params["uniqueContextId"]
+            if not isinstance(context, str) or not context.startswith(prefix):
+                raise ConnectionError("Chrome context belongs to a different approved session")
+            params = dict(params, uniqueContextId=context[len(prefix):])
         self._msg_id += 1
         req_id = self._msg_id
         fut = asyncio.get_running_loop().create_future()
@@ -581,6 +619,8 @@ class CdpSession:
             msg = await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._pending.pop(req_id, None)
+            if prefix:
+                self._ws and self._ws.forget(req_id)
         if "error" in msg:
             err = msg["error"]
             raise RuntimeError(f"CDP {method} failed: {err.get('code')} {err.get('message')}")
@@ -661,6 +701,18 @@ class GazeSession:
         self._intent_nonce = secrets.token_hex(8)
         self._cdp.intent_nonce = self._intent_nonce
         self._sync_overlay_config()
+        self._cdp.on_disconnect = self._browser_disconnected
+
+    def _browser_disconnected(self) -> None:
+        from .. import service
+        turns = service._VOICE_TURNS
+        if turns is not None and turns.session is self:
+            with turns.lock:
+                turns._disconnect()
+        else:
+            self.tasks.stop()
+            self.clear_hover_snapshot()
+            self.revoke_webcam()
 
     @property
     def cdp(self) -> Any:
@@ -675,7 +727,7 @@ class GazeSession:
         value = local_cdp_url(value)
         if value != self._cdp.http_url:
             self._cdp.close()
-            self._cdp.chrome.http_url = value
+            self._cdp._owned_chrome.http_url = value
 
     def is_chrome_reachable(self) -> bool:
         return self._cdp.chrome.available()

@@ -70,6 +70,40 @@ class FirstRunTests(unittest.TestCase):
             voice.prepare_recognition.assert_not_called()
             ctx.inject_message.assert_not_called()
 
+    def test_disclosure_and_refused_source_change_cannot_steal_existing_binding(self):
+        from unittest.mock import PropertyMock
+        plugin, session, ctx, command, _ = self.register(None)
+        ctx.turns.bind(session_key="key", session_id="owner")
+        binding = ctx.turns.binding
+        with patch.object(plugin, "_handle_slash_command", wraps=cli._handle_slash_command), \
+             patch.object(cli, "get_shared_session", return_value=session), \
+             patch.object(type(session.cdp), "is_connected", new_callable=PropertyMock, return_value=True):
+            command("start --existing", session_key="other", session_id="other")
+            self.assertIs(ctx.turns.binding, binding)
+            command("start --existing --accept", session_key="other", session_id="other")
+            self.assertIs(ctx.turns.binding, binding)
+
+    def test_late_ready_cannot_replace_newer_binding_or_revive_stop(self):
+        plugin, session, ctx, command, _ = self.register(None)
+        callbacks = []
+        def pending(raw, *, on_ready=None):
+            session.cdp.source = "existing"
+            if on_ready:
+                callbacks.append(on_ready)
+            return "Waiting"
+        with patch.object(plugin, "_handle_slash_command", side_effect=pending):
+            command("start --existing --accept", session_key="old", session_id="old")
+            ctx.turns.bind(session_key="new", session_id="new")
+            binding = ctx.turns.binding
+            ctx.turns.pending.append({"request_id": "retained"})
+            callbacks.pop()()
+            self.assertIs(ctx.turns.binding, binding)
+            self.assertEqual(ctx.turns.pending, [{"request_id": "retained"}])
+            command("start --existing --accept", session_key="new", session_id="new")
+            command("stop", session_key="new", session_id="new")
+            callbacks.pop()()
+            self.assertIsNone(ctx.turns.binding)
+
     def test_read_only_commands_do_not_steal_another_conversation(self):
         plugin, session, ctx, command, _ = self.register(None)
         ctx.turns.bind(session_key="key", session_id="owner")
