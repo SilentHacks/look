@@ -1,41 +1,41 @@
 // Loaded by CDP only, in the tracker window's isolated world. No website runs here.
 (async function (opts) {
   "use strict";
-  const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, ...data}));
+  let flow = 0;
+  const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, flow, ...data}));
   const make = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = text; if (cls) n.className = cls; return n; };
   const style = make("style");
   // Material values are the companion's glass plate (browser/overlay.js) and type (browser/panel.js).
   style.textContent = `
-    :root { color-scheme:light dark; --ground:#efeff2; --label:rgba(0,0,0,.86); --secondary:rgba(60,60,67,.72); --tertiary:rgba(60,60,67,.5);
-      --accent:#0066d6; --tint:rgba(0,102,214,.11); --bars:#0a6fe0; --hover:rgba(0,0,0,.055); --line:rgba(0,0,0,.09);
-      --fill:rgba(250,250,252,.8); --blur:blur(34px) saturate(1.9); --sheen:rgba(255,255,255,.42);
-      --shadow:0 0 0 .5px rgba(0,0,0,.13),0 12px 36px rgba(0,0,0,.17),0 3px 8px rgba(0,0,0,.07),inset 0 .5px 0 rgba(255,255,255,.75);
-      --quiet:0 0 0 .5px rgba(0,0,0,.11),0 5px 16px rgba(0,0,0,.07),inset 0 .5px 0 rgba(255,255,255,.75);
-      --dot:#111316; --tube:rgba(250,250,252,.92); --tube-edge:rgba(0,0,0,.26); --trace:rgba(17,19,22,.36); --hollow:rgba(60,60,67,.55);
-      --region:rgba(0,0,0,.05); --region-edge:rgba(0,0,0,.16); }
-    @media (prefers-color-scheme: dark) { :root { --ground:#1b1b1e; --label:rgba(255,255,255,.92); --secondary:rgba(235,235,245,.68); --tertiary:rgba(235,235,245,.42);
-      --accent:#4ea1ff; --tint:rgba(78,161,255,.17); --bars:#5facff; --hover:rgba(255,255,255,.08); --line:rgba(255,255,255,.11);
-      --fill:rgba(40,40,44,.76); --blur:blur(34px) saturate(1.7); --sheen:rgba(255,255,255,.07);
-      --shadow:0 0 0 .5px rgba(255,255,255,.15),0 14px 44px rgba(0,0,0,.55),0 3px 8px rgba(0,0,0,.3),inset 0 .5px 0 rgba(255,255,255,.1);
-      --quiet:0 0 0 .5px rgba(255,255,255,.13),0 5px 16px rgba(0,0,0,.3),inset 0 .5px 0 rgba(255,255,255,.1);
-      --dot:#fff; --tube:rgba(64,64,70,.92); --tube-edge:rgba(255,255,255,.3); --trace:rgba(255,255,255,.4); --hollow:rgba(235,235,245,.4);
-      --region:rgba(255,255,255,.07); --region-edge:rgba(255,255,255,.24); }
-      /* The screen is the light on the face: the dots and check always use the bright field. */
-      body.focus { --ground:#dfdfe3; --label:rgba(0,0,0,.86); --secondary:rgba(60,60,67,.72); --line:rgba(0,0,0,.09);
-        --fill:rgba(250,250,252,.8); --blur:blur(34px) saturate(1.9); --sheen:rgba(255,255,255,.42); --dot:#111316;
-        --quiet:0 0 0 .5px rgba(0,0,0,.11),0 5px 16px rgba(0,0,0,.07),inset 0 .5px 0 rgba(255,255,255,.75); } }
+    :root { color-scheme:light dark; --ground:#efeff2; --label:#202124; --secondary:#62636a; --tertiary:#797a80;
+      --accent:#0066d6; --tint:rgba(0,102,214,.10); --hover:rgba(35,36,40,.13); --line:rgba(35,36,40,.13);
+      --fill:rgba(250,250,252,.82); --blur:blur(34px) saturate(1.6); --sheen:rgba(255,255,255,.8);
+      --shadow:0 0 0 .5px rgba(0,0,0,.13),0 12px 36px rgba(0,0,0,.12),0 3px 8px rgba(0,0,0,.04),inset 0 1px 0 rgba(255,255,255,.8);
+      --quiet:var(--shadow); --dot:#202124; }
+    @media (prefers-color-scheme:dark) { :root { --ground:#1b1b1e; --label:#f2f2f5; --secondary:#b5b5be; --tertiary:#96969e;
+      --accent:#6aaeff; --tint:rgba(78,161,255,.17); --hover:rgba(255,255,255,.17); --line:rgba(255,255,255,.17);
+      --fill:rgba(44,44,48,.86); --sheen:rgba(255,255,255,.1);
+      --shadow:0 0 0 .5px rgba(255,255,255,.17),0 12px 36px rgba(0,0,0,.36),inset 0 1px 0 rgba(255,255,255,.1); } }
+    /* Measurement is a bright neutral field in either appearance. */
+    body.focus { --ground:#efeff2; --label:#202124; --secondary:#62636a; --line:rgba(35,36,40,.13);
+      --fill:rgba(250,250,252,.82); --dot:#202124; --accent:#0066d6;
+      --shadow:0 0 0 .5px rgba(0,0,0,.13),0 12px 36px rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.8); }
     * { box-sizing:border-box; }
     html,body { height:100%; margin:0; }
     body { background:var(--ground); color:var(--label); overflow:hidden; -webkit-font-smoothing:antialiased; letter-spacing:-.006em; cursor:default;
       font:15px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif; transition:background-color .6s ease; }
-    .glass { background:linear-gradient(180deg,var(--sheen),transparent 46%),var(--fill); -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur); box-shadow:var(--shadow); }
-    #beta { position:fixed; left:28px; top:24px; margin:0; font-size:13px; color:var(--tertiary); }
-    body.focus #beta,body.practising #beta { display:none; }
-    main { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; }
+    [hidden] { display:none!important; }
+    .glass { background:var(--fill); -webkit-backdrop-filter:var(--blur); backdrop-filter:var(--blur); box-shadow:var(--shadow); }
+    h1 { font-size:32px; line-height:1.14; letter-spacing:-.035em; font-weight:600; margin:9px 0 12px; text-align:center; }
+    main.result h1 { font-size:36px; }
+    .rail { position:fixed; top:24px; left:30%; transform:translateX(-50%); display:flex; gap:14px; align-items:baseline; color:var(--secondary); font-size:13px; }
+    .rail strong { color:var(--label); font-weight:500; }
+    #cancel { position:fixed; top:16px; left:70%; transform:translateX(-50%); font-size:13px; }
+    main { position:fixed; inset:52px 24px 36px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; }
     .arrive { animation:arrive .42s cubic-bezier(.2,.8,.2,1) both; }
     @keyframes arrive { from { opacity:0; transform:translateY(8px) scale(.985); } }
     #feed { position:fixed; left:0; top:0; width:2px; height:2px; opacity:0; pointer-events:none; }
-    .face { position:relative; width:min(336px,46vh); height:min(336px,46vh); border-radius:50%; padding:9px; flex:none; margin-bottom:6px; }
+    .face { position:relative; width:230px; height:230px; border-radius:50%; padding:8px; flex:none; margin-bottom:22px; }
     .face .picture { position:relative; width:100%; height:100%; border-radius:50%; overflow:hidden; background:var(--ground); box-shadow:inset 0 0 0 .5px var(--line),inset 0 1px 3px rgba(0,0,0,.08); }
     .face video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); display:block; }
     .face.off video,.face.off .guide,.face.off .you { display:none; }
@@ -46,12 +46,10 @@
     .you { left:50%; top:48%; width:62%; height:62%; opacity:0; border:2px solid #fff; filter:drop-shadow(0 0 2px rgba(0,0,0,.45));
       transition:left .22s ease,top .22s ease,width .22s ease,height .22s ease,opacity .25s ease; }
     .face.placed .guide { opacity:0; }
-    .note { max-width:560px; margin:0; font-size:13px; color:var(--secondary); text-align:center; }
-    .note.notice { color:var(--label); font-weight:500; }
+    .note { max-width:390px; margin:0; font-size:15px; line-height:1.5; color:var(--secondary); text-align:center; }
     .note.kept { color:var(--tertiary); margin-top:-8px; }
-    .detail { margin:0; max-width:420px; font-size:12px; color:var(--tertiary); text-align:center; overflow-wrap:anywhere; }
-    .row { display:inline-flex; align-items:center; gap:3px; padding:5px; border-radius:26px; margin-top:6px; max-width:calc(100vw - 32px); }
-    button { all:unset; box-sizing:border-box; white-space:nowrap; height:38px; line-height:38px; padding:0 18px; border-radius:19px; font-size:14px; font-weight:400; color:var(--secondary); transition:background-color .16s ease,opacity .16s ease; }
+    .row { display:inline-flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:3px; padding:5px; border-radius:28px; margin-top:24px; max-width:calc(100vw - 32px); }
+    button { all:unset; box-sizing:border-box; cursor:pointer; white-space:nowrap; padding:11px 19px; border-radius:22px; font-size:14px; font-weight:400; color:var(--secondary); transition:background-color .16s ease,opacity .16s ease; }
     button:hover { background-color:var(--hover); }
     button.primary { background-color:var(--tint); color:var(--accent); font-weight:600; }
     button.primary:hover { filter:brightness(1.05); }
@@ -61,47 +59,32 @@
     button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .key { display:inline-block; padding:0 12px; height:25px; line-height:24px; border-radius:7px; font-size:12.5px; font-weight:500; color:var(--label); background:linear-gradient(180deg,var(--sheen),transparent 60%),var(--fill);
       box-shadow:0 0 0 .5px var(--line),0 1.5px 0 var(--line),0 3px 8px rgba(0,0,0,.08),inset 0 .5px 0 var(--sheen); vertical-align:baseline; transition:transform .1s ease,box-shadow .1s ease; }
-    .key.down { transform:translateY(1.5px); box-shadow:0 0 0 .5px var(--line),inset 0 .5px 0 var(--sheen); }
-    #dot { position:fixed; left:0; top:0; width:0; height:0; display:none; transition:transform .55s cubic-bezier(.3,.7,.2,1); }
+    #dot { --size:clamp(44px,11vw,108px); position:fixed; left:0; top:0; width:0; height:0; display:none; }
     #dot .disc,#dot .pt { position:absolute; border-radius:50%; }
-    #dot .disc { left:-56px; top:-56px; width:112px; height:112px; box-shadow:var(--quiet); transition:transform .42s cubic-bezier(.2,.9,.3,1); }
-    #dot .pt { left:-5.5px; top:-5.5px; width:11px; height:11px; background:var(--dot); transition:transform .3s ease; }
-    #dot.collect .disc { transform:scale(.27); transition:transform var(--ms,1.1s) cubic-bezier(.45,0,.55,1); }
-    #dot.collect .pt { transform:scale(1.9); transition:transform var(--ms,1.1s) cubic-bezier(.45,0,.55,1); }
-    #dot.travel .disc { transform:scale(.38); }
-    #dot.shake { animation:shake .34s ease; }
-    @keyframes shake { 25% { margin-left:-7px; } 60% { margin-left:6px; } 85% { margin-left:-2px; } }
-    .echo { position:fixed; left:0; top:0; width:30px; height:30px; margin:-15px 0 0 -15px; border-radius:50%; pointer-events:none; box-shadow:0 0 0 1px var(--dot); opacity:0; animation:echo .5s ease-out forwards; }
-    @keyframes echo { from { opacity:.34; scale:1; } to { opacity:0; scale:2.7; } }
-    #cue { position:fixed; left:0; top:0; display:none; align-items:center; gap:7px; font-size:13px; color:var(--secondary); white-space:nowrap; transition:opacity .2s ease; }
-    #practice { position:fixed; inset:0; display:none; padding:24px 24px 88px; grid:1fr 1fr / 1fr 1fr 1fr; gap:14px; }
-    .topic { display:grid; place-items:center; border-radius:22px; box-shadow:var(--quiet); background:var(--fill); font:500 24px/1.2 -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif; letter-spacing:-.018em; }
-    #region { position:fixed; left:0; top:0; width:42vmin; height:42vmin; margin:-21vmin 0 0 -21vmin; border-radius:50%; pointer-events:none; opacity:0;
-      background:var(--region); box-shadow:0 0 0 .5px var(--region-edge),0 6px 22px rgba(0,0,0,.09),inset 0 .5px 0 var(--sheen); transition:transform .3s cubic-bezier(.3,.7,.3,1),opacity .35s ease; }
-    #bar { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); display:none; align-items:center; gap:3px; max-width:calc(100vw - 32px); padding:5px 5px 5px 20px; border-radius:26px; }
-    #bar .words { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; margin-right:14px; font-size:13px; color:var(--secondary); }
+    #dot .disc { left:calc(var(--size) / -2); top:calc(var(--size) / -2); width:var(--size); height:var(--size); box-shadow:var(--quiet); transition:transform .42s cubic-bezier(.2,.9,.3,1); }
+    #dot .pt { left:-5px; top:-5px; width:10px; height:10px; background:var(--dot); transition:transform .3s ease; }
+    #dot.collect .disc { transform:scale(.29); transition:transform var(--ms,1.1s) cubic-bezier(.45,0,.55,1); }
+    #dot.collect .pt { transform:scale(2.4); transition:transform var(--ms,1.1s) cubic-bezier(.45,0,.55,1); }
+    #cue { position:fixed; left:0; top:0; display:none; width:270px; max-width:calc(100vw - 32px); text-align:center; font-size:13px; color:var(--secondary); line-height:1.5; }
+    #practice { position:fixed; inset:60px 36px 120px; display:none; grid:1fr 1fr / 1fr 1fr 1fr; gap:16px; }
+    .topic { display:grid; place-items:center; border-radius:24px; box-shadow:inset 0 0 0 .5px var(--line); background:var(--fill); font:500 23px/1.2 -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif; letter-spacing:-.018em; }
+    .topic.selected { box-shadow:var(--shadow),inset 0 0 0 2px var(--line); }
+    #bar { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); display:none; flex-direction:column; align-items:center; gap:12px; max-width:calc(100vw - 32px); }
+    #bar .words { font-size:13px; color:var(--secondary); }
     #lesson { display:flex; flex-direction:column; align-items:center; gap:14px; margin-bottom:10px; }
-    #say { display:flex; align-items:center; gap:12px; font:500 22px/1.2 -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif; letter-spacing:-.018em; }
-    #say .key { height:44px; line-height:43px; padding:0 34px; border-radius:11px; font-size:17px; }
-    #capsule { display:flex; align-items:center; gap:10px; height:36px; padding:0 16px 0 14px; border-radius:18px; font-size:12.5px; font-weight:500; color:var(--label); opacity:0; transform:translateY(5px); transition:opacity .2s ease,transform .2s ease; }
-    #capsule.on { opacity:1; transform:none; }
-    #capsule .bars { display:flex; align-items:center; gap:2.4px; height:18px; }
-    #capsule .bars i { width:2.6px; height:16px; border-radius:1.3px; background:var(--bars); transform:scaleY(.22); }
-    #capsule.on .bars i { animation:level 1.05s ease-in-out infinite; }
-    #capsule.on .bars i:nth-child(2n) { animation-delay:-.32s; }
-    #capsule.on .bars i:nth-child(3n) { animation-delay:-.61s; }
-    @keyframes level { 50% { transform:scaleY(.86); } }
-    #rehearse { min-height:18px; }
-    @media (max-width:760px) { #bar { flex-wrap:wrap; border-radius:22px; } #bar .words { white-space:normal; } }
-    @media (prefers-reduced-motion: reduce) { .arrive,.place,.pop,.draw,.face.waking,#dot.shake,#capsule.on .bars i { animation:none; } .echo { display:none; }
-      body,#dot,#dot .disc,#dot .pt,#dot.collect .disc,#dot.collect .pt,#region,.you { transition:none; } #capsule.on .bars i { transform:scaleY(.6); } }
+    #say { display:flex; align-items:center; gap:9px; }
+    #say .key { height:38px; line-height:37px; padding:0 13px; font-size:24px; }
+    @media (max-width:850px) { .face { width:184px; height:184px; } h1 { font-size:28px; } main.result h1 { font-size:30px; } #practice { inset:40px 20px 130px; gap:10px; } .topic { font-size:19px; } }
+    @media (max-width:520px) { #practice { grid:1fr 1fr 1fr / 1fr 1fr; } .topic { font-size:17px; } .rail { font-size:12px; gap:8px; } }
+    @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
     @media (prefers-reduced-transparency: reduce) { :root,body.focus { --fill:rgb(250,250,252); --sheen:transparent; --blur:none; }
       .glass { -webkit-backdrop-filter:none; backdrop-filter:none; } }
     @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) { :root { --fill:rgb(44,44,47); }
       body.focus { --fill:rgb(250,250,252); } }`;
   document.head.append(style);
   document.title = "Hermes Gaze";
-  const beta = make("p", "Eye tracking beta"); beta.id = "beta";
+  const rail = make("div", "", "rail"), stageName = make("strong"), count = make("span"); count.id = "progress"; count.setAttribute("role", "status"); rail.append(stageName, count);
+  const cancel = make("button", "Cancel"); cancel.id = "cancel"; cancel.dataset.action = "cancel"; cancel.addEventListener("click", e => act("cancel", e));
   const main = make("main");
   // The detection video never leaves the DOM: removing a media element pauses it.
   const video = make("video"); video.autoplay = true; video.muted = true; video.playsInline = true; video.id = "feed";
@@ -114,21 +97,17 @@
   const cue = make("div"); cue.id = "cue";
   const practice = make("div"); practice.id = "practice";
   for (const topic of ["Saturn’s rings", "Coral reefs", "Sourdough", "The Silk Road", "Honeybees", "Northern lights"]) practice.append(make("div", topic, "topic glass"));
-  const region = make("div"); region.id = "region";
-  const bar = make("div", "", "glass"); bar.id = "bar";
+  const bar = make("div"); bar.id = "bar";
   const barText = make("span", "", "words");
-  const capsule = make("div", "", "glass"); capsule.id = "capsule";
-  const bars = make("span", "", "bars"); for (let i = 0; i < 9; i++) bars.append(make("i"));
-  capsule.append(bars, make("span", "Listening"));
   const lessonKey = make("span", "Space", "key");
-  const say = make("div"); say.id = "say"; say.append(make("span", "Hold"), lessonKey, make("span", "in Chrome to ask"));
-  const lesson = make("div"); lesson.id = "lesson"; lesson.append(capsule, say);
+  const say = make("h1"); say.id = "say"; say.append(make("span", "Hold"), lessonKey, make("span", "to ask"));
+  const lesson = make("div"); lesson.id = "lesson"; lesson.append(say);
   const rehearse = make("p", "", "note"); rehearse.id = "rehearse";
-  document.body.append(video, beta, main, practice, region, dot, cue, bar);
+  document.body.append(video, main, practice, dot, cue, bar, rail, cancel);
+  rail.hidden = cancel.hidden = true;
 
   const POINTS = [.1, .5, .9].flatMap(y => [.1, .5, .9].map(x => [x, y]));
-  const NO_EYES = "Couldn’t see your eyes", OFF_SCREEN = "Off screen", MOVED = "Window moved";
-  const STAYS = "Camera stays in this window. No microphone is used during setup.";
+  const NO_EYES = "Couldn’t see your eyes.", MOVED = "Window moved";
   const CURSOR = ["cursor", "Use cursor"];
   // Display only: a coarse cell, so the area never reads as a precise pointer.
   const REGION_COLS = 8, REGION_ROWS = 6, LOST_AFTER_MS = 700, TAP_HOLD_MS = 220;
@@ -139,8 +118,10 @@
   let frames = 0, firstFrame = 0, lastFrame = 0, frameMs = 0, featureMs = 0;
   let phase = "start", locked = null, calibrated = !!opts.calibrated, notice = opts.calibration_notice || "", faceAt = 0;
   let check = null, checkIndex = -1, checkObserving = false, checkTimer = 0;
-  let seenAt = 0, lostWhy = "", barWords = "", practiceTick = 0;
+  let seenAt = 0, practiceTick = 0;
   let holdStart = 0, holdTimer = 0;
+  let taught = false, retryPoint = false, listening = false, rehearsed = false, spaceDown = false;
+  const faceNote = make("p", "", "note");
 
   const windowNow = () => [screenX, screenY, innerWidth, innerHeight, devicePixelRatio];
   const faceVisible = () => performance.now() - faceAt < 800;
@@ -155,7 +136,7 @@
     return row;
   }
   // Every full page: optional round picture, only the words that can't be drawn, one capsule of actions.
-  function page({camera = "", waking = false, status = "", notes = [], kept = "", detail = "", extra = [], actions = []}) {
+  function page({camera = "", waking = false, status = "", notes = [], kept = "", extra = [], actions = []}) {
     const parts = [];
     if (camera) {
       const live = camera === "live" && stream;
@@ -163,21 +144,30 @@
       if (live) { preview.srcObject = stream; preview.play().catch(() => {}); }
       parts.push(face);
     }
+    if (status) parts.push(make("h1", status));
     parts.push(...extra);
-    if (status) parts.push(make("p", status, "note notice"));
     for (const line of notes) if (line) parts.push(make("p", line, "note"));
     if (kept) parts.push(make("p", kept, "note kept"));
-    if (detail) parts.push(make("p", detail, "detail"));
     if (actions.length) parts.push(buttons(actions));
-    main.replaceChildren(...parts); main.className = ""; main.style.display = "";
+    main.replaceChildren(...parts); main.className = ["result", "error", "moved"].includes(phase) ? "result" : ""; main.style.display = "";
     for (const part of parts) { part.classList.remove("arrive"); void part.offsetWidth; part.classList.add("arrive"); }
     updateFace();
   }
   function updateFace() {
-    if (!stream) return;
-    const begin = main.querySelector('[data-action="calibrate"]');
-    if (begin && phase === "home" && !calibrated) begin.disabled = !faceVisible();
-    if (!faceVisible()) { you.style.opacity = "0"; face.classList.remove("placed"); }
+    const visible = faceVisible();
+    for (const b of document.querySelectorAll('[data-action="calibrate"],[data-action="check"],[data-action="start-check"]')) b.disabled = !visible;
+    if (!visible) { you.style.opacity = "0"; face.classList.remove("placed"); }
+    if (phase === "home") faceNote.textContent = !visible ? "Bring your face into view." : notice;
+    if (phase === "boundary") faceNote.textContent = visible ? "" : "Bring your face into view.";
+    if (["calibrate", "checkIntro", "check"].includes(phase)) {
+      if (!visible && (collecting || checkObserving || phase === "check")) {
+        collecting = awaiting = checkObserving = false; clearTimeout(checkTimer); dot.classList.remove("collect");
+        if (phase === "check") phase = "checkIntro";
+        emit("observation_cancel");
+      }
+      const p = phase === "calibrate" ? POINTS[index] : check?.points[checkIndex];
+      if (p) showCue(...p);
+    }
   }
   // Runs here only, on landmarks already in this window. Nothing about it crosses the binding.
   function followFace(lm) {
@@ -191,45 +181,51 @@
   }
   function home() {
     phase = "home"; locked = null; hideFlow();
-    if (calibrated) page({camera: "live", status: notice || "A saved calibration was found", notes: ["Test whether it still matches how you’re sitting, or start a new calibration.", "To test: look at each dot, tap Space, and keep looking until it moves.", STAYS], actions: [["check", "Test saved calibration"], ["calibrate", "Start new calibration"], CURSOR]});
-    else page({camera: "live", status: notice || "Set up eye tracking", notes: ["Sit comfortably with your face inside the circle.", "Look at each dot, tap Space, and keep looking until it moves. No need to hold Space.", "First we learn where you’re looking, then test the calibration with more dots.", STAYS], actions: [["calibrate", "Start calibration", !faceVisible()], CURSOR]});
-    notice = "";
+    const outdated = notice === "Eye tracker updated. Start a new calibration." || notice === "The eye tracker has changed.";
+    notice = outdated ? "The eye tracker has changed." : notice;
+    page({camera: "live", status: calibrated ? "Saved calibration" : outdated ? "Recalibration needed" : "Set up eye tracking",
+      extra: [faceNote], actions: calibrated ? [["check", "Check"], ["calibrate", "Calibrate again"], CURSOR] : [["calibrate", "Start calibration"], CURSOR]});
   }
   function hideFlow() {
     index = -1; collecting = false; awaiting = false; checkObserving = false; checkIndex = -1; clearTimeout(checkTimer); check = null;
-    dot.style.display = "none"; cue.style.display = "none"; practice.style.display = "none"; bar.style.display = "none"; region.style.opacity = "0";
-    dot.classList.remove("collect", "travel", "shake"); setFocus(false); document.body.classList.remove("practising");
+    clearTimeout(holdTimer); holdStart = 0; listening = false;
+    rail.hidden = cancel.hidden = true;
+    dot.style.display = "none"; cue.style.display = "none"; practice.style.display = "none"; bar.style.display = "none";
+    dot.classList.remove("collect"); setFocus(false); document.body.classList.remove("practising");
   }
-  function fatal(raw, label, showRaw) {
+  function fatal(label) {
+    flow++; emit("calibration_cancel");
     active = false; clearInterval(timer); stream?.getTracks().forEach(t => t.stop()); stream = null; video.srcObject = null; preview.srcObject = null;
     hideFlow(); phase = "error";
-    page({camera: "empty", status: label, detail: showRaw ? raw : "", actions: [["retry", "Try again"], CURSOR]});
+    page({status: label, notes: label === "Camera stopped" ? ["Check the camera connection."] : [], kept: calibrated ? "Saved calibration unchanged." : "", actions: [["retry", "Try again"], CURSOR]});
   }
   function cameraLabel(e) {
     const name = e && e.name;
-    if (name === "NotAllowedError") return ["Camera blocked", false];
-    if (name === "NotFoundError") return ["No camera", false];
-    if (name === "NotReadableError") return ["Camera in use", false];
-    return ["Camera stopped", true];
+    if (name === "NotAllowedError") return "Camera blocked";
+    if (name === "NotFoundError") return "No camera";
+    if (name === "NotReadableError") return "Camera in use";
+    return "Camera stopped";
   }
   function moveDot(x, y) { dot.style.transform = `translate(${x * innerWidth}px,${y * innerHeight}px)`; }
-  function showCue(x, y, line = "Look at the dot") {
-    const key = make("span", "Space", "key");
-    cue.replaceChildren(...(line ? [make("span", line), make("span", "·")] : []), make("span", "Tap"), key);
-    cue.style.display = "flex";
+  function showCue(x, y) {
+    const line = !faceVisible() ? "Bring your face into view." : retryPoint ? NO_EYES : !taught && !collecting && phase !== "check" && !awaiting ? "teach" : "";
+    cue.replaceChildren();
+    if (line === "teach") cue.append(make("span", "Look at the dot. Tap "), make("span", "Space", "key"), make("span", ", then keep looking until it moves."));
+    else cue.textContent = line;
+    cue.style.display = line ? "block" : "none";
     const r = cue.getBoundingClientRect();
     const px = Math.min(innerWidth - r.width - 16, Math.max(16, x * innerWidth - r.width / 2));
     const py = y > .7 ? y * innerHeight - r.height - 74 : y * innerHeight + 72;
     cue.style.transform = `translate(${px}px,${py}px)`;
   }
+  function progress(training) {
+    rail.hidden = cancel.hidden = false;
+    stageName.textContent = training ? "Calibration" : "Accuracy check";
+    count.textContent = `${(training ? index : checkIndex) + 1} of ${training ? 9 : 10}`;
+  }
   function place() {
     const [x, y] = POINTS[index]; moveDot(x, y); dot.classList.remove("collect", "shake");
-    showCue(x, y);
-  }
-  function release() {
-    const [x, y] = POINTS[index];
-    const echo = make("div", "", "echo"); echo.style.transform = `translate(${x * innerWidth}px,${y * innerHeight}px)`;
-    echo.addEventListener("animationend", () => echo.remove()); document.body.append(echo);
+    progress(true); showCue(x, y);
   }
   function measure(e) {
     // Measured from this trusted click: no fullscreen/browser-chrome offset guess.
@@ -239,136 +235,154 @@
         screen_width: screen.width, screen_height: screen.height, screen_left: screen.availLeft, screen_top: screen.availTop, dpr: devicePixelRatio}};
   }
   function act(action, e) {
-    if (!e.isTrusted || !active && action !== "retry" && action !== "cursor") return;
+    if (!e.isTrusted || !active && !["retry", "cursor", "setup"].includes(action)) return;
+    if (["calibrate", "check", "start-check"].includes(action) && !faceVisible()) return;
     if (action === "calibrate" && stream) {
-      hideFlow(); phase = "calibrate"; index = 0; main.style.display = "none"; setFocus(true); dot.style.display = "block";
-      emit("calibration_start", measure(e)); place();
+      flow++; hideFlow(); phase = "calibrate"; index = 0; retryPoint = false; main.style.display = "none"; setFocus(true); dot.style.display = "block";
+      emit("calibration_start", measure(e)); place(); e.target.blur();
+    } else if (action === "start-check" && phase === "boundary") {
+      phase = "waiting"; main.replaceChildren(); emit("check_begin"); e.target.blur();
     } else if (action === "check" && stream) {
-      hideFlow(); phase = "waiting"; emit("check_start", measure(e));
+      flow++; hideFlow(); phase = "waiting"; emit("check_start", measure(e)); e.target.blur();
     } else if (action === "practise" && stream) {
-      hideFlow(); phase = "waiting"; emit("practice_start", measure(e));
+      flow++; hideFlow(); phase = "waiting"; emit("practice_start", measure(e));
     } else if (action === "done") {
-      if (phase === "practice") emit("practice_end");
-      handoff();
-    } else if (action === "home") {
-      home();
+      flow++; emit("practice_end"); handoff();
+    } else if (action === "finish" && phase === "handoff") {
+      hideFlow(); phase = "finished"; main.replaceChildren(); e.target.blur();
+    } else if (action === "cancel" || action === "home") {
+      flow++; emit("calibration_cancel"); home();
     } else if (action === "cursor") {
-      emit("use_cursor"); hideFlow(); phase = "closing"; shutdown();
-      page({camera: "empty", status: "Camera off"});
-    } else if (action === "retry") {
-      restart();
-    }
+      flow++; emit("use_cursor"); hideFlow(); phase = "cursor"; shutdown();
+      page({status: "Eye tracking off", actions: [["setup", "Set up eye tracking"]]});
+    } else if (action === "retry" || action === "setup") restart();
   }
   function handoff() {
     hideFlow(); phase = "handoff"; locked = null;
-    rehearse.textContent = ""; lessonKey.classList.remove("down"); capsule.classList.remove("on");
-    page({extra: [lesson, rehearse], notes: ["Return to the companion browser. Hold Space and wait for ‘Listening’, then speak.", "Let go to send. Tap Space to scroll. This practice does not record audio.", "Move the pointer once on each page"], actions: [["home", "Done"], CURSOR]});
-  }
-  function waitForCheck() {
-    // The same gesture for both stages: each dot waits for a fresh tap.
-    phase = "checkIntro"; main.style.display = "none"; setFocus(true); checkIndex = 0;
-    showCheckDot();
+    rehearsed = false; say.replaceChildren(make("span", "Hold"), lessonKey, make("span", "to ask")); say.style.color = "";
+    rehearse.textContent = "Wait for “Listening”, then speak. Release to send.";
+    page({extra: [lesson, rehearse], actions: [["finish", "Return to Chrome"]]});
+    document.activeElement?.blur();
   }
   function showCheckDot() {
-    phase = "checkIntro";
+    phase = "checkIntro"; retryPoint = false; awaiting = false;
     const [x, y] = check.points[checkIndex]; moveDot(x, y);
     dot.classList.remove("collect", "travel"); dot.style.display = "block";
-    showCue(x, y, "Test calibration · Look at the dot");
+    progress(false); showCue(x, y);
   }
   function startCheckRun() {
-    cue.replaceChildren(make("span", "Keep looking until the dot moves"));
-    phase = "check"; dot.classList.add("collect");
+    phase = "check"; showCue(...check.points[checkIndex]); dot.style.setProperty("--ms", `${check.settle_ms + check.observe_ms}ms`); dot.classList.add("collect");
+    const owner = flow;
     checkTimer = setTimeout(() => {
+      if (flow !== owner || phase !== "check") return;
       checkObserving = true;
       checkTimer = setTimeout(() => {
-        checkObserving = false; emit("check_trial", {index: checkIndex}); checkIndex++;
-        if (checkIndex < check.points.length) showCheckDot();
+        if (flow !== owner || phase !== "check") return;
+        checkObserving = false; awaiting = true; emit("check_trial", {index: checkIndex});
       }, check.observe_ms);
     }, check.settle_ms);
   }
-  function setPracticeWords(kind) {
-    if (kind === barWords) return;
-    barWords = kind;
-    if (kind === "hold") barText.textContent = "Practice: look between the cards. The shaded area follows your gaze.";
-    else barText.textContent = kind;
-  }
   function practiceFrame() {
     if (phase !== "practice") return;
-    if (performance.now() - seenAt > LOST_AFTER_MS) {
-      region.style.opacity = "0";
-      setPracticeWords(lostWhy === "offscreen" ? OFF_SCREEN : NO_EYES);
-    } else setPracticeWords("hold");
+    if (performance.now() - seenAt > LOST_AFTER_MS) for (const card of practice.children) card.classList.remove("selected");
+    barText.textContent = faceVisible() ? "" : "Bring your face into view.";
   }
   addEventListener("keydown", e => {
     if (!e.isTrusted) return;
-    if (e.code === "Escape" && ["calibrate", "checkIntro", "check", "practice", "waiting"].includes(phase)) {
-      emit("calibration_cancel"); home(); return;
+    if (e.code === "Escape" && ["calibrate", "boundary", "checkIntro", "check", "practice", "waiting"].includes(phase)) {
+      e.preventDefault(); flow++; emit("calibration_cancel"); home(); return;
     }
     if (e.code !== "Space") return;
-    if (phase === "calibrate") {
+    const fresh = !spaceDown && !e.repeat; spaceDown = true;
+    if (["calibrate", "checkIntro", "check"].includes(phase)) {
       e.preventDefault();
-      if (e.repeat || collecting || awaiting || index < 0) return;
-      collecting = true; until = performance.now() + 1100; dot.classList.remove("shake"); dot.classList.add("collect"); cue.replaceChildren(make("span", "Keep looking until the dot moves"));
-    } else if (phase === "checkIntro") {
-      e.preventDefault(); if (!e.repeat) startCheckRun();
-    } else if (phase === "handoff") {
-      e.preventDefault(); if (e.repeat || holdStart) return;
-      holdStart = performance.now(); lessonKey.classList.add("down");
-      holdTimer = setTimeout(() => { capsule.classList.add("on"); rehearse.textContent = "Only a rehearsal"; }, TAP_HOLD_MS);
+      if (!fresh || !faceVisible() || collecting || awaiting) return;
+      if (phase === "checkIntro") { startCheckRun(); return; }
+      if (phase !== "calibrate" || index < 0) return;
+      collecting = true; retryPoint = false; until = performance.now() + 1100; dot.style.setProperty("--ms", "1100ms"); dot.classList.remove("shake"); dot.classList.add("collect"); showCue(...POINTS[index]);
+    } else if (phase === "boundary") {
+      // Only an explicit trusted control activation starts the held-out check.
+      if (!e.target.closest("button")) e.preventDefault();
+    } else if (phase === "handoff" && !e.target.closest("button")) {
+      e.preventDefault(); if (!fresh || rehearsed || holdStart) return;
+      holdStart = performance.now(); const owner = flow;
+      holdTimer = setTimeout(() => {
+        if (flow !== owner || phase !== "handoff" || !holdStart) return;
+        listening = true; rehearsed = true; say.textContent = "Listening"; say.style.color = "var(--accent)"; rehearse.textContent = "";
+      }, TAP_HOLD_MS);
     }
   }, true);
   addEventListener("keyup", e => {
-    if (!e.isTrusted || e.code !== "Space" || phase !== "handoff" || !holdStart) return;
-    e.preventDefault(); clearTimeout(holdTimer);
-    const held = performance.now() - holdStart; holdStart = 0; lessonKey.classList.remove("down"); capsule.classList.remove("on");
-    rehearse.textContent = held >= TAP_HOLD_MS ? "In Chrome, this asks" : "Hold longer";
+    if (!e.isTrusted || e.code !== "Space") return;
+    spaceDown = false;
+    if (phase !== "handoff" || !holdStart) return;
+    e.preventDefault(); clearTimeout(holdTimer); holdStart = 0;
+    if (listening) { say.textContent = ""; rehearse.textContent = ""; listening = false; }
   }, true);
+  addEventListener("blur", () => { spaceDown = false; clearTimeout(holdTimer); holdStart = 0; if (listening) { say.textContent = ""; listening = false; } });
   function shutdown() {
+    flow++;
     active = false; clearInterval(timer); clearInterval(practiceTick); stream?.getTracks().forEach(t => t.stop()); try { model?.close(); } catch {}
     model = null; stream = null; video.srcObject = null; preview.srcObject = null;
   }
   addEventListener("pagehide", () => { shutdown(); hideFlow(); }, {once: true});
   globalThis.__HERMES_WEBCAM__ = {
     stop() { shutdown(); hideFlow(); },
-    pointAccepted() { awaiting = false; release(); dot.classList.remove("collect"); index++; if (index < POINTS.length) place(); },
+    pointAccepted() { if (phase !== "calibrate" || !awaiting) return; taught = true; awaiting = false; dot.classList.remove("collect"); index++; if (index < POINTS.length) place(); },
     pointRetry() {
-      awaiting = false; collecting = false;
-      dot.classList.remove("collect", "shake"); void dot.offsetWidth; dot.classList.add("shake");
-      showCue(...POINTS[index], NO_EYES);
+      if (phase !== "calibrate") return;
+      awaiting = false; collecting = false; retryPoint = true;
+      dot.classList.remove("collect"); showCue(...POINTS[index]);
     },
     calibrationFailed() { hideFlow(); phase = "result";
-      page({camera: "live", status: "Calibration could not be completed", notes: ["Try brighter, even lighting and keep your head comfortable and still.", "Look at each dot, tap Space, and keep looking until it moves."], kept: calibrated ? "Your saved calibration has not changed" : "No calibration has been saved", actions: [["calibrate", "Try calibration again"], CURSOR]}); },
-    checkReady(value) { hideFlow(); check = value; waitForCheck(); },
+      page({status: "Couldn’t calibrate", notes: ["Try even lighting and a steady position."], kept: calibrated ? "Saved calibration unchanged." : "", actions: [["calibrate", "Calibrate again"], CURSOR]}); },
+    checkBoundary(value) {
+      if (phase !== "calibrate") return;
+      taught = true; hideFlow(); check = value; phase = "boundary";
+      page({status: "Ready to check", extra: [faceNote], actions: [["start-check", "Start accuracy check"], ["cancel", "Cancel"]]});
+      document.activeElement?.blur();
+    },
+    checkReady(value) {
+      if (phase !== "waiting") return;
+      hideFlow(); check = value; checkIndex = 0; main.style.display = "none"; setFocus(true); showCheckDot();
+    },
+    checkAccepted() { if (phase !== "check" || !awaiting) return; taught = true; checkIndex++; showCheckDot(); },
     checkResult(result) {
       hideFlow(); phase = "result"; locked = null; calibrated = result.calibrated;
-      page({status: result.note, notes: [result.detail], kept: result.kept ? "Your saved calibration has not changed" : "", actions: [...result.actions, CURSOR]});
+      if (calibrated) notice = "";
+      page({status: result.note, notes: [result.detail], kept: result.kept ? "Saved calibration unchanged." : "", actions: result.outcome === "good" ? result.actions : [...result.actions, CURSOR]});
     },
     practiceReady() {
-      hideFlow(); phase = "practice"; main.style.display = "none"; seenAt = performance.now(); lostWhy = "face"; barWords = ""; document.body.classList.add("practising");
+      hideFlow(); phase = "practice"; main.style.display = "none"; seenAt = performance.now(); document.body.classList.add("practising");
       practice.style.display = "grid"; bar.style.display = "flex";
-      bar.replaceChildren(barText, ...[...buttons([["done", "Done"], ["calibrate", "Start new calibration"], CURSOR]).children]);
-      setPracticeWords("hold");
+      bar.replaceChildren(barText, buttons([["done", "Done"], ["calibrate", "Calibrate again"]]));
+      practiceFrame();
     },
     practiceGaze(value) {
       if (phase !== "practice") return;
-      if (value.lost) { lostWhy = value.lost; return; }
+      for (const card of practice.children) card.classList.remove("selected");
+      if (value.lost) return;
       seenAt = performance.now();
       const x = (Math.floor(value.x * REGION_COLS - 1e-9) + .5) / REGION_COLS, y = (Math.floor(value.y * REGION_ROWS - 1e-9) + .5) / REGION_ROWS;
-      region.style.transform = `translate(${x * innerWidth}px,${y * innerHeight}px)`; region.style.opacity = "1";
+      const card = [...practice.children].find(n => { const r = n.getBoundingClientRect(); return x * innerWidth >= r.left && x * innerWidth <= r.right && y * innerHeight >= r.top && y * innerHeight <= r.bottom; });
+      card?.classList.add("selected");
     },
     notice(text) { notice = text; home(); },
-    cameraFailed(raw) { fatal(raw, "Camera stopped", false); },
-    status() { return {active, phase, index, collecting, checkIndex, face: faceVisible(), videoTime: video.currentTime, hidden: document.hidden,
+    cameraFailed() { fatal("Camera stopped"); },
+    status() { return {active, phase, flow, index, collecting, checkIndex, face: faceVisible(), videoTime: video.currentTime, hidden: document.hidden,
       frames, frame_ms: frames ? frameMs / frames : null, feature_ms: frames ? featureMs / frames : null,
       sample_hz: frames > 1 ? (frames - 1) * 1000 / (lastFrame - firstFrame) : null}; }
   };
   function tick() {
-    if (!active || video.readyState < 2 || video.currentTime === lastVideoTime) return;
-    lastVideoTime = video.currentTime;
-    if (locked && ["calibrate", "checkIntro", "check", "practice"].includes(phase) &&
+    if (!active) return;
+    if (locked && ["calibrate", "boundary", "waiting", "checkIntro", "check", "practice"].includes(phase) &&
         (document.hidden || locked.some((v, i) => v !== windowNow()[i]))) {
-      emit("calibration_cancel"); notice = MOVED; home(); return;
+      flow++; emit("calibration_cancel"); hideFlow(); locked = null; phase = "moved";
+      page({status: MOVED, notes: ["Keep this window on one screen."], kept: calibrated ? "Saved calibration unchanged." : "", actions: [["home", "Restart setup"], CURSOR]}); return;
     }
+    updateFace();
+    if (video.readyState < 2 || video.currentTime === lastVideoTime) return;
+    lastVideoTime = video.currentTime;
     const now = performance.now(), t = (performance.timeOrigin + now) / 1000;
     try {
       const lm = model.detectForVideo(video, now).faceLandmarks[0];
@@ -376,35 +390,45 @@
       const f = globalThis.__hermesGazeAppearance(video, lm, globalThis.__hermesGazeFeatures(lm), true);
       const done = performance.now();
       frameMs += done - now; featureMs += done - featureStart;
+      if (!lm) faceAt = 0;
       if (!frames) firstFrame = now;
       frames++; lastFrame = now;
       if (f) { faceAt = now; if (phase === "home") followFace(lm); }
       updateFace();
       emit("sample", {t, features: f, calibration: collecting ? index : -1, check: checkObserving ? checkIndex : -1, hidden: document.hidden});
       if (collecting && now >= until) { collecting = false; awaiting = true; emit("calibration_point", {index}); }
-    } catch (e) { emit("error", {error: String(e)}); fatal(String(e), "Camera stopped", true); }
+    } catch (e) { emit("error", {error: String(e)}); fatal("Camera stopped"); }
   }
   async function openCamera() {
+    const owner = flow;
     if (!model) {
       const {FaceLandmarker} = await import(opts.module);
+      if (owner !== flow) return;
       // Python installs the checksum-verified SIMD loader into this isolated context.
       const files = {wasmBinaryPath: opts.wasm + "/vision_wasm_internal.wasm"};
-      model = await FaceLandmarker.createFromOptions(files, {baseOptions: {modelAssetPath: opts.model, delegate: "CPU"},
+      const loaded = await FaceLandmarker.createFromOptions(files, {baseOptions: {modelAssetPath: opts.model, delegate: "CPU"},
         runningMode: "VIDEO", numFaces: 1, minFaceDetectionConfidence: .5, minFacePresenceConfidence: .5});
+      if (owner !== flow) { loaded.close(); return; }
+      model = loaded;
     }
-    stream = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480}, audio: false});
+    const acquired = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480}, audio: false});
+    if (owner !== flow) { acquired.getTracks().forEach(t => t.stop()); return; }
+    stream = acquired;
     video.srcObject = stream; await video.play();
+    if (owner !== flow) return;
     active = true; lastVideoTime = -1;
     timer = setInterval(tick, 100); // Timers, not requestAnimationFrame: this owned process disables background throttling.
     clearInterval(practiceTick); practiceTick = setInterval(practiceFrame, 150);
     emit("ready"); home();
   }
-  function failedToOpen(e) { emit("error", {error: String(e)}); const [label, showRaw] = cameraLabel(e); fatal(String(e), label, showRaw); }
+  function failedToOpen(e) { emit("error", {error: String(e)}); fatal(cameraLabel(e)); }
   async function restart() {
-    phase = "start"; page({camera: "empty", waking: true, actions: [CURSOR]});
+    flow++; hideFlow(); locked = null; phase = "start"; page({camera: "empty", waking: true, actions: [CURSOR]});
     emit("retry_camera");
-    try { await openCamera(); } catch (e) { failedToOpen(e); }
+    const owner = flow;
+    try { await openCamera(); } catch (e) { if (owner === flow) failedToOpen(e); }
   }
   page({camera: "empty", waking: true, actions: [CURSOR]});
-  try { await openCamera(); } catch (e) { failedToOpen(e); }
+  const owner = flow;
+  try { await openCamera(); } catch (e) { if (owner === flow) failedToOpen(e); }
 })

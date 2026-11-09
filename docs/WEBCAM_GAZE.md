@@ -44,9 +44,9 @@ unload and owned-document replacement close only the camera process we started.
 
 `/gaze calibrate` switches to webcam mode, starts the owned camera window and
 brings it forward; `/gaze mode webcam` opens the same flow. Maximize it, keep its zoom at
-100%, and click **Start calibration** (**Start new calibration** for a saved setup). At each dot, look at it, tap Space and keep looking for
-about one second. A dot without enough usable frames asks again rather than ending
-the attempt. Esc cancels; moving/resizing/hiding the window
+100%, and click **Start calibration** (**Calibrate again** for a saved setup). At each dot, look at it, tap Space and keep looking for
+about one second. One current-target count advances only after Python accepts the observation.
+A dot without enough usable frames asks again. Esc or **Cancel** cancels; moving/resizing/hiding the window
 cancels rather than applying wrong screen targets. The trusted opening click
 measures the actual viewport origin, including browser chrome. Nine targets are
 converted to desktop logical coordinates using that origin, not a fullscreen or
@@ -55,9 +55,10 @@ converted to desktop logical coordinates using that origin, not a fullscreen or
 ### Held-out check and practice
 
 Fitting produces a **candidate** in a private estimator copy. The accepted estimator
-and file do not change until a check passes. The check uses the same gesture at
-every dot: look at it, tap Space, and keep looking until it moves. Each dot waits
-for a fresh tap. It tests five positions that differ from the training nine, in two orders (ten equal trials). Each trial ignores a settling period, then
+and file do not change until a check passes. **Ready to check** stops between fitting
+and checking: explicitly activate **Start accuracy check** to continue. Space on the
+neutral field cannot start it. The check uses the same fresh Space tap at every dot.
+It tests five positions that differ from the training nine, in two orders (ten equal trials). Each trial ignores a settling period, then
 takes the median of its valid estimates. Missing, off-screen or mostly absent trials
 fail. Estimates stay in memory for that trial and never refit anything. Named
 constants in `tracker/webcam_gaze.py` are **provisional pending a real-camera
@@ -66,22 +67,24 @@ of ten pass; fewer than six valid trials cannot judge.
 
 The result states whether calibration was saved, whether a saved calibration passed,
 or why another attempt is needed. No circles or miss lines are shown. A weak or
-unmeasurable new calibration offers **Try calibration again** or **Use cursor** and
+unmeasurable new calibration offers **Calibrate again** or **Use cursor** and
 keeps any earlier saved calibration. A cancelled or failed attempt saves nothing.
-Moving, resizing or hiding the window during the dots or check ends the attempt
-and says so. When a saved profile is found, the opening screen explains this and
-lets you **Test saved calibration** or **Start new calibration**. Testing never rewrites it.
+Moving, resizing or hiding the window during measurement or at the stopped boundary
+discards the candidate. Saved setup offers **Check** or **Calibrate again**;
+checking goes straight to ten targets and never rewrites the saved profile.
 
-Practice runs only in the owned window and only while open: six broad cards and a
-neutral lens. Python maps each estimate to the window; the page snaps it to a coarse
-8×6 cell for display only, with the same no-smoothing estimator underneath. Off-window
-estimates are removed, never clamped. Practice and checks deliver nothing to
-websites. Finish teaches the real companion gesture; its hold-Space rehearsal says
-it is one and touches no microphone or model. The window asks the user to return to Chrome
-itself: another Chrome process's focus cannot be reliably raised from here.
+Practice runs only in the owned window: six cards with gaze shading. Python maps
+each estimate to the window; the page retains its coarse 8×6 display mapping.
+Off-window estimates and missing faces remove shading, never clamp it. Practice
+and checks deliver nothing to websites.
 
-**Use cursor** is offered on every screen and changes the session mode with the
-camera. Camera errors stay on screen with a plain state and **Try again**.
+**Continue** or practice **Done** teaches hold-to-ask once. The silent rehearsal
+shows **Listening** after a 220ms hold; releasing clears it without recording,
+speech, model calls or message injection. **Return to Chrome** leaves an empty
+camera window open; switch back to the companion browser yourself.
+
+**Use cursor** is available at entry and on unsuccessful results/recovery.
+Camera errors stay on screen with a plain state and **Try again**.
 If the window closes or startup returns `stopped`, the command offers
 **Try again** with `/gaze calibrate`; it does not claim calibration is ready.
 

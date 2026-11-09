@@ -359,6 +359,8 @@ class CalibrationCheckFlow(unittest.TestCase):
 
     def run_check(self, gaze):
         """gaze(target, trial) returns features or None for one trial's five frames."""
+        if self.host._check is not None and not self.host._check["started"]:
+            self.event("check_begin")
         self.assertEqual(self.ui[-1][0], "checkReady")
         points = self.ui[-1][1]["points"]
         for trial, (x, y) in enumerate(points):
@@ -413,21 +415,10 @@ class CalibrationCheckFlow(unittest.TestCase):
                 _, result = self.run_check(gaze)
                 self.assertEqual(result["outcome"], outcome)
                 self.assertEqual([a for a, _ in result["actions"]], ["calibrate"])
-                self.assertEqual(result["actions"][0][1], "Try calibration again")
-                self.assertNotIn("ready", result["note"].lower())
-                self.assertNotRegex(result["note"], r"\d")
                 self.assertTrue(result["kept"])
                 self.assertEqual(self.host.profile_path.read_bytes(), before)
                 self.assertEqual(self.host.estimator.profile, json.loads(before))
 
-    def test_result_explains_failure_without_a_spatial_diagram(self):
-        self.fit()
-        _, result = self.run_check(lambda *_: None)
-        self.assertNotIn("map", result)
-        self.assertEqual(result["note"], "Calibration needs another try")
-        self.assertIn("lighting", result["detail"])
-        self.assertFalse(result["calibrated"])
-        self.assertIsNone(self.host._check)
 
     def test_a_miss_draws_where_it_landed_in_the_window_and_nowhere_outside_it(self):
         screen = {"left": 0, "top": 0, "width": 1000, "height": 500}
@@ -446,6 +437,42 @@ class CalibrationCheckFlow(unittest.TestCase):
         self.assertIsNone(self.host._check)
         self.assertEqual(self.host.profile_path.read_bytes(), before)
         self.assertEqual(self.host.estimator.profile, json.loads(before))
+    def test_save_failure_preserves_accepted_estimator_and_file(self):
+        self.host._save(self.saved()); before = self.host.profile_path.read_bytes()
+        self.host.profile = json.loads(before); self.host.estimator.load(self.host.profile)
+        self.fit()
+        with patch.object(self.host, "_save", side_effect=OSError("disk full")):
+            method, result = self.run_check(lambda t, _: appearance_features(*t))
+        self.assertEqual(method, "checkResult")
+        self.assertTrue(result["kept"])
+        self.assertEqual(self.host.profile_path.read_bytes(), before)
+        self.assertEqual(self.host.estimator.profile, json.loads(before))
+        self.assertIsNone(self.host._check)
+
+
+    def test_boundary_rejects_observations_until_explicit_start_and_cancel_rejects_old_flow(self):
+        self.fit()
+        self.assertEqual(self.ui[-1][0], "checkBoundary")
+        for _ in range(5):
+            self.sample(appearance_features(.3, .3), check=0)
+        self.event("check_trial", index=0)
+        self.assertEqual(self.host._check["trial"], 0)
+        self.assertEqual(self.host._check["estimates"], [])
+        self.event("calibration_cancel", flow=1)
+        self.event("check_begin", flow=0)
+        self.event("calibration_start", flow=0, screen=SCREEN, viewport=VIEWPORT)
+        self.assertIsNone(self.host._check)
+        self.assertIsNone(self.host._calibration)
+        self.assertFalse(self.host.profile_path.exists())
+
+    def test_face_loss_discards_partial_observation_without_advancing(self):
+        self.event("calibration_start", screen=SCREEN, viewport=VIEWPORT)
+        for _ in range(6):
+            self.sample(appearance_features(.1, .1), calibration=0)
+        self.event("observation_cancel")
+        self.event("calibration_point", index=0)
+        self.assertEqual(self.host._point_index, 0)
+        self.assertEqual(self.host._observations, [])
 
     def test_a_point_without_enough_samples_retries_that_dot(self):
         self.event("calibration_start", screen=SCREEN, viewport=VIEWPORT)
@@ -469,7 +496,6 @@ class CalibrationCheckFlow(unittest.TestCase):
         self.event("check_start", screen=SCREEN, viewport=VIEWPORT)
         _, result = self.run_check(lambda t, _: appearance_features(1 - t[0], 1 - t[1]))
         self.assertEqual(result["outcome"], "weak")
-        self.assertEqual(result["actions"][0][1], "Try calibration again")
         self.assertEqual(self.host.profile_path.read_bytes(), before)
 
     def test_practice_is_private_to_the_window_and_never_clamps(self):

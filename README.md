@@ -100,9 +100,10 @@ typing or navigation already performed.
 
 After a useful cursor answer, explicitly enter `/gaze calibrate`. It switches to
 webcam mode and opens the separate local camera window. Click **Start calibration**
-(**Start new calibration** for a saved setup). In both the calibration and its test,
-look at each dot, tap Space, and keep looking until it moves. Each dot waits for you.
-A saved setup is identified explicitly and can be tested without replacing it.
+(**Calibrate again** for a saved setup). Look at each dot, tap Space, and keep looking
+until it moves. After nine accepted targets, **Ready to check** waits for your
+**Start accuracy check** action before ten checks. **Check** tests a saved setup
+directly without replacing it.
 `/gaze mode webcam` opens the same flow. Move the pointer once in every page,
 and again after zooming or resizing. Use one display, good light and broad page
 regions; recalibrate after moving or changing camera, posture or glasses.

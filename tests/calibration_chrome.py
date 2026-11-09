@@ -17,18 +17,19 @@ import tempfile
 import threading
 import time
 import urllib.request
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
 import tests
-from benchmark.probe_companion_ui import Tab
+from benchmark.probe_companion_ui import Tab, make_recording
 from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, LandmarkEstimator, ScreenPoint
 from hermes_gaze.webcam import WebcamHost
 from tests.webcam_chrome import PORTRAIT, PORTRAIT_HASH, tracker_tab, until
 
 HEADLESS = ("--headless=new", "--window-size=1440,900", "--screen-info={1440x900}")
-SPOT, FACE_SECONDS, BLACK_SECONDS = 2, 18, 4
+SPOT, FACE_SECONDS, BLACK_SECONDS = 3, 27, 4
 PERIOD = FACE_SECONDS + BLACK_SECONDS
 
 
@@ -71,7 +72,12 @@ class Window:
         return self.tab.iso("globalThis.__HERMES_WEBCAM__.status()", self.host._context)
 
     def wait(self, phase, seconds=30):
-        until(lambda: self.state()["phase"] == phase, seconds)
+        try:
+            until(lambda: self.state()["phase"] == phase, seconds)
+        except AssertionError:
+            raise AssertionError({"expected": phase, "ui": self.state(), "host": self.host.status(),
+                                  "text": self.text(), "screen": self.tab.main("[screen.width,screen.height,screen.availLeft,screen.availTop]"),
+                                  "saved_screen": self.host.profile and self.host.profile["screen"]}) from None
 
     def text(self):
         return self.tab.main("document.body.innerText")
@@ -104,19 +110,30 @@ class Window:
             assert "Tap" in self.text()
             self.shot("03-first-dot-tap-space")
         for index in range(9):
-            until(lambda: index * SPOT + .15 <= self.clock() < index * SPOT + .75, PERIOD + 8)
-            self.tap()
-            if shots and index == 4:
-                for name, wait in (("04a-ring-closing", .1), ("04b-ring-closing", .3), ("04c-ring-closing", .3)):
-                    self.shot(name, wait)
-            until(lambda: self.state()["index"] != index or self.state()["phase"] != "calibrate", 6)
+            for attempt in range(4):
+                until(lambda: index * SPOT + .35 <= self.clock() < index * SPOT + .75 and self.state()["face"], PERIOD + 8)
+                self.tap()
+                assert self.state()["index"] == index and f"{index + 1} of 9" in self.text()
+                self.key("keyDown")  # Stray/repeated input during observation cannot skip a point.
+                self.key("keyUp")
+                assert self.state()["index"] == index
+                if index:
+                    assert "Tap Space" not in self.text()
+                if shots and index == 4:
+                    self.shot("progress", .15)
+                time.sleep(1.4)
+                if self.state()["index"] != index or self.state()["phase"] != "calibrate":
+                    break
+                assert f"{index + 1} of 9" in self.text(), "rejected point must not advance"
+            else:
+                raise AssertionError(f"Fake camera rejected target {index + 1} four times")
 
     def fit(self, report, shots=False):
         """Fake footage is not a person: a real fit can legitimately fail. Say so, then retry."""
         for _ in range(4):
             self.nine(shots=shots)
-            until(lambda: self.state()["phase"] in ("checkIntro", "result"), 30)
-            if self.state()["phase"] == "checkIntro":
+            until(lambda: self.state()["phase"] in ("boundary", "result"), 30)
+            if self.state()["phase"] == "boundary":
                 return
             report["fit_retries"] = report.get("fit_retries", 0) + 1
         raise AssertionError("Fit failed four times on fake footage")
@@ -126,13 +143,28 @@ class Window:
         self.tap(); self.wait("check", 4)
 
     def finish_check(self):
-        until(lambda: .1 <= self.clock() < 1.2, PERIOD + 8)
+        if self.state()["phase"] == "boundary":
+            self.click("start-check"); self.wait("checkIntro")
         for index in range(10):
             until(lambda: self.state()["phase"] == "checkIntro" and self.state()["checkIndex"] == index, 5)
-            # Each target waits: it must not advance until the user is ready.
-            time.sleep(.15)
-            assert self.state()["phase"] == "checkIntro" and self.state()["checkIndex"] == index
-            self.tap()
+            for attempt in range(4):
+                # A full real observation fits between the portrait's movements.
+                until(lambda: .45 <= self.clock() % SPOT < .55 and self.clock() < FACE_SECONDS - 1.7 and self.state()["face"], PERIOD + 8)
+                assert f"{index + 1} of 10" in self.text()
+                if index:
+                    assert "Tap Space" not in self.text()
+                self.tap()
+                trace = []
+                for _ in range(18):
+                    time.sleep(.1)
+                    s = self.state()
+                    trace.append((round(self.clock(), 2), s["phase"], s["face"], s["checkIndex"]))
+                if self.state()["phase"] == "result" or self.state()["checkIndex"] != index:
+                    break
+                assert self.state()["phase"] == "checkIntro" and f"{index + 1} of 10" in self.text()
+            else:
+                raise AssertionError({"target": index + 1, "trace": trace, "text": self.text(),
+                                      "trial": self.host._check and self.host._check["trial"]})
         self.wait("result", 5)
 
     def close(self):
@@ -156,10 +188,10 @@ def jittered(host, misses=()):
 
 def camera_failure(tmp, video, out, report):
     source = (ROOT / "browser" / "webcam_host.js").read_text()
-    needle = "stream = await navigator.mediaDevices.getUserMedia("
+    needle = "const acquired = await navigator.mediaDevices.getUserMedia("
     assert needle in source
     broken = tmp / "broken_camera.js"
-    broken.write_text(source.replace(needle, "throw new DOMException('Could not start video source', 'NotReadableError');\n    stream = await navigator.mediaDevices.getUserMedia("))
+    broken.write_text(source.replace(needle, "throw new DOMException('Could not start video source', 'NotReadableError');\n    " + needle))
     used = []
     host = WebcamHost(lambda *_: False, profile_path=tmp / "none.json", runtime_source=broken, chrome_args=HEADLESS,
                       fake_video=video, on_use_cursor=lambda: used.append(True))
@@ -185,7 +217,7 @@ def old_profile(tmp, video, out, report):
     window = Window(WebcamHost(lambda *_: False, profile_path=path, fake_video=video, chrome_args=HEADLESS), out)
     try:
         window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
-        assert "Start a new calibration" in window.text() and "Test saved calibration" not in window.text()
+        assert "Recalibration needed" in window.text() and "The eye tracker has changed." in window.text()
         assert not window.host.status()["calibrated"] and path.read_bytes() == before
         window.shot("11-old-calibration")
         report["old_profile"] = {"refused_with_plain_message": True, "file_unchanged": True}
@@ -195,142 +227,160 @@ def old_profile(tmp, video, out, report):
 
 def main_flow(tmp, video, out, report, scheme="light"):
     path = tmp / f"personal-{scheme}" / "calibration.json"
-    used = []
-    host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS,
-                      on_use_cursor=lambda: used.append(True))
+    host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS)
     window = Window(host, out, scheme)
-    def at(x, y):
-        def predict(_features, t):
-            s = host.profile["screen"]
-            return ScreenPoint(s["left"] + x * s["width"], s["top"] + y * s["height"], t)
-        return predict
+    checks = []
+    def check(ok, name):
+        assert ok, name
+        checks.append(name)
+    def selected():
+        return window.tab.main("document.querySelectorAll('.topic.selected').length")
     try:
         window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
-        assert window.tab.main("typeof __HERMES_WEBCAM__") == "undefined"
-        assert window.tab.main("typeof __hermesGazeIntent") == "undefined"
-        words = window.text()
-        assert "stays in this window" in words and "Eye tracking beta" in words and "Start calibration" in words
-        for gone in ("large", "glasses", "Hermes can see"):
-            assert gone not in words, words
-        window.shot("02-setup")
-
-        # A cancelled attempt leaves nothing behind.
-        window.fit(report, shots=True)
-        assert not path.exists() and not host.status()["calibrated"]
-        window.shot("05-check-waiting")
+        check(window.tab.main("typeof __HERMES_WEBCAM__") == "undefined", "isolated runtime")
+        check(window.text().strip() == "Set up eye tracking\n\nStart calibration\nUse cursor", "entry whitelist")
+        window.shot("setup")
+        # No observation advances merely because Space repeats or the face disappears.
+        window.click("calibrate"); window.wait("calibrate")
+        check("1 of 9" in window.text() and "Tap Space" in window.text(), "single initial instruction")
+        until(lambda: FACE_SECONDS + .8 <= window.clock(), PERIOD + 8)
+        window.tap(); time.sleep(1.3)
+        check(window.state()["index"] == 0 and not window.state()["collecting"], "missing face cannot collect")
         window.tap("Escape"); window.wait("home")
-        assert not path.exists() and not host.status()["calibrated"] and host._check is None
-        report["cancel_after_fit"] = {"nothing_saved": True}
-
-        # A real fit and real frames; the check sees scripted estimates near each target.
+        window.fit(report, shots=True)
+        check(not path.exists() and host._check is not None and not host._check["started"], "unsaved stopped candidate")
+        check(window.text().strip() == "Ready to check\n\nStart accuracy check\nCancel", "boundary whitelist")
+        window.shot("boundary")
+        for _ in range(3): window.tap()
+        time.sleep(1.8)
+        check(window.state()["phase"] == "boundary" and host._check["trial"] == 0, "neutral Space never starts check")
+        # Resizing at the boundary discards the candidate and stale callbacks.
+        queued = []
+        with patch.object(host, "_send", side_effect=lambda method, params: queued.append(params["expression"])):
+            host._ui("checkReady", {"points": [[.5, .5]]})
+        window.tab.send("Emulation.setDeviceMetricsOverride", {"width": 1300, "height": 800, "deviceScaleFactor": 1, "mobile": False})
+        window.wait("moved")
+        until(lambda: host._check is None)
+        check(not path.exists(), "resize discards unsaved candidate")
+        window.tab.iso(queued[0], host._context)
+        check(window.state()["phase"] == "moved", "old callback cannot resurrect")
+        window.tab.send("Emulation.clearDeviceMetricsOverride", {})
+        window.click("home"); window.wait("home")
+        window.fit(report)
+        window.click("cancel"); window.wait("home")
+        until(lambda: host._check is None)
+        check(not path.exists(), "boundary Cancel discards candidate")
+        if scheme == "light":
+            window.tab.send("Page.startScreencast", {"format": "jpeg", "quality": 75, "maxWidth": 1280, "maxHeight": 720, "everyNthFrame": 2})
         window.fit(report)
         Scripted.script = jittered(host)
-        window.shot("06-check-running")
-        hidden = window.tab.main("getComputedStyle(document.querySelector('#region')).opacity")
-        assert hidden == "0"
-        assert not path.exists()
         window.finish_check()
-        Scripted.script = None
-        words = window.text()
-        assert "Try eye tracking" in words and "Finish setup" in words and "%" not in words and not any(c.isdigit() for c in words), words
-        assert window.tab.main("document.querySelectorAll('#map, #marks').length") == 0
-        assert path.exists() and oct(path.stat().st_mode & 0o777) == "0o600" and host.status()["calibrated"]
-        assert host._check is None and "map" not in json.dumps(host.status())
-        window.shot("07-success", 1.6)
-        report["passing_check"] = {"saved_only_after_result": True, "region_hidden_during_check": True}
+        check("Calibration saved" in window.text(), "passing check result")
+        check(path.exists() and path.stat().st_mode & 0o777 == 0o600, "private save after pass")
         saved = path.read_bytes()
-
-        # Practice: only ever inside this window.
-        Scripted.script = at(.3, .35)
+        window.shot("saved")
+        if scheme == "light":
+            window.tab.send("Page.stopScreencast")
+            make_recording(window.tab, out)
+        # Optional practice uses real-frame Python predictions, never page delivery.
+        def at(_f, t):
+            s = host.profile["screen"]
+            return ScreenPoint(s["left"] + .3 * s["width"], s["top"] + .35 * s["height"], t)
+        Scripted.script = at
         until(lambda: .1 <= window.clock() < 12, PERIOD + 8)
         window.click("practise"); window.wait("practice")
-        until(lambda: window.tab.main("document.querySelector('#region').style.opacity") == "1")
-        until(lambda: "Practice: look between the cards" in window.text(), 5)
-        assert host.delivered == 0
-        window.shot("08-practice")
+        until(selected)
+        check(host.delivered == 0 and "Practice:" not in window.text(), "practice stays local without caption")
+        window.shot("practice")
         Scripted.script = lambda *_: None
-        until(lambda: "Off screen" in window.text(), 5)
-        assert window.tab.main("document.querySelector('#region').style.opacity") == "0"
-        window.shot("09a-practice-offscreen")
-        Scripted.script = at(.7, .6)
-        until(lambda: FACE_SECONDS + .4 <= window.clock(), PERIOD + 8)
-        until(lambda: "Couldn’t see your eyes" in window.text(), 5)
-        assert window.tab.main("document.querySelector('#region').style.opacity") == "0"
-        window.shot("09b-practice-face-lost")
-        report["practice"] = {"lost_face_removes_region_says_why": True, "offscreen_says_why": True, "pages_delivered": host.delivered}
-        Scripted.script = None
-
-        # The rehearsal says it is one.
+        until(lambda: selected() == 0)
+        check("Off screen" not in window.text(), "offscreen removes highlight silently")
+        until(lambda: FACE_SECONDS + .8 <= window.clock(), PERIOD + 8)
+        until(lambda: "Bring your face into view." in window.text())
+        check(selected() == 0, "face loss removes highlight")
         window.click("done"); window.wait("handoff")
-        assert "Hold" in window.text() and "in Chrome to ask" in window.text()
-        window.shot("10a-lesson")
-        window.key("keyDown"); until(lambda: "rehearsal" in window.tab.main("document.querySelector('#rehearse').textContent"), 3)
-        assert "Listening" in window.text()
-        window.shot("10b-rehearsal-held", .35)
-        window.key("keyUp"); until(lambda: "this asks" in window.text(), 3)
-        window.shot("10c-rehearsal-done", .25)
-        report["rehearsal"] = {"says_rehearsal": True}
-        window.click("home"); window.wait("home")
-        assert "Test saved calibration" in window.text() and "stays in this window" in window.text()
-        window.shot("12-welcome-back")
-
-        # A weak attempt explains the failure and keeps the accepted calibration.
-        window.fit(report)
-        Scripted.script = jittered(host, misses={1, 2, 5, 7})
+        check("Hold Space to ask" in " ".join(window.text().split()), "handoff gesture once")
+        window.shot("handoff")
+        window.tap(); time.sleep(.3)
+        check("Hold Space to ask" in " ".join(window.text().split()), "short tap does not rehearse")
+        window.key("keyDown")
+        until(lambda: window.tab.main("document.querySelector('#say').textContent") == "Listening", 3)
+        window.shot("listening", .1)
+        window.key("keyUp")
+        check(window.text().strip() == "Return to Chrome", "release silently clears rehearsal")
+        window.shot("released", .1)
+        window.click("finish"); window.wait("finished")
+        check(window.text().strip() == "" and window.state()["active"], "one finish leaves empty live window")
+        window.tap(); time.sleep(.3)
+        check(window.text().strip() == "", "finished cannot restart rehearsal")
+        window.shot("finished", .1)
+        window.close()
+        # New process, same profile: direct checking teaches its first tap once.
+        host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS)
+        window = Window(host, out, scheme)
+        window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
+        window.click("check"); window.wait("checkIntro")
+        check("1 of 10" in window.text() and "Tap Space" in window.text(), "saved entry skips training and teaches once")
+        Scripted.script = jittered(host)
         window.finish_check()
+        check("Saved calibration passed" in window.text() and path.read_bytes() == saved, "saved pass never rewrites profile")
+        window.click("done"); window.wait("handoff")
+        # Optional rehearsal: finish using native Space on its focused button.
+        window.tab.main("document.querySelector('[data-action=finish]').focus()")
+        window.tap(); window.wait("finished")
+        check(window.text().strip() == "", "focused finish Space does not rehearse")
+        window.close()
+        host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS)
+        window = Window(host, out, scheme)
+        window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
+        window.click("check"); window.wait("checkIntro")
+        Scripted.script = lambda *_: None
+        window.finish_check()
+        check("Couldn’t see your eyes clearly" in window.text() and "Saved calibration unchanged." in window.text(), "insufficient check recovery")
+        check(path.read_bytes() == saved, "failed saved check preserves profile")
+        window.shot("insufficient")
         Scripted.script = None
-        words = window.text()
-        assert "Calibration" in words and "Your saved calibration has not changed" in words, words
-        assert "Try calibration again" in words and "Use cursor" in words and "ready" not in words.lower()
-        assert path.read_bytes() == saved
-        window.shot("13-weak", 1.6)
-        report["failed_check"] = {"previous_kept": True}
-
-        # A fit that fails outright says what to change and keeps the earlier setup.
         Scripted.fail_next_fit = True
         window.nine(); window.wait("result", 30)
-        words = window.text()
-        assert "Calibration" in words and "Your saved calibration has not changed" in words, words
-        assert path.read_bytes() == saved
-        window.shot("13b-fit-failed")
-
-        # A moved or resized window is an error state, not a silent return.
-        window.click("calibrate"); window.wait("calibrate")
-        window.tab.send("Emulation.setDeviceMetricsOverride", {"width": 1300, "height": 800, "deviceScaleFactor": 1, "mobile": False})
-        window.wait("home"); until(lambda: "Window moved" in window.text(), 3)
-        window.tab.send("Emulation.clearDeviceMetricsOverride", {})
-        window.shot("12b-window-moved", .8)
-        assert path.read_bytes() == saved
-        report["window_moved"] = {"shown_as_error": True, "saved_file_unchanged": True}
-
-        # Daily start: a new process with the accepted file.
-        window.close()
-        window = Window(WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS,
-                                   on_use_cursor=lambda: used.append(True)), out, scheme)
-        host = window.host
-        window.wait("home")
-        assert host.status()["calibrated"] and "Test saved calibration" in window.text()
-        window.click("check"); window.wait("checkIntro")
-        window.shot("14-saved-check-waiting", .9)
-        Scripted.script = lambda *_: None
-        window.finish_check()
-        Scripted.script = None
-        words = window.text()
-        assert "Saved calibration did not pass" in words and "Try calibration again" in words, words
-        assert path.read_bytes() == saved
-        window.shot("15-couldnt-check", 1.6)
-        for name, value in (("reduced-solid", [{"name": "prefers-color-scheme", "value": scheme}, {"name": "prefers-reduced-transparency", "value": "reduce"}, {"name": "prefers-reduced-motion", "value": "reduce"}]),):
-            window.tab.send("Emulation.setEmulatedMedia", {"features": value})
-            window.click("calibrate"); window.wait("calibrate")
-            window.shot(f"16-dot-{name}", .4)
-            window.tap("Escape"); window.wait("home")
-            window.shot(f"16-home-{name}")
-        report["daily_start"] = {"saved_file_untouched_by_check": True}
-        window.click("cursor"); until(lambda: used)
-        report["tracker_final"] = {k: v for k, v in host.status().items() if k in ("state", "calibrated", "delivered")}
+        check("Couldn’t calibrate" in window.text() and path.read_bytes() == saved, "fit failure preserves profile")
+        window.shot("fit-failed")
+        report[scheme] = {"checks": checks, "passed": len(checks)}
     finally:
         Scripted.script = None
         window.close()
+
+
+def dark_smoke(tmp, video, out, report):
+    path = tmp / "personal-light" / "calibration.json"
+    before = path.read_bytes()
+    host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS)
+    window = Window(host, out, "dark")
+    try:
+        window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
+        window.shot("setup")
+        window.click("check"); window.wait("checkIntro")
+        assert "1 of 10" in window.text()
+        until(lambda: window.tab.main("getComputedStyle(document.body).backgroundColor") == "rgb(239, 239, 242)")
+        window.shot("check")
+        window.tap("Escape"); window.wait("home")
+        window.fit(report)
+        until(lambda: window.tab.main("getComputedStyle(document.body).backgroundColor") == "rgb(27, 27, 30)")
+        window.shot("boundary")
+        assert window.tab.main("document.documentElement.scrollWidth <= innerWidth")
+        window.tab.send("Emulation.setEmulatedMedia", {"features": [
+            {"name": "prefers-color-scheme", "value": "dark"},
+            {"name": "prefers-reduced-transparency", "value": "reduce"},
+            {"name": "prefers-reduced-motion", "value": "reduce"}]})
+        window.shot("boundary-solid")
+        assert "Ready to check" in window.text() and "of 9" not in window.text()
+        window.click("cancel"); window.wait("home")
+        until(lambda: host._check is None)
+        assert path.read_bytes() == before and host._check is None
+        report["dark"] = {"saved_entry": True, "neutral_measurement": True, "stopped_boundary": True,
+                          "solid_reduced_motion": True, "no_overflow": True, "saved_profile_unchanged": True}
+    finally:
+        window.close()
+
 
 
 def run(out, schemes=("light", "dark")):
@@ -342,7 +392,10 @@ def run(out, schemes=("light", "dark")):
         camera_failure(tmp, video, out, report)
         old_profile(tmp, video, out, report)
         for scheme in schemes:
-            main_flow(tmp, video, out, report, scheme)
+            if scheme == "dark" and "light" in schemes:
+                dark_smoke(tmp, video, out, report)
+            else:
+                main_flow(tmp, video, out, report, scheme)
     (out / "calibration-results.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
 

@@ -111,6 +111,7 @@ class WebcamHost:
         self._point_index = 0
         self._check = None  # In-memory held-out check; estimates are discarded after each result.
         self._practice = None
+        self._flow = 0
 
     def status(self) -> dict:
         return {"state": self.state, "calibrated": self.profile is not None, "samples": self.samples,
@@ -127,6 +128,7 @@ class WebcamHost:
     def _start(self) -> dict:
         if self._thread and self._thread.is_alive():
             return self.status()
+        self._flow = 0
         self._stop.clear(); self._ready.clear(); self.error = ""; self.state = "starting"
         self.last_sample = 0.
         self._clear_flow()
@@ -196,7 +198,9 @@ class WebcamHost:
         raise RuntimeError("Tracker stopped")
 
     def _ui(self, method: str, value="") -> None:
-        self._send("Runtime.evaluate", {"expression": "globalThis.__HERMES_WEBCAM__?." + method + "(" + json.dumps(value) + ")",
+        expression = "globalThis.__HERMES_WEBCAM__"
+        self._send("Runtime.evaluate", {"expression": f"if ({expression}?.status().flow === {self._flow}) "
+                                       + expression + "?." + method + "(" + json.dumps(value) + ")",
                                        "contextId": self._context})
 
     def _clear_flow(self) -> None:
@@ -231,12 +235,13 @@ class WebcamHost:
             self._clear_flow(); self._ui("notice", _WRONG_WINDOW); return
         self._calibration = None; self._observations = []
         self._check = {"estimator": estimator, "screen": screen, "targets": targets, "candidate": candidate,
-                       "viewport": viewport, "trial": 0, "estimates": [], "trials": []}
-        self._ui("checkReady", {"points": points, "settle_ms": CHECK_SETTLE_MS, "observe_ms": CHECK_OBSERVE_MS})
+                       "viewport": viewport, "trial": 0, "estimates": [], "trials": [], "started": candidate is None}
+        self._ui("checkReady" if candidate is None else "checkBoundary",
+                 {"points": points, "settle_ms": CHECK_SETTLE_MS, "observe_ms": CHECK_OBSERVE_MS})
 
     def _check_observe(self, data: dict, features: list | None, t: float) -> None:
         check = self._check
-        if data.get("check") != check["trial"] or len(check["estimates"]) >= 60:
+        if not check["started"] or data.get("check") != check["trial"] or len(check["estimates"]) >= 60:
             return
         point = check["estimator"].predict(features, t) if features is not None else None
         screen = check["screen"]
@@ -254,23 +259,21 @@ class WebcamHost:
                 self.error = ""; self._calibration_notice = ""; accepted = True
             except (OSError, ValueError) as exc:
                 self.error = str(exc)[:300]
-                self._ui("notice", "Couldn\u2019t save. Try again."); return
-        self._ui("checkResult", self._result_words(outcome, candidate is not None, accepted))
+                self._ui("checkResult", {"note": "Couldn’t save calibration", "detail": "",
+                         "kept": self.profile is not None, "calibrated": self.profile is not None,
+                         "actions": [["calibrate", "Calibrate again"]]}); return
+        self._ui("checkResult", self._result_words(outcome, accepted))
 
-    def _result_words(self, outcome: str, new: bool, accepted: bool) -> dict:
+    def _result_words(self, outcome: str, accepted: bool) -> dict:
         if outcome == "good":
-            return {"outcome": outcome, "note": "Calibration saved" if accepted else "Saved calibration passed the test",
-                    "detail": "Try looking between the practice cards to see the broad area the tracker detects.",
-                    "kept": False, "calibrated": True,
-                    "actions": [["practise", "Try eye tracking"], ["done", "Finish setup"]]}
-        detail = ("The estimated gaze did not match the dots reliably. Try brighter, even lighting and keep your head still."
-                  if outcome == "weak" else
-                  "The camera could not get enough clear views of your eyes. Check the lighting and keep your face in view.")
-        if new and self.profile is None:
-            detail += " No calibration has been saved."
-        return {"outcome": outcome, "note": "Calibration needs another try" if new else "Saved calibration did not pass the test",
-                "detail": detail, "kept": self.profile is not None,
-                "calibrated": self.profile is not None, "actions": [["calibrate", "Try calibration again"]]}
+            return {"outcome": outcome, "note": "Calibration saved" if accepted else "Saved calibration passed",
+                    "detail": "", "kept": False, "calibrated": True,
+                    "actions": [["practise", "Try eye tracking"], ["done", "Continue"]]}
+        return {"outcome": outcome,
+                "note": "Gaze didn’t match the dots" if outcome == "weak" else "Couldn’t see your eyes clearly",
+                "detail": "Try even lighting and a steady position." if outcome == "weak" else "Try brighter, even lighting.",
+                "kept": self.profile is not None, "calibrated": self.profile is not None,
+                "actions": [["calibrate", "Calibrate again"]]}
 
     def _practice_observe(self, features: list | None, t: float) -> None:
         if features is None:
@@ -311,6 +314,12 @@ class WebcamHost:
         if not isinstance(data, dict) or data.get("nonce") != self._nonce:
             return
         kind = data.get("type")
+        flow = data.get("flow", self._flow)
+        if type(flow) is not int or flow < self._flow:
+            return
+        if flow > self._flow:
+            self._clear_flow()
+            self._flow = flow
         if kind == "ready":
             self.error = ""; self.state = "running"; self._ready.set()
         elif kind == "error":
@@ -350,15 +359,26 @@ class WebcamHost:
             else:
                 self._practice = viewport; self._ui("practiceReady")
         elif kind == "calibration_cancel" or kind == "practice_end":
-            self._clear_flow()  # An unaccepted candidate goes with it; the saved profile stays.
+            self._clear_flow()  # Unsaved candidate only; the saved profile stays.
+        elif kind == "check_begin" and self._check is not None:
+            if not self._check["started"]:
+                self._check["started"] = True
+                self._ui("checkReady", {"points": [CHECK_POINTS[i] for order in CHECK_ORDERS for i in order],
+                                      "settle_ms": CHECK_SETTLE_MS, "observe_ms": CHECK_OBSERVE_MS})
+        elif kind == "observation_cancel":
+            self._point_samples = []
+            if self._check is not None:
+                self._check["estimates"] = []
         elif kind == "check_trial" and self._check is not None:
             check = self._check
-            if data.get("index") != check["trial"]:
+            if not check["started"] or data.get("index") != check["trial"]:
                 return
             check["trials"].append(score_check_trial(check["estimates"], check["targets"][check["trial"]]))
             check["estimates"] = []; check["trial"] += 1
             if check["trial"] == len(check["targets"]):
                 self._finish_check()
+            else:
+                self._ui("checkAccepted")
         elif kind == "calibration_point" and self._calibration is not None:
             if data.get("index") != self._point_index:
                 return

@@ -104,11 +104,15 @@ def run(out):
                     camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
                 until(lambda: camera_state()["index"] != index)
             # This portrait cannot follow the dot, so its held-out result is set; the fit is real.
+            until(lambda: camera_state()["phase"] == "boundary")
+            click_action(camera, "start-check")
             until(lambda: camera_state()["phase"] == "checkIntro")
             assert not host.profile_path.exists()
             with patch("hermes_gaze.webcam.summarize_check", return_value="good"):
-                for kind in ("keyDown", "keyUp"):
-                    camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
+                for trial in range(10):
+                    until(lambda: camera_state()["phase"] == "checkIntro" and camera_state()["checkIndex"] == trial)
+                    for kind in ("keyDown", "keyUp"):
+                        camera.send("Input.dispatchKeyEvent", {"type": kind, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32})
                 until(lambda: host.profile is not None, 30)
             assert host.profile_path.stat().st_mode & 0o777 == 0o600
             report["calibration"] = {"points": 9, "stored_mode": "0600", "model": host.profile["model_id"]}
