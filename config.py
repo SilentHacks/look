@@ -4,6 +4,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
+
+
+def local_cdp_url(value: str) -> str:
+    """Supported companion transport: literal IPv4 loopback, no URL indirection."""
+    try:
+        parsed = urlsplit(value)
+        if (parsed.scheme == "http" and parsed.hostname in ("127.0.0.1", "localhost")
+                and parsed.port and parsed.username is None and parsed.password is None
+                and parsed.path in ("", "/") and not parsed.query and not parsed.fragment):
+            return f"http://127.0.0.1:{parsed.port}"
+    except ValueError:
+        pass
+    raise ValueError("Look cdp_url must be http://127.0.0.1:<port> (or localhost). "
+                     "Remote, HTTPS, credentialed and path-based endpoints are not supported.")
 
 
 @dataclass
@@ -23,6 +38,9 @@ class GazeConfig:
     highlight_include_page_text: bool = False
     answer_turn_seconds: float = 12.0  # Each unseen answer's turn before the stack moves on or retreats.
     tts_voice: str = "Russell"
+
+    def __post_init__(self) -> None:
+        self.cdp_url = local_cdp_url(self.cdp_url)
 
     @classmethod
     def from_ctx(cls, ctx: Any) -> "GazeConfig":

@@ -7,9 +7,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import tests
 from hermes_gaze import service, voice
-from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.config import GazeConfig
 from hermes_gaze.voice_turns import VoiceTurns
+from tests.owned_chrome import private_session
 CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 SHOTS=Path(os.environ.get('SHOTS', str(Path(__file__).parent/'shots')))
 SHOTS.mkdir(exist_ok=True, parents=True)
@@ -66,22 +66,15 @@ class Host:
 class Rig:
     def __init__(self, width=1440,height=900,headless=True,scale=2):
         self.tmp=tempfile.mkdtemp(prefix='hermes-ui-dev-')
-        args=[CHROME,'--remote-debugging-port=0',f'--user-data-dir={self.tmp}','--no-first-run','--no-default-browser-check',f'--window-size={width},{height}',os.environ.get('REVIEW_START_URL','about:blank')]
-        if headless: args[1:1]=['--headless=new','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36']
-        self.chrome=subprocess.Popen(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        active=Path(self.tmp)/'DevToolsActivePort'
-        def ready_port():
-            lines = active.read_text().splitlines() if active.exists() else []
-            return int(lines[0]) if len(lines) >= 2 else None
+        args=[f'--window-size={width},{height}']
+        if headless: args += ['--headless=new','--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36']
         try:
-            port=until(ready_port,what='chrome debugging port')
+            self.session=private_session(self.tmp, chrome_args=args, url=os.environ.get('REVIEW_START_URL','about:blank'))
         except BaseException:
-            self.chrome.terminate()
-            self.chrome.wait(8)
             shutil.rmtree(self.tmp,ignore_errors=True)
             raise
+        self.chrome=self.session.cdp.chrome.process
         time.sleep(.7)  # Let hostile fixture install page-world hooks BEFORE plugin attachment.
-        self.session=GazeSession(f'http://127.0.0.1:{port}')
         assert self.session.cdp.connect()
         self.host=Host()
         self.ctx=SimpleNamespace(inject_message=self.host.inject_message)

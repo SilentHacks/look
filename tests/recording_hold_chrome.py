@@ -13,9 +13,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
 from hermes_gaze import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.microphone import Microphone
 from hermes_gaze.resolver.cursor_context import cursor_result
+from tests.owned_chrome import private_session
 
 
 def until(predicate, seconds=10):
@@ -50,15 +50,10 @@ class Input:
 
 def run():
     with tempfile.TemporaryDirectory(prefix='hermes-recording-chrome-') as tmp:
-        chrome = subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-            '--remote-debugging-port=0', f'--user-data-dir={tmp}', '--no-first-run',
-            '--no-default-browser-check', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        session = None
+        session = private_session(tmp)
+        chrome = session.cdp.chrome.process
         mic = Microphone()
         try:
-            active = Path(tmp) / 'DevToolsActivePort'
-            until(active.exists)
-            session = GazeSession('http://127.0.0.1:' + active.read_text().splitlines()[0])
             assert session.cdp.connect()
             def new_tab():
                 req = urllib.request.Request(session.cdp_http_url + '/json/new?about:blank', method='PUT')

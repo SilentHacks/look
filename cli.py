@@ -8,11 +8,10 @@ import os
 import platform
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 from . import service
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
-from .browser.cdp_bridge import get_shared_session, launch_chrome_with_cdp
+from .browser.cdp_bridge import get_shared_session
 from .config import GazeConfig
 from .server import get_shared_server
 from .tools import handle_gaze_resolve
@@ -131,24 +130,13 @@ def _handle_slash_command(raw_args: str) -> str:
 
     if sub in ("start", "connect") and not tail:
         get_shared_server().start()
-        if not session.is_chrome_reachable():
-            port = urlparse(session.cdp_http_url).port or 9333
-            try:
-                launch_chrome_with_cdp("about:blank", port=port)
-            except OSError:
-                return ("Chrome could not start. Install Google Chrome in Applications, "
-                        "then /look start. /look setup checks readiness.")
-            for _ in range(40):
-                if session.is_chrome_reachable():
-                    break
-                time.sleep(.25)
-        ready = session.ensure_overlay()
-        if not ready and session.is_chrome_reachable():
-            try:
+        try:
+            ready = session.cdp.start()
+            if not ready:
                 session.cdp.open_blank()
                 ready = session.ensure_overlay()
-            except OSError:
-                pass
+        except (OSError, ValueError) as exc:
+            return str(exc)
         return ("Look is ready in Chrome. Hold Space; wait for Listening, then speak."
                 if ready else "Chrome could not attach. Open an ordinary page in the companion, then /look start.")
 
@@ -177,17 +165,10 @@ def _handle_slash_command(raw_args: str) -> str:
         server.start()
         url = f"http://{server.host}:{server.port}/"
         try:
-            if not session.is_chrome_reachable():
-                port = urlparse(session.cdp_http_url).port or 9333
-                launch_chrome_with_cdp(url, port=port)
-                for _ in range(20):
-                    if session.is_chrome_reachable():
-                        break
-                    time.sleep(0.25)
-            else:
-                session.cdp.open_url(url)
-        except OSError:
-            return "Practice page could not open. /look diagnostics has connection details."
+            session.cdp.start()
+            session.cdp.open_url(url)
+        except (OSError, ValueError) as exc:
+            return str(exc)
         session.configure(mode=session.tracker.mode, sigma_px=session.tracker.sigma_px,
                           dwell_ms=cfg.dwell_ms, wiggle_trigger=cfg.wiggle_trigger,
                           hotkey=cfg.hotkey, candidate_radius_px=380)

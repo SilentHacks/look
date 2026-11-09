@@ -5,11 +5,10 @@ import json
 import logging
 import threading
 import time
-import urllib.parse
-import urllib.request
 from typing import Any
 
 from .cdp_bridge import CdpSession
+from .ownership import OwnedChrome, OwnershipError
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +18,9 @@ class NoForegroundTab(ConnectionError):
 
 
 class Companion:
-    def __init__(self, http_url: str) -> None:
-        self.http_url = http_url.rstrip("/")
+    def __init__(self, http_url: str, *, profile_dir=None) -> None:
+        self.chrome = OwnedChrome(http_url, profile_dir)
+        self._lifecycle = threading.RLock()
         self.overlay_config: dict = {}
         self.intent_nonce = ""
         self._tabs: dict[str, CdpSession] = {}
@@ -34,6 +34,10 @@ class Companion:
         self._start_owner: dict | None = None
 
     @property
+    def http_url(self) -> str:
+        return self.chrome.http_url
+
+    @property
     def is_connected(self) -> bool:
         with self._lock:
             return any(tab.is_connected for tab in self._tabs.values())
@@ -41,19 +45,32 @@ class Companion:
     def set_intent_handler(self, handler) -> None:
         self._handler = handler
 
+    def start(self, url: str = "about:blank") -> bool:
+        with self._lifecycle:
+            try:
+                self.chrome.start(url)
+                return self.connect()
+            except Exception:
+                self.close()
+                raise
+
     def connect(self) -> bool:
-        with self._lock:
-            if self._thread is None or not self._thread.is_alive():
-                self._stop.clear()
-                self._thread = threading.Thread(target=self._watch, name="hermes-gaze-tabs", daemon=True)
-                self._thread.start()
-        # Admission waits for the first attachment, not for every background page.
-        for _ in range(80):
-            if self.is_connected:
-                return True
-            if self._stop.wait(.1):
-                break
-        return False
+        with self._lifecycle:
+            self.chrome.attach()
+            with self._lock:
+                if self._stop.is_set() and self._thread and self._thread.is_alive():
+                    raise OwnershipError("Look is still stopping. Retry /look start.")
+                if self._thread is None or not self._thread.is_alive():
+                    self._stop = threading.Event()
+                    self._thread = threading.Thread(target=self._watch, name="hermes-gaze-tabs", daemon=True)
+                    self._thread.start()
+            # Admission waits for the first attachment, not every background page.
+            for _ in range(80):
+                if self.is_connected:
+                    return True
+                if self._stop.wait(.1):
+                    break
+            return False
 
     def push_level(self, target: str, level: float) -> None:
         with self._lock:
@@ -63,10 +80,7 @@ class Companion:
 
     def open_url(self, url: str) -> None:
         """Open a validated http(s) destination beside the current tab; the URL is never fetched here."""
-        request = urllib.request.Request(
-            self.http_url + "/json/new?" + urllib.parse.quote(url, safe=":/?&=%#+,;@~-._!*'()"), method="PUT")
-        with urllib.request.urlopen(request, timeout=3) as response:
-            response.read()
+        self.chrome.command("Target.createTarget", {"url": url})
 
     def show_document(self, target: str | None, document: str | None) -> bool:
         """Bring a captured source tab forward only if that exact document still exists."""
@@ -82,9 +96,7 @@ class Companion:
             return False
 
     def open_blank(self) -> None:
-        request = urllib.request.Request(self.http_url + "/json/new?about:blank", method="PUT")
-        with urllib.request.urlopen(request, timeout=3) as response:
-            response.read()
+        self.open_url("about:blank")
 
     @staticmethod
     def _document_owner(tab: CdpSession) -> dict:
@@ -114,9 +126,7 @@ class Companion:
         if self._return_tab(self._start_owner) is not None:
             return dict(self._start_owner)
         url = Path(__file__).with_name("start.html").resolve().as_uri()
-        request = urllib.request.Request(self.http_url + "/json/new?" + urllib.parse.quote(url, safe=""), method="PUT")
-        with urllib.request.urlopen(request, timeout=3) as response:
-            target = json.load(response)["id"]
+        target = self.chrome.command("Target.createTarget", {"url": url})["targetId"]
         deadline = time.monotonic() + 5
         while valid() and not self._stop.is_set() and time.monotonic() < deadline:
             with self._lock:
@@ -177,10 +187,7 @@ class Companion:
         tab = self._owned_tab(owner)
         old_document = tab._context_unique_id
         if new_tab:
-            request = urllib.request.Request(
-                self.http_url + "/json/new?" + urllib.parse.quote(url, safe=""), method="PUT")
-            with urllib.request.urlopen(request, timeout=5) as response:
-                target = json.load(response)["id"]
+            target = self.chrome.command("Target.createTarget", {"url": url})["targetId"]
             tab._submit(tab._send_cmd("Target.activateTarget", {"targetId": target}, timeout=2.), 3.)
         else:
             result = tab._submit(tab._send_cmd("Page.navigate", {"url": url}, timeout=5.), 6.)
@@ -249,11 +256,11 @@ class Companion:
     def _watch(self) -> None:
         while not self._stop.is_set():
             try:
-                with urllib.request.urlopen(self.http_url + "/json/list", timeout=2) as response:
-                    targets = json.load(response)
-                    pages = {str(t["id"]): t for t in targets
-                             if t.get("type") == "page" and t.get("webSocketDebuggerUrl")
-                             and str(t.get("url", "")).startswith(("http://", "https://", "file://", "about:blank"))}
+                targets = self.chrome.command("Target.getTargets")["targetInfos"]
+                targets = [dict(t, id=t["targetId"]) for t in targets]
+                pages = {str(t["id"]): t for t in targets
+                         if t.get("type") == "page"
+                         and str(t.get("url", "")).startswith(("http://", "https://", "file://", "about:blank"))}
                 # Navigation can temporarily clear a listed target's URL. It is not a closed tab.
                 # Keep the pinned transport; only eligible URLs admit new attachments below.
                 with self._lock:
@@ -264,14 +271,15 @@ class Companion:
                     if self._stop.is_set():
                         break
                     with self._lock:
+                        if self._stop.is_set():
+                            break
                         tab = self._tabs.get(key)
-                    if tab is None:
-                        tab = CdpSession(self.http_url)
-                        tab.tab = page
-                        tab.overlay_config = self.overlay_config
-                        tab.intent_nonce = self.intent_nonce
-                        tab.set_intent_handler(lambda intent, reply, key=key: self._dispatch(key, intent, reply))
-                        with self._lock:
+                        if tab is None:
+                            tab = CdpSession(self.http_url, owner=self.chrome)
+                            tab.tab = page
+                            tab.overlay_config = self.overlay_config
+                            tab.intent_nonce = self.intent_nonce
+                            tab.set_intent_handler(lambda intent, reply, key=key: self._dispatch(key, intent, reply))
                             self._tabs[key] = tab
                     if not tab.is_connected:
                         self._attach(tab)
@@ -289,6 +297,12 @@ class Companion:
                     tab.flush_replies()
             except Exception:
                 logger.debug("Chrome tab discovery unavailable", exc_info=True)
+                # Existing transports belong to the lost browser, not its replacement.
+                with self._lock:
+                    tabs, self._tabs = list(self._tabs.values()), {}
+                    self._last_foreground = self._start_owner = None
+                for tab in tabs:
+                    tab.close()
             self._stop.wait(.25)
 
     def _attach(self, tab: CdpSession) -> None:
@@ -453,10 +467,14 @@ class Companion:
                 tab.push_overlay_config()
 
     def close(self) -> None:
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=12)
-        with self._lock:
-            tabs, self._tabs = list(self._tabs.values()), {}
-        for tab in tabs:
-            tab.close()
+        with self._lifecycle:
+            self._stop.set()
+            if self._thread:
+                self._thread.join()
+            with self._lock:
+                tabs, self._tabs = list(self._tabs.values()), {}
+                self._last_foreground = self._start_owner = None
+            for tab in tabs:
+                tab.close()
+            # All input transports are terminal before another runtime can acquire.
+            self.chrome.close()

@@ -47,7 +47,7 @@ config_schema:
   cdp_url:
     type: str
     default: "http://127.0.0.1:9333"
-    description: "Companion-only local Chrome endpoint. Never expose it to Hermes browser_exec/browser_cdp or set BROWSER_CDP_URL to it."
+    description: "Verified Look companion only: http://127.0.0.1:<port> (localhost accepted). Arbitrary existing browsers and remote endpoints are refused. Never expose it to Hermes browser_exec/browser_cdp or BROWSER_CDP_URL."
   sigma_px:
     type: float
     default: 120.0

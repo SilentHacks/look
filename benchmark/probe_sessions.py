@@ -294,10 +294,14 @@ def run(args) -> dict:
             env.pop("HERMES_IGNORE_RULES", None)
         else:
             env["HERMES_IGNORE_RULES"] = "1"
-        chrome = subprocess.Popen([args.chrome, "--headless=new", "--no-first-run", "--no-default-browser-check",
-                                   f"--remote-debugging-port={args.port}", f"--user-data-dir={temp / 'chrome'}",
-                                   "--window-size=1440,1100", (root / "benchmark/benchmark_page.html").as_uri()],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sys.path.insert(0, str(root))
+        import tests  # Register the plugin package shell without executing registration.
+        from tests.owned_chrome import private_session
+        companion = private_session(temp / "plugin-data/hermes-gaze/chrome-profile", port=args.port,
+            executable=args.chrome, chrome_args=("--headless=new", "--window-size=1440,1100"),
+            url=(root / "benchmark/benchmark_page.html").as_uri())
+        chrome = companion.cdp.chrome.process
+        companion.close()  # Hand the verified warm browser to the host, not a competing runtime.
         try:
             with (temp / "backend.log").open("w+") as log:
                 rpc = Rpc(env, log)

@@ -19,7 +19,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import tests
 from hermes_gaze import service, voice
-from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.config import GazeConfig
 from hermes_gaze.resolver.cursor_context import cursor_result
 from hermes_gaze.voice_turns import VoiceTurns
@@ -190,16 +189,10 @@ class LeakServer(http.server.BaseHTTPRequestHandler):
 
 
 with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
-    chrome = subprocess.Popen(['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '--headless=new', '--remote-debugging-port=0', f'--user-data-dir={tmp}', '--no-first-run',
-        '--no-default-browser-check', 'about:blank'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    session = None
+    from tests.owned_chrome import private_session
+    session = private_session(tmp, chrome_args=("--headless=new",))
+    chrome = session.cdp.chrome.process
     try:
-        # Discover only the port published by OUR private profile, never an existing browser.
-        active_port = Path(tmp) / 'DevToolsActivePort'
-        until(active_port.exists)
-        port = int(active_port.read_text().splitlines()[0])
-        session = GazeSession(f'http://127.0.0.1:{port}')
         assert session.cdp.connect()
         def new_tab():
             request = urllib.request.Request(session.cdp_http_url + '/json/new?about:blank', method='PUT')

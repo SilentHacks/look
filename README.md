@@ -92,6 +92,9 @@ undo typing/navigation or cancel a Hermes turn already accepted by the host.
 Start reconnects in cursor mode; eye tracking always needs an explicit start.
 Closing companion tabs alone does not stop the separate camera. `/look status`
 reports camera activity even without an attached page; `/look stop` releases both.
+Stop leaves Chrome's local debugging port live until that Chrome process exits.
+It keeps the dedicated profile and sign-ins; it never kills a browser process.
+Start can reuse that verified browser, including after a Hermes process restart.
 
 **Compatibility:** `/gaze` and `hermes gaze` remain aliases. `connect` means `start`,
 `disconnect` now performs the full `stop`, and `tracker stop` means `cursor`.
@@ -357,6 +360,47 @@ Never point `browser_exec`, `browser_cdp`, `BROWSER_CDP_URL`, `BU_CDP_URL`,
 removes and vetoes arbitrary code/browser/terminal/delegation tools. Disconnect
 with `/look stop` to use the ordinary Hermes tool surface again. A raw
 debugger can synthesize trusted clicks; that authority defeats the private card.
+
+Only `http://127.0.0.1:<port>` or `http://localhost:<port>` is supported for
+`cdp_url`; localhost is normalized to the literal loopback address. Remote,
+HTTPS, IPv6, credentialed, query and path-based endpoints are rejected before
+network access. Discovery ignores environment proxies and refuses redirects.
+The companion requires `websockets` 15.x; upgrade dependencies through the normal
+consented plugin update/install if an older environment still has 12–14.
+
+Look opens a **separate persistent Chrome profile**, not your personal Chrome,
+and uses a private launch-identity file plus an exclusive per-profile runtime
+lock. Before attachment, it checks that Chrome reports that launch identity,
+the exact dedicated profile and configured port. Each page WebSocket verifies
+the same identity before bindings/scripts. Page sockets pin the TCP destination
+to loopback and reject cross-origin WebSocket redirects. New tabs and discovery
+use the verified browser socket, not fresh
+HTTP mutations. An occupied port, another runtime, missing identity file or
+wrong Chrome fails closed, without injecting or killing the occupant.
+Verification uses Chrome's `--enable-automation` command-line reporting; sites
+can detect automation and Chrome may show its automation notice. Site sign-in
+compatibility is not guaranteed.
+
+An explicitly configured local `cdp_url` still chooses the companion port; it
+is **not** permission to attach an arbitrary existing browser. After upgrading
+from the old unverified launcher, quit **only Look's companion Chrome windows**
+once, then `/look start`; the same profile/sign-ins remain. For an unrelated
+port occupant, leave it alone and configure a free local port. If the dedicated
+profile is still open on an old port, close its companion windows before changing
+ports. A lost/corrupt identity file cannot safely recover an already-running
+browser: close that companion and restart, without deleting profile data.
+
+This prevents accidental endpoint/profile mix-ups; it is **not local attacker
+authentication**. Chrome CDP has no authentication: any process able to reach
+the loopback port has debugger authority, can read the launch identity, inspect
+sign-ins and synthesize trusted input. Same-user/root code can also alter local
+files or bypass the advisory lock. Trust local users/processes and filesystem;
+do not forward the port. The identity never enters website DOM/JavaScript, and
+the protected renderer remains a website boundary, not a debugger boundary.
+
+No-device ownership regression: `HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python
+-B -m unittest tests.test_companion_ownership`; real temporary-profile Chrome:
+`HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python -B tests/companion_ownership_chrome.py`.
 
 Collection is bounded: 60 seconds/256 cursor intervals, 64 target identities, 32
 retained captures, 1024 rows/table, 64 collected columns and 8192 captured members/

@@ -283,15 +283,13 @@ def run(args):
             for line in args.env_file.read_text().splitlines():
                 if line.startswith("TYPESAFE_API_KEY="):
                     env["TYPESAFE_API_KEY"] = line.split("=", 1)[1].strip().strip("\"'")
-        chrome = subprocess.Popen([CHROME, *(["--headless=new", "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"] if args.headless else []), "--no-first-run", "--no-default-browser-check",
-                                   f"--remote-debugging-port={port}", f"--user-data-dir={temp / 'chrome'}", "--window-size=1440,900", "about:blank"],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for _ in range(100):
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1).read()
-                break
-            except Exception:
-                time.sleep(.2)
+        sys.path.insert(0, str(ROOT))
+        import tests  # Register the plugin package shell without executing registration.
+        from tests.owned_chrome import private_session
+        companion = private_session(temp / "plugin-data/hermes-gaze/chrome-profile", port=port,
+            chrome_args=("--window-size=1440,900", *(["--headless=new", "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"] if args.headless else [])))
+        chrome = companion.cdp.chrome.process
+        companion.close()  # Browser stays warm; the host must acquire its own exclusive runtime lease.
         with (temp / "backend.log").open("w+") as log:
             # Hermes's bootstrap rewrites sys.path, so the stub must already be in sys.modules.
             # Without this the backend opens the real microphone.

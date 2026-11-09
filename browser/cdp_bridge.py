@@ -15,16 +15,15 @@ import functools
 import json
 import logging
 import secrets
-import subprocess
 import threading
 import time
-import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from collections import deque
 from ..resolver.cursor_context import stamp_resolution
 from ..release_timing import TIMINGS
+from ..config import local_cdp_url
 
 try:
     from plugins.plugin_utils import lazy_singleton
@@ -88,8 +87,9 @@ class CdpSession:
     """Persistent websocket to ONE pinned Chrome tab, serviced by a dedicated
     worker thread that owns an asyncio loop."""
 
-    def __init__(self, http_url: str = "http://127.0.0.1:9333") -> None:
-        self.http_url = http_url.rstrip("/")
+    def __init__(self, http_url: str = "http://127.0.0.1:9333", *, owner=None) -> None:
+        self.http_url = local_cdp_url(http_url)
+        self._owner = owner
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._loop_ready = threading.Event()
@@ -234,12 +234,23 @@ class CdpSession:
             return False
         self._target_id = str(tab.get("id") or "") or None
         # 32 MiB > the service's max transcribe payload (~16.9M base64 chars + envelope)
-        self._ws = await websockets.connect(str(tab["webSocketDebuggerUrl"]), max_size=32 * 1024 * 1024)
+        # Ignore discovery-supplied URLs. Verify launch identity on this exact socket
+        # before Runtime.enable, bindings, scripts or any page access.
+        target = self._target_id
+        if not target or not all(c.isalnum() or c == "-" for c in target):
+            raise ConnectionError("Invalid Chrome target identity")
+        self._ws = await websockets.connect(
+            self.http_url.replace("http://", "ws://") + "/devtools/page/" + target,
+            max_size=32 * 1024 * 1024, proxy=None,
+            host="127.0.0.1", port=int(self.http_url.rsplit(":", 1)[1]))
         if self._closed:
             await self._drop_ws()
             return False
         self._pump_task = asyncio.ensure_future(self._pump(self._ws))
         try:
+            if self._owner is None:
+                raise ConnectionError("Chrome transport has no verified companion owner")
+            self._owner.verify_arguments(await self._send_cmd("Browser.getBrowserCommandLine", {}, timeout=3.))
             for method, params in (
                 ("Runtime.enable", {}),
                 ("Page.enable", {}),
@@ -617,12 +628,12 @@ class GazeSession:
     resolution + the Companion. Deliberately process-global — owned Chrome and
     the camera are OS resources shared across Hermes profiles."""
 
-    def __init__(self, cdp_http_url: str = "http://127.0.0.1:9333") -> None:
+    def __init__(self, cdp_http_url: str = "http://127.0.0.1:9333", *, profile_dir: Path | None = None) -> None:
         from .companion import Companion
         from ..microphone import Microphone
         from ..browser_tasks import BrowserTasks
 
-        self._cdp = Companion(http_url=cdp_http_url)
+        self._cdp = Companion(http_url=cdp_http_url, profile_dir=profile_dir)
         self.microphone = Microphone()
         self._lock = threading.RLock()
         self.ring_buffer = FixationRingBuffer(window_seconds=10.0)
@@ -661,17 +672,19 @@ class GazeSession:
 
     @cdp_http_url.setter
     def cdp_http_url(self, value: str) -> None:
-        self._cdp.http_url = value.rstrip("/")
+        value = local_cdp_url(value)
+        if value != self._cdp.http_url:
+            self._cdp.close()
+            self._cdp.chrome.http_url = value
 
     def is_chrome_reachable(self) -> bool:
-        try:
-            with urllib.request.urlopen(f"{self.cdp_http_url}/json/version", timeout=1.2) as resp:
-                return resp.status == 200
-        except Exception:
-            return False
+        return self._cdp.chrome.available()
 
     def ensure_connected(self) -> bool:
-        return self.is_chrome_reachable() and self._cdp.connect()
+        try:
+            return self._cdp.connect()
+        except ConnectionError:
+            return False
 
     def eval_js(self, expression: str, timeout: float = 6.0) -> Any:
         return self._cdp.eval_js(expression, timeout=timeout)
@@ -998,39 +1011,3 @@ def get_shared_session() -> GazeSession:
     return GazeSession()
 
 
-def launch_chrome_with_cdp(url: str, port: int = 9333, profile_dir: Optional[Path] = None) -> subprocess.Popen:
-    """Launch macOS/Linux Google Chrome with CDP and a dedicated profile, without media grants."""
-    import sys
-    try:
-        from plugins.plugin_storage import plugin_data_dir
-    except ImportError:
-        def plugin_data_dir(name: str) -> Path:
-            return Path.home() / ".cache" / name
-    from ..server import get_shared_server
-
-    # Ensure background demo session server is active
-    server = get_shared_server()
-    server.start()
-
-    # Use HTTP server origin if url is file URI or default
-    target_url = url
-    if not url or url.startswith("file://"):
-        target_url = f"http://{server.host}:{server.port}/"
-
-    prof = profile_dir or (plugin_data_dir("hermes-gaze") / "chrome-profile")
-    prof.mkdir(parents=True, exist_ok=True)
-    mac_app = Path("/Applications/Google Chrome.app")
-    chrome_args = [
-        f"--remote-debugging-port={port}",
-        f"--user-data-dir={prof}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        target_url,
-    ]
-    if sys.platform == "darwin" and mac_app.exists():
-        cmd = ["/usr/bin/open", "-na", str(mac_app), "--args", *chrome_args]
-    else:
-        mac_chrome = mac_app / "Contents" / "MacOS" / "Google Chrome"
-        exe = str(mac_chrome) if mac_chrome.is_file() else "google-chrome"
-        cmd = [exe, *chrome_args]
-    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

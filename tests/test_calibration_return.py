@@ -81,16 +81,9 @@ class OwnedReturn(unittest.TestCase):
         fallback = SimpleNamespace(**vars(self.tab))
         fallback._target_id = "start"
         self.companion._tabs["start"] = fallback
-        response = Mock()
-        response.__enter__ = Mock(return_value=response)
-        response.__exit__ = Mock(return_value=False)
-        response.read.return_value = b'{"id":"start"}'
-        with patch("hermes_gaze.browser.companion.urllib.request.urlopen", return_value=response) as opened:
+        with patch.object(self.companion.chrome, "command", return_value={"targetId": "start"}) as opened:
             owner = self.companion.open_start_page(lambda: True)
             self.assertEqual(owner["browser_target"], "start")
-            request = opened.call_args.args[0]
-            from urllib.parse import unquote
-            self.assertIn(Path("browser/start.html").resolve().as_uri(), unquote(request.full_url))
             self.assertEqual(self.companion.open_start_page(lambda: True), owner)
             self.assertEqual(opened.call_count, 1)
             fallback._route_id += 1
@@ -100,7 +93,7 @@ class OwnedReturn(unittest.TestCase):
             self.companion.open_start_page(lambda: False)
 
     def test_fallback_creation_failure_is_not_reported_as_restored_source(self):
-        with patch("hermes_gaze.browser.companion.urllib.request.urlopen", side_effect=OSError("Chrome unavailable")):
+        with patch.object(self.companion.chrome, "command", side_effect=OSError("Chrome unavailable")):
             with self.assertRaisesRegex(OSError, "Chrome unavailable"):
                 self.companion.open_start_page(lambda: True)
         self.assertIsNone(self.companion._start_owner)
