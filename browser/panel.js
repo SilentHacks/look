@@ -413,7 +413,7 @@
     // Footer: a plain hint until you hover, then plain words. Without a hint it folds away.
     const foot = root.querySelector('.foot');
     const failed = m.item.turns.some(t => t.error);
-    const sig = JSON.stringify([m.hint, m.alert, m.reading, m.autoRead, m.canRead, m.item.lost, m.item.host, m.item.gone, m.paused]);
+    const sig = JSON.stringify([m.hint, m.alert, m.reading, m.autoRead, m.canRead, m.eyeTracking, m.item.lost, m.item.host, m.item.gone, m.paused]);
     if (foot.dataset.sig !== sig) {
       foot.dataset.sig = sig;
       foot.textContent = '';
@@ -441,6 +441,10 @@
             actions.append(always);
           }
         }
+      }
+      if (m.eyeTracking) {
+        const tracker = h('button', 'act', 'Eye tracking');
+        tracker.dataset.act = 'tracking'; actions.append(tracker);
       }
       const close = h('button', 'act quiet', 'Dismiss');
       close.dataset.act = 'dismiss';
@@ -586,6 +590,17 @@
     clip();
   }
 
+  function renderTracking(m) {
+    clearView(); shownKey = 'tracking'; view = 'tracking';
+    const card = h('div', 'card quiet');
+    const head = h('div', 'head'); head.append(h('div', 'title', m.running ? 'Eye tracking' : 'Camera stopped'));
+    const choices = h('div', 'choices');
+    for (const [action, label] of [['show_camera', 'Open camera window'], ['use_cursor', 'Use cursor'], ['dismiss', 'Dismiss']]) {
+      const button = h('button', 'choice', label); button.dataset.act = action; choices.append(button);
+    }
+    card.append(head, choices); root.append(card);
+  }
+
   function report() {
     const card = root.querySelector('.card');
     const size = el => el ? Math.ceil(el.getBoundingClientRect().height) : 0;
@@ -613,6 +628,7 @@
       else if (m.view === 'confirm') renderConfirm(m);
       else if (m.view === 'doing') renderDoing(m);
       else if (m.view === 'lens') renderLens(m);
+      else if (m.view === 'tracking') renderTracking(m);
       else renderNote(m);
       report();
       sizeObserver.observe(root);

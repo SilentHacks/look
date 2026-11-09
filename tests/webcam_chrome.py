@@ -84,7 +84,7 @@ def run(out):
             rig.cmd("Emulation.setFocusEmulationEnabled", {"enabled": False}, tab)
             rig.page("document.body.style.cssText='margin:0;height:200vh';document.body.innerHTML='<article id=planet style=\"padding:32px;height:85vh;background:#eef\"><h1>Jupiter storms</h1><p>The Great Red Spot is a persistent storm on Jupiter.</p></article>'")
             rig.session.configure(mode="webcam")
-            status = host.start()
+            status = rig.session.start_webcam()
             assert status["state"] == "running", status
             assert not status["calibrated"], status
             camera = tracker_tab(host)
@@ -126,8 +126,8 @@ def run(out):
 
             # Return directly from the first completed calibration: no restart, new tab,
             # focus emulation or synthetic viewport geometry to hide a handoff defect.
-            until(lambda: host.drops["no_foreground_tab"] > 0)
-            rig.cmd("Page.bringToFront", {}, tab)
+            click_action(camera, "done")
+            until(lambda: camera_state()["phase"] == "tracking", 10)
             until(lambda: rig.page("document.hasFocus() && !document.hidden"))
             assert rig.iso("window.__HERMES_GAZE_OVERLAY__.state.mode") == "webcam"
             # Returning focus can itself produce a trusted mousemove; do not assume
@@ -213,8 +213,7 @@ def run(out):
             # Stop midway through a second calibration, then reuse the saved profile.
             until(lambda: camera.main("!document.body.classList.contains('calibrating')"))
             saved_profile = host.profile_path.read_bytes()
-            click_action(camera, "done")
-            click_action(camera, "home")
+            # Recalibration is available in the retained camera window.
             click_action(camera, "calibrate")
             until(lambda: camera_state()["index"] == 0)
             for kind in ("keyDown", "keyUp"):

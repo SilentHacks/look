@@ -30,6 +30,8 @@ class Companion:
         self._handler = None
         self._local = threading.local()
         self._inbox_event: dict | None = None
+        self._last_foreground: dict | None = None
+        self._start_owner: dict | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -83,6 +85,74 @@ class Companion:
         request = urllib.request.Request(self.http_url + "/json/new?about:blank", method="PUT")
         with urllib.request.urlopen(request, timeout=3) as response:
             response.read()
+
+    @staticmethod
+    def _document_owner(tab: CdpSession) -> dict:
+        return dict(browser_target=tab._target_id, browser_document=tab._context_unique_id,
+                    browser_route=tab._route_id)
+
+    def capture_return_owner(self) -> dict | None:
+        """Terminal setup may use the last observed page, never an arbitrary listed tab."""
+        try:
+            return self._document_owner(self._target())
+        except NoForegroundTab:
+            return dict(self._last_foreground) if self._last_foreground else None
+
+    def _return_tab(self, owner: dict | None) -> CdpSession | None:
+        with self._lock:
+            tab = self._tabs.get((owner or {}).get("browser_target"))
+        if (tab is None or not owner.get("browser_document") or
+                self._document_owner(tab) != owner):
+            return None
+        return tab
+
+    def open_start_page(self, valid) -> dict:
+        """Explicit fallback only. Never navigate an existing, unrelated tab."""
+        from pathlib import Path
+        if not valid():
+            raise ConnectionError("Setup connection changed. Start setup again in Hermes.")
+        if self._return_tab(self._start_owner) is not None:
+            return dict(self._start_owner)
+        url = Path(__file__).with_name("start.html").resolve().as_uri()
+        request = urllib.request.Request(self.http_url + "/json/new?" + urllib.parse.quote(url, safe=""), method="PUT")
+        with urllib.request.urlopen(request, timeout=3) as response:
+            target = json.load(response)["id"]
+        deadline = time.monotonic() + 5
+        while valid() and not self._stop.is_set() and time.monotonic() < deadline:
+            with self._lock:
+                tab = self._tabs.get(target)
+            if tab and tab.is_connected and tab._context_unique_id and tab._ui_frames and not tab._main_frame_loading:
+                self._start_owner = self._document_owner(tab)
+                return dict(self._start_owner)
+            self._stop.wait(.05)
+        raise ConnectionError("Start page did not attach. Open a page in the companion and restart setup.")
+
+    def return_to_document(self, owner: dict | None, valid) -> dict:
+        """One activation, then bounded exact-document foreground/renderer observations."""
+        if not valid():
+            return {"ok": False, "error": "Setup connection changed. Start setup again in Hermes."}
+        tab = self._return_tab(owner)
+        if tab is None:
+            return {"ok": False, "missing": True}
+        if not tab.is_connected or not self.show_document(owner["browser_target"], owner["browser_document"]):
+            return {"ok": False, "error": "Chrome did not acknowledge activation. Try again or open the start page."}
+        deadline = time.monotonic() + 3
+        while valid() and not self._stop.is_set() and time.monotonic() < deadline:
+            if self._return_tab(owner) is not tab:
+                return {"ok": False, "missing": True}
+            if tab.is_connected and tab._ui_frames and not tab._main_frame_loading:
+                try:
+                    ready = tab.eval_js_once(
+                        "document.visibilityState === 'visible' && document.hasFocus() && "
+                        "!!window.__HERMES_GAZE_OVERLAY__?.returnFromCalibration()",
+                        timeout=.4, context_id=owner["browser_document"])
+                    if ready and valid() and self._return_tab(owner) is tab:
+                        self._last_foreground = dict(owner)
+                        return {"ok": True}
+                except (ConnectionError, RuntimeError, TimeoutError):
+                    pass  # Read observations only; never repeat the foreground command.
+            self._stop.wait(.05)
+        return {"ok": False, "error": "Chrome foreground focus was not observed. Try again or open the start page."}
 
     def _owned_tab(self, owner: dict) -> CdpSession:
         with self._lock:
@@ -201,6 +271,15 @@ class Companion:
                         self._attach(tab)
                         continue
                     self._display_pending(tab)
+                    if tab._context_unique_id:
+                        try:
+                            owner = self._document_owner(tab)
+                            if tab.eval_js_once("document.visibilityState === 'visible' && document.hasFocus()",
+                                                timeout=.3, context_id=owner["browser_document"]):
+                                if self._document_owner(tab) == owner:
+                                    self._last_foreground = owner
+                        except (ConnectionError, RuntimeError, TimeoutError):
+                            pass
                     tab.flush_replies()
             except Exception:
                 logger.debug("Chrome tab discovery unavailable", exc_info=True)
@@ -247,6 +326,7 @@ class Companion:
                 continue
             try:
                 if tab.eval_js("document.visibilityState === 'visible' && document.hasFocus()", timeout=.5):
+                    self._last_foreground = self._document_owner(tab)
                     return tab
             except Exception:
                 continue

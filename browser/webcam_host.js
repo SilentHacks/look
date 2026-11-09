@@ -1,8 +1,8 @@
 // Loaded by CDP only, in the tracker window's isolated world. No website runs here.
 (async function (opts) {
   "use strict";
-  let flow = 0;
-  const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, flow, ...data}));
+  let flow = 0, setup = opts.setup || "";
+  const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, setup, flow, ...data}));
   const make = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = text; if (cls) n.className = cls; return n; };
   const style = make("style");
   // Material values are the companion's glass plate (browser/overlay.js) and type (browser/panel.js).
@@ -66,16 +66,24 @@
     #dot.collect .disc { transform:scale(.29); transition:transform var(--ms,1.1s) cubic-bezier(.45,0,.55,1); }
     #dot.collect .pt { transform:scale(2.4); transition:transform var(--ms,1.1s) cubic-bezier(.45,0,.55,1); }
     #cue { position:fixed; left:0; top:0; display:none; width:270px; max-width:calc(100vw - 32px); text-align:center; font-size:13px; color:var(--secondary); line-height:1.5; }
-    #practice { position:fixed; inset:60px 36px 120px; display:none; grid:1fr 1fr / 1fr 1fr 1fr; gap:16px; }
-    .topic { display:grid; place-items:center; border-radius:24px; box-shadow:inset 0 0 0 .5px var(--line); background:var(--fill); font:500 23px/1.2 -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif; letter-spacing:-.018em; }
-    .topic.selected { box-shadow:var(--shadow),inset 0 0 0 2px var(--line); }
+    #practice { position:fixed; inset:38px 36px 285px; display:none; grid-template-columns:1fr 1.1fr; gap:38px; align-items:center; max-width:930px; margin:auto; }
+    body.practising #practice { display:grid; }
+    .article h2 { font-size:29px; letter-spacing:-.035em; line-height:1.12; margin:0 0 17px; }
+    .article p { max-width:380px; font-size:15px; line-height:1.7; color:var(--secondary); }
+    .topic { display:grid; place-items:center; height:220px; border-radius:34px; background:var(--fill); box-shadow:inset 0 0 0 .5px var(--line); }
+    .topic.selected { outline:2px solid var(--line); outline-offset:9px; }
+    .planet { width:138px; height:138px; border-radius:50%; background:linear-gradient(140deg,#ddc6a0,#a8977f); position:relative; }
+    .planet::after { content:""; position:absolute; width:290px; height:72px; border:18px solid #c5bcb0; border-radius:50%; top:30px; left:-76px; transform:rotate(-24deg); }
+    #example { position:fixed; right:8%; top:48px; width:310px; padding:23px; border-radius:23px; }
+    #example h2 { font-size:19px; margin:0 0 9px; }
+    #example p { line-height:1.6; font-size:14px; }
+    .quiet { color:var(--secondary); font-size:12px; }
+    .practice-status { min-height:44px; padding:9px 21px; border-radius:28px; font-size:16px; }
+    .practice-status.live { color:var(--accent); }
     #bar { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); display:none; flex-direction:column; align-items:center; gap:12px; max-width:calc(100vw - 32px); }
-    #bar .words { font-size:13px; color:var(--secondary); }
-    #lesson { display:flex; flex-direction:column; align-items:center; gap:14px; margin-bottom:10px; }
-    #say { display:flex; align-items:center; gap:9px; }
-    #say .key { height:38px; line-height:37px; padding:0 13px; font-size:24px; }
-    @media (max-width:850px) { .face { width:184px; height:184px; } h1 { font-size:28px; } main.result h1 { font-size:30px; } #practice { inset:40px 20px 130px; gap:10px; } .topic { font-size:19px; } }
-    @media (max-width:520px) { #practice { grid:1fr 1fr 1fr / 1fr 1fr; } .topic { font-size:17px; } .rail { font-size:12px; gap:8px; } }
+    @media (max-width:850px) { .face { width:184px; height:184px; } h1 { font-size:28px; } main.result h1 { font-size:30px; } #practice { inset:30px 28px 280px; gap:22px; } .article h2 { font-size:25px; } }
+    @media (max-width:520px) { #practice { inset:20px 24px 315px; flex-direction:column; justify-content:center; gap:15px; } body.practising #practice { display:flex; } .topic { width:280px; height:170px; } .article h2 { font-size:24px; } .article p { font-size:13px; } .rail { font-size:12px; gap:8px; } #example { right:6%; max-width:88%; } }
+    @media (max-height:560px) { #practice { inset:20px 32px 220px; } .topic { height:140px; } .planet { transform:scale(.7); } .article p { font-size:13px; } #bar { bottom:12px; gap:4px; } #bar h1 { font-size:23px; margin:4px; } #bar .row { margin-top:10px; } }
     @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
     @media (prefers-reduced-transparency: reduce) { :root,body.focus { --fill:rgb(250,250,252); --sheen:transparent; --blur:none; }
       .glass { -webkit-backdrop-filter:none; backdrop-filter:none; } }
@@ -95,22 +103,25 @@
   const dot = make("div"); dot.id = "dot";
   const disc = make("div", "", "disc glass"); dot.append(disc, make("div", "", "pt"));
   const cue = make("div"); cue.id = "cue";
-  const practice = make("div"); practice.id = "practice";
-  for (const topic of ["Saturn’s rings", "Coral reefs", "Sourdough", "The Silk Road", "Honeybees", "Northern lights"]) practice.append(make("div", topic, "topic glass"));
-  const bar = make("div"); bar.id = "bar";
-  const barText = make("span", "", "words");
-  const lessonKey = make("span", "Space", "key");
-  const say = make("h1"); say.id = "say"; say.append(make("span", "Hold"), lessonKey, make("span", "to ask"));
-  const lesson = make("div"); lesson.id = "lesson"; lesson.append(say);
-  const rehearse = make("p", "", "note"); rehearse.id = "rehearse";
-  document.body.append(video, main, practice, dot, cue, bar, rail, cancel);
+  const practice = make("article"); practice.id = "practice";
+  const article = make("div", "", "article");
+  article.append(make("h2", "Saturn’s rings"), make("p", "Saturn’s rings stretch far beyond the planet. From a distance they look solid, but they’re made of countless separate pieces."));
+  const planet = make("div", "", "topic");
+  planet.setAttribute("role", "img"); planet.setAttribute("aria-label", "Illustration of Saturn and its rings");
+  planet.append(make("div", "", "planet")); practice.append(article, planet);
+  const example = make("section", "", "glass"); example.id = "example"; example.hidden = true;
+  example.setAttribute("aria-label", "Example answer");
+  example.append(make("h2", "Saturn’s rings"), make("p", "Saturn’s rings are mostly ice, with some rock and dust. Billions of pieces orbit the planet."), make("p", "Example answer", "quiet"));
+  const bar = make("div"); bar.id = "bar"; bar.setAttribute("aria-live", "polite");
+  document.body.append(video, main, practice, example, dot, cue, bar, rail, cancel);
+  cue.setAttribute("role", "status"); dot.setAttribute("aria-describedby", "cue");
   rail.hidden = cancel.hidden = true;
 
   const POINTS = [.1, .5, .9].flatMap(y => [.1, .5, .9].map(x => [x, y]));
   const NO_EYES = "Couldn’t see your eyes.", MOVED = "Window moved";
   const CURSOR = ["cursor", "Use cursor"];
   // Display only: a coarse cell, so the area never reads as a precise pointer.
-  const REGION_COLS = 8, REGION_ROWS = 6, LOST_AFTER_MS = 700, TAP_HOLD_MS = 220;
+  const REGION_COLS = 8, REGION_ROWS = 6, LOST_AFTER_MS = 700, TAP_HOLD_MS = 130, READY_MS = 650;
   // Face cue, in fractions of the round picture. Fixed by eye; it is a hint, not a gate.
   const GUIDE = {x: .5, y: .48, size: .62}, FIT = {x: .075, y: .085, size: .14}, HEAD_SPAN = 1.65;
 
@@ -118,9 +129,9 @@
   let frames = 0, firstFrame = 0, lastFrame = 0, frameMs = 0, featureMs = 0;
   let phase = "start", locked = null, calibrated = !!opts.calibrated, notice = opts.calibration_notice || "", faceAt = 0;
   let check = null, checkIndex = -1, checkObserving = false, checkTimer = 0;
-  let seenAt = 0, practiceTick = 0;
-  let holdStart = 0, holdTimer = 0;
-  let taught = false, retryPoint = false, listening = false, rehearsed = false, spaceDown = false;
+  let seenAt = 0, practiceTick = 0, practiceFace = false;
+  let holdStart = 0, holdTimer = 0, readyTimer = 0, practiceStep = "idle";
+  let retryPoint = false, listening = false, rehearsed = false, spaceDown = false;
   const faceNote = make("p", "", "note");
 
   const windowNow = () => [screenX, screenY, innerWidth, innerHeight, devicePixelRatio];
@@ -130,7 +141,7 @@
   function buttons(list) {
     const row = make("div", "", "row glass");
     list.forEach(([action, label, disabled], i) => {
-      const b = make("button", label, i === 0 && action !== "cursor" ? "primary" : "");
+      const b = make("button", label, i === 0 && !["cursor", "done"].includes(action) ? "primary" : "");
       b.dataset.action = action; b.disabled = !!disabled; b.addEventListener("click", e => act(action, e)); row.append(b);
     });
     return row;
@@ -189,7 +200,7 @@
   }
   function hideFlow() {
     index = -1; collecting = false; awaiting = false; checkObserving = false; checkIndex = -1; clearTimeout(checkTimer); check = null;
-    clearTimeout(holdTimer); holdStart = 0; listening = false;
+    clearTimeout(holdTimer); clearTimeout(readyTimer); holdStart = 0; listening = false; example.hidden = true;
     rail.hidden = cancel.hidden = true;
     dot.style.display = "none"; cue.style.display = "none"; practice.style.display = "none"; bar.style.display = "none";
     dot.classList.remove("collect"); setFocus(false); document.body.classList.remove("practising");
@@ -209,14 +220,14 @@
   }
   function moveDot(x, y) { dot.style.transform = `translate(${x * innerWidth}px,${y * innerHeight}px)`; }
   function showCue(x, y) {
-    const line = !faceVisible() ? "Bring your face into view." : retryPoint ? NO_EYES : !taught && !collecting && phase !== "check" && !awaiting ? "teach" : "";
-    cue.replaceChildren();
-    if (line === "teach") cue.append(make("span", "Look at the dot. Tap "), make("span", "Space", "key"), make("span", ", then keep looking until it moves."));
-    else cue.textContent = line;
-    cue.style.display = line ? "block" : "none";
+    cue.textContent = !faceVisible() ? "Bring your face into view." : retryPoint ? "Couldn’t see your eyes. Tap Space" :
+      collecting || phase === "check" || awaiting ? "Keep looking" : "Tap Space";
+    cue.style.display = "block";
+    const size = Math.max(10, Math.min(76, Math.floor(2 * (innerHeight * .1 - 42))));
+    dot.style.setProperty("--size", `${size}px`);
     const r = cue.getBoundingClientRect();
     const px = Math.min(innerWidth - r.width - 16, Math.max(16, x * innerWidth - r.width / 2));
-    const py = y > .7 ? y * innerHeight - r.height - 74 : y * innerHeight + 72;
+    const py = y * innerHeight + size / 2 + 7;
     cue.style.transform = `translate(${px}px,${py}px)`;
   }
   function progress(training) {
@@ -247,10 +258,12 @@
       flow++; hideFlow(); phase = "waiting"; emit("check_start", measure(e)); e.target.blur();
     } else if (action === "practise" && stream) {
       flow++; hideFlow(); phase = "waiting"; emit("practice_start", measure(e));
-    } else if (action === "done") {
-      flow++; emit("practice_end"); handoff();
-    } else if (action === "finish" && phase === "handoff") {
-      hideFlow(); phase = "finished"; main.replaceChildren(); e.target.blur();
+    } else if (action === "done" || action === "return" || action === "start-page") {
+      if (phase === "returning") return;
+      flow++; hideFlow(); locked = null; phase = "returning";
+      page({status: "Returning to browsing…"}); emit("return_browsing", {start_page: action === "start-page"});
+    } else if (action === "again" && phase === "practice") {
+      practiceStep = "idle"; renderPractice();
     } else if (action === "cancel" || action === "home") {
       flow++; emit("calibration_cancel"); home();
     } else if (action === "cursor") {
@@ -258,12 +271,28 @@
       page({status: "Eye tracking off", actions: [["setup", "Set up eye tracking"]]});
     } else if (action === "retry" || action === "setup") restart();
   }
-  function handoff() {
-    hideFlow(); phase = "handoff"; locked = null;
-    rehearsed = false; say.replaceChildren(make("span", "Hold"), lessonKey, make("span", "to ask")); say.style.color = "";
-    rehearse.textContent = "Wait for “Listening”, then speak. Release to send.";
-    page({extra: [lesson, rehearse], actions: [["finish", "Return to Chrome"]]});
-    document.activeElement?.blur();
+  function renderPractice() {
+    const step = practiceStep, answered = step === "answer", retry = ["tap", "early", "cancelled", "interrupted"].includes(step);
+    const title = step === "waiting" ? "Wait for Listening…" : step === "listening" ? "Listening" : answered ? "" : retry ? "Try the hold again" : "Ask about Saturn";
+    practiceFace = faceVisible();
+    const help = !practiceFace && !answered ? "Bring your face into view." : step === "waiting" ? "Keep holding Space." : step === "listening" ? "Say “What are these rings made of?”" :
+      step === "tap" ? "Hold Space a little longer." : step === "early" ? "Wait for “Listening” before speaking." :
+      step === "cancelled" ? "Rehearsal cancelled. Hold Space to try again." : step === "interrupted" ? "Rehearsal interrupted. Hold Space to try again." :
+      answered ? "" : "Look at the rings, then hold Space.";
+    example.hidden = !answered;
+    practice.setAttribute("aria-hidden", String(answered));
+    const parts = [];
+    if (title) { const heading = make(["waiting", "listening"].includes(step) ? "div" : "h1", title, ["waiting", "listening"].includes(step) ? `practice-status glass${step === "listening" ? " live" : ""}` : ""); heading.id = "say"; parts.push(heading); }
+    if (help) parts.push(make("p", help, "note"));
+    if (step === "listening") parts.push(make("p", "Then release Space.", "note"));
+    parts.push(buttons(answered ? [["return", "Return to browsing"], ["again", "Try again"]] : [["done", "Skip practice"]]),
+      make("p", "Practice only — microphone off.", "quiet"));
+    bar.replaceChildren(...parts);
+  }
+  function interruptPractice(step) {
+    if (phase !== "practice" || !holdStart) return;
+    clearTimeout(holdTimer); clearTimeout(readyTimer); holdStart = 0; listening = false;
+    practiceStep = step; renderPractice();
   }
   function showCheckDot() {
     phase = "checkIntro"; retryPoint = false; awaiting = false;
@@ -285,12 +314,14 @@
   }
   function practiceFrame() {
     if (phase !== "practice") return;
-    if (performance.now() - seenAt > LOST_AFTER_MS) for (const card of practice.children) card.classList.remove("selected");
-    barText.textContent = faceVisible() ? "" : "Bring your face into view.";
+    if (performance.now() - seenAt > LOST_AFTER_MS) planet.classList.remove("selected");
+    if (!faceVisible()) interruptPractice("interrupted");
+    if (practiceFace !== faceVisible()) renderPractice();
   }
   addEventListener("keydown", e => {
     if (!e.isTrusted) return;
-    if (e.code === "Escape" && ["calibrate", "boundary", "checkIntro", "check", "practice", "waiting"].includes(phase)) {
+    if (e.code === "Escape" && phase === "practice") { e.preventDefault(); interruptPractice("cancelled"); return; }
+    if (e.code === "Escape" && ["calibrate", "boundary", "checkIntro", "check", "waiting"].includes(phase)) {
       e.preventDefault(); flow++; emit("calibration_cancel"); home(); return;
     }
     if (e.code !== "Space") return;
@@ -305,23 +336,31 @@
     } else if (phase === "boundary") {
       // Only an explicit trusted control activation starts the held-out check.
       if (!e.target.closest("button")) e.preventDefault();
-    } else if (phase === "handoff" && !e.target.closest("button")) {
-      e.preventDefault(); if (!fresh || rehearsed || holdStart) return;
+    } else if (phase === "practice" && !e.target.closest("button")) {
+      e.preventDefault(); if (!fresh || practiceStep === "answer" || holdStart || !faceVisible()) return;
       holdStart = performance.now(); const owner = flow;
       holdTimer = setTimeout(() => {
-        if (flow !== owner || phase !== "handoff" || !holdStart) return;
-        listening = true; rehearsed = true; say.textContent = "Listening"; say.style.color = "var(--accent)"; rehearse.textContent = "";
+        if (flow !== owner || phase !== "practice" || !holdStart) return;
+        practiceStep = "waiting"; renderPractice();
+        readyTimer = setTimeout(() => {
+          if (flow !== owner || phase !== "practice" || !holdStart) return;
+          listening = true; practiceStep = "listening"; renderPractice();
+        }, READY_MS);
       }, TAP_HOLD_MS);
     }
   }, true);
   addEventListener("keyup", e => {
     if (!e.isTrusted || e.code !== "Space") return;
     spaceDown = false;
-    if (phase !== "handoff" || !holdStart) return;
-    e.preventDefault(); clearTimeout(holdTimer); holdStart = 0;
-    if (listening) { say.textContent = ""; rehearse.textContent = ""; listening = false; }
+    if (phase !== "practice" || !holdStart) return;
+    e.preventDefault(); clearTimeout(holdTimer); clearTimeout(readyTimer);
+    const elapsed = performance.now() - holdStart; holdStart = 0;
+    practiceStep = listening ? "answer" : elapsed < TAP_HOLD_MS ? "tap" : "early";
+    if (listening && !rehearsed) { rehearsed = true; emit("practice_complete"); }
+    listening = false; renderPractice();
   }, true);
-  addEventListener("blur", () => { spaceDown = false; clearTimeout(holdTimer); holdStart = 0; if (listening) { say.textContent = ""; listening = false; } });
+  addEventListener("blur", () => { spaceDown = false; interruptPractice("interrupted"); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) interruptPractice("interrupted"); });
   function shutdown() {
     flow++;
     active = false; clearInterval(timer); clearInterval(practiceTick); stream?.getTracks().forEach(t => t.stop()); try { model?.close(); } catch {}
@@ -330,7 +369,20 @@
   addEventListener("pagehide", () => { shutdown(); hideFlow(); }, {once: true});
   globalThis.__HERMES_WEBCAM__ = {
     stop() { shutdown(); hideFlow(); },
-    pointAccepted() { if (phase !== "calibrate" || !awaiting) return; taught = true; awaiting = false; dot.classList.remove("collect"); index++; if (index < POINTS.length) place(); },
+    beginSetup(value) {
+      setup = value; flow++; emit("calibration_cancel");
+      if (active && stream) home();
+      else if (phase !== "error") restart();
+    },
+    returnResult(result) {
+      if (phase !== "returning") return;
+      phase = result.ok ? "tracking" : "return-error";
+      if (result.ok) page({status: "Eye tracking", notes: ["Keep this window open for eye tracking."], actions: [["return", "Return to browsing"], ["calibrate", "Calibrate again"], CURSOR]});
+      else page({status: result.missing ? "That page is no longer available" : "Couldn’t bring your page forward",
+        notes: ["Your calibration is saved. Eye tracking stays on.", result.error || ""],
+        actions: [["return", "Try again"], ["start-page", "Open start page"], CURSOR]});
+    },
+    pointAccepted() { if (phase !== "calibrate" || !awaiting) return; awaiting = false; dot.classList.remove("collect"); index++; if (index < POINTS.length) place(); },
     pointRetry() {
       if (phase !== "calibrate") return;
       awaiting = false; collecting = false; retryPoint = true;
@@ -340,7 +392,7 @@
       page({status: "Couldn’t calibrate", notes: ["Try even lighting and a steady position."], kept: calibrated ? "Saved calibration unchanged." : "", actions: [["calibrate", "Calibrate again"], CURSOR]}); },
     checkBoundary(value) {
       if (phase !== "calibrate") return;
-      taught = true; hideFlow(); check = value; phase = "boundary";
+      hideFlow(); check = value; phase = "boundary";
       page({status: "Ready to check", actions: [["start-check", "Start accuracy check"], ["cancel", "Cancel"]]});
       faceNote.className = "note kept"; main.append(faceNote);
       document.activeElement?.blur();
@@ -349,37 +401,36 @@
       if (phase !== "waiting") return;
       hideFlow(); check = value; checkIndex = 0; main.style.display = "none"; setFocus(true); showCheckDot();
     },
-    checkAccepted() { if (phase !== "check" || !awaiting) return; taught = true; checkIndex++; showCheckDot(); },
+    checkAccepted() { if (phase !== "check" || !awaiting) return; checkIndex++; showCheckDot(); },
     checkResult(result) {
       hideFlow(); phase = "result"; locked = null; calibrated = result.calibrated;
       if (calibrated) notice = "";
       page({status: result.note, notes: [result.detail], kept: result.kept ? "Saved calibration unchanged." : "", actions: result.outcome === "good" ? result.actions : [...result.actions, CURSOR]});
     },
     practiceReady() {
-      hideFlow(); phase = "practice"; main.style.display = "none"; seenAt = performance.now(); document.body.classList.add("practising");
-      practice.style.display = "grid"; bar.style.display = "flex";
-      bar.replaceChildren(barText, buttons([["done", "Done"], ["calibrate", "Calibrate again"]]));
-      practiceFrame();
+      hideFlow(); phase = "practice"; practiceStep = "idle"; main.style.display = "none"; seenAt = performance.now(); document.body.classList.add("practising");
+      practice.style.display = "";
+      bar.style.display = "flex"; renderPractice(); document.activeElement?.blur();
     },
     practiceGaze(value) {
       if (phase !== "practice") return;
-      for (const card of practice.children) card.classList.remove("selected");
+      planet.classList.remove("selected");
       if (value.lost) return;
       seenAt = performance.now();
       const x = (Math.floor(value.x * REGION_COLS - 1e-9) + .5) / REGION_COLS, y = (Math.floor(value.y * REGION_ROWS - 1e-9) + .5) / REGION_ROWS;
-      const card = [...practice.children].find(n => { const r = n.getBoundingClientRect(); return x * innerWidth >= r.left && x * innerWidth <= r.right && y * innerHeight >= r.top && y * innerHeight <= r.bottom; });
-      card?.classList.add("selected");
+      const r = planet.getBoundingClientRect();
+      if (x * innerWidth >= r.left && x * innerWidth <= r.right && y * innerHeight >= r.top && y * innerHeight <= r.bottom) planet.classList.add("selected");
     },
     notice(text) { notice = text; home(); },
     cameraFailed() { fatal("Camera stopped"); },
-    status() { return {active, phase, flow, index, collecting, checkIndex, face: faceVisible(), videoTime: video.currentTime, hidden: document.hidden,
+    status() { return {active, phase, flow, setup, index, collecting, checkIndex, practiceStep, face: faceVisible(), videoTime: video.currentTime, hidden: document.hidden,
       frames, frame_ms: frames ? frameMs / frames : null, feature_ms: frames ? featureMs / frames : null,
       sample_hz: frames > 1 ? (frames - 1) * 1000 / (lastFrame - firstFrame) : null}; }
   };
   function tick() {
     if (!active) return;
     if (locked && ["calibrate", "boundary", "waiting", "checkIntro", "check", "practice"].includes(phase) &&
-        (document.hidden || locked.some((v, i) => v !== windowNow()[i]))) {
+        ((document.hidden && phase !== "practice") || locked.some((v, i) => v !== windowNow()[i]))) {
       flow++; emit("calibration_cancel"); hideFlow(); locked = null; phase = "moved";
       page({status: MOVED, notes: ["Keep this window on one screen."], kept: calibrated ? "Saved calibration unchanged." : "", actions: [["home", "Restart setup"], CURSOR]}); return;
     }

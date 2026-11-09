@@ -497,6 +497,16 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 session.cdp.open_url(url)
                 reply({"ok": True})
             return
+        if itype == "tracker":
+            if intent.get("action") == "cursor":
+                session.configure(mode="hover")
+                reply({"ok": True})
+            elif intent.get("action") == "show" and session.webcam is not None:
+                session.webcam.calibrate()
+                reply({"ok": True})
+            else:
+                reply({"ok": False, "error": "Camera window is unavailable. Run /gaze calibrate in Hermes."})
+            return
         if itype == "show_source":
             reply(_show_source(session, str(intent.get("item_id") or ""), intent.get("_browser_target")))
             return

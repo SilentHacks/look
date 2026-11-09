@@ -74,11 +74,14 @@ class WebcamHost:
     def __init__(self, on_point, *, estimator: GazeEstimator | None = None,
                  profile_path: Path | None = None, assets: Path | None = None,
                  fake_video: Path | None = None, runtime_source: Path | None = None,
-                 runtime_options: dict | None = None, on_use_cursor=None, chrome_args: tuple[str, ...] = ()) -> None:
+                 runtime_options: dict | None = None, on_use_cursor=None, on_return=None,
+                 on_rehearsed=None, on_state=None, chrome_args: tuple[str, ...] = ()) -> None:
         self.estimator = estimator or AppearanceEstimator()
         self._feature_limits = getattr(self.estimator, "feature_limits", (4.,) * self.estimator.feature_count)
         self.on_point = on_point
         self.on_use_cursor = on_use_cursor
+        self.on_return, self.on_rehearsed = on_return, on_rehearsed
+        self.on_state = on_state
         self.chrome_args = tuple(chrome_args)
         self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hermes-gaze" / "webcam-calibration.json"
         self.assets = assets
@@ -112,6 +115,56 @@ class WebcamHost:
         self._check = None  # In-memory held-out check; estimates are discarded after each result.
         self._practice = None
         self._flow = 0
+        self._setup = ""
+        self._return_pending = None
+        self._setup_valid = lambda: True
+        self._return_seen = set()
+
+    def begin_setup(self, on_return, on_rehearsed=None, valid=lambda: True) -> None:
+        """Replace setup authority before foregrounding the camera, including a reused host."""
+        self._setup = secrets.token_hex(16)
+        self.on_return, self.on_rehearsed = on_return, on_rehearsed
+        self._return_pending = None
+        self._setup_valid = valid
+        self._return_seen.clear()
+        if self._thread and self._thread.is_alive():
+            self._commands.put(("Runtime.evaluate", {
+                "expression": "globalThis.__HERMES_WEBCAM__?.beginSetup(" + json.dumps(self._setup) + ")",
+                "contextId": self._context}))
+
+    def _begin_return(self, data: dict) -> None:
+        owner = (self._setup, self._flow)
+        if self._return_pending is not None or owner in self._return_seen:
+            return
+        self._clear_flow()  # Discard rehearsal/observations, not the camera or accepted estimator.
+        self._return_seen.add(owner)
+        self._return_pending = owner
+        callback = self.on_return
+        def valid():
+            return (not self._stop.is_set() and self.state == "running" and self.profile is not None
+                    and (self._setup, self._flow) == owner and self._setup_valid())
+        def run():
+            try:
+                result = (callback(data.get("start_page") is True, valid) if callback and valid() else
+                          {"ok": False, "error": "No connected browsing destination. Start setup again in Hermes."})
+            except Exception as exc:
+                result = {"ok": False, "error": str(exc)[:300]}
+            self._commands.put(("_return_result", (owner, result)))
+        threading.Thread(target=run, name="hermes-webcam-return", daemon=True).start()
+
+    def _return_result(self, owner, result) -> None:
+        if owner != self._return_pending or owner != (self._setup, self._flow):
+            return
+        self._return_pending = None
+        if self._stop.is_set() or self.state != "running":
+            return
+        if not self._setup_valid():
+            result = {"ok": False, "error": "Setup connection changed. Run /gaze calibrate in Hermes again."}
+        self._ui("returnResult", result)
+
+    def _publish_state(self) -> None:
+        if self.on_state is not None:
+            threading.Thread(target=self.on_state, name="hermes-webcam-status", daemon=True).start()
 
     def status(self) -> dict:
         return {"state": self.state, "calibrated": self.profile is not None, "samples": self.samples,
@@ -161,8 +214,14 @@ class WebcamHost:
         self._ready.wait(25)
         return self.status()
 
-    def stop(self) -> None:
+    def cancel(self) -> None:
+        """Revoke synchronously without joining the camera reader under an inbox lock."""
         self._stop.set()
+        self._return_pending = None
+        self.state = "stopping"
+
+    def stop(self) -> None:
+        self.cancel()
         if self._ws is not None:
             try:
                 self._ws.send(json.dumps({"id": 0, "method": "Browser.close"}))
@@ -174,6 +233,7 @@ class WebcamHost:
             self._thread.join(12)
         self._clear_flow()
         self.state = "stopped"
+        self._publish_state()
 
     def calibrate(self) -> dict:
         status = self.start()
@@ -199,7 +259,10 @@ class WebcamHost:
 
     def _ui(self, method: str, value="") -> None:
         expression = "globalThis.__HERMES_WEBCAM__"
-        self._send("Runtime.evaluate", {"expression": f"if ({expression}?.status().flow === {self._flow}) "
+        if method == "cameraFailed":
+            self._publish_state()
+        self._send("Runtime.evaluate", {"expression": f"if ({expression}?.status().flow === {self._flow} && "
+                                       + expression + "?.status().setup === " + json.dumps(self._setup) + ") "
                                        + expression + "?." + method + "(" + json.dumps(value) + ")",
                                        "contextId": self._context})
 
@@ -268,7 +331,7 @@ class WebcamHost:
         if outcome == "good":
             return {"outcome": outcome, "note": "Calibration saved" if accepted else "Saved calibration passed",
                     "detail": "", "kept": False, "calibrated": True,
-                    "actions": [["practise", "Try eye tracking"], ["done", "Continue"]]}
+                    "actions": [["practise", "Try a question"], ["done", "Skip practice"]]}
         return {"outcome": outcome,
                 "note": "Gaze didn’t match the dots" if outcome == "weak" else "Couldn’t see your eyes clearly",
                 "detail": "Try even lighting and a steady position." if outcome == "weak" else "Try brighter, even lighting.",
@@ -311,7 +374,7 @@ class WebcamHost:
             data = json.loads(payload)
         except (ValueError, TypeError):
             return
-        if not isinstance(data, dict) or data.get("nonce") != self._nonce:
+        if not isinstance(data, dict) or data.get("nonce") != self._nonce or data.get("setup", "") != self._setup:
             return
         kind = data.get("type")
         flow = data.get("flow", self._flow)
@@ -320,12 +383,16 @@ class WebcamHost:
         if flow > self._flow:
             self._clear_flow()
             self._flow = flow
+            self._return_pending = None
         if kind == "ready":
             self.error = ""; self.state = "running"; self._ready.set()
+            self._publish_state()
         elif kind == "error":
             # The window stays open to explain this; Use cursor or Try again ends it.
             self.error = str(data.get("error", "Tracker failed"))[:300]; self.state = "failed"
             self._clear_flow(); self._ready.set()
+            self._return_pending = None
+            self._publish_state()
         elif kind == "retry_camera":
             self.error = ""; self.state = "starting"; self.last_sample = 0.
         elif kind == "use_cursor":
@@ -334,6 +401,11 @@ class WebcamHost:
                 self._stop.set()
             else:  # configure() stops this host and joins this thread's loop; keep it off the reader.
                 threading.Thread(target=self.on_use_cursor, name="hermes-webcam-cursor", daemon=True).start()
+        elif kind == "return_browsing":
+            self._begin_return(data)
+        elif kind == "practice_complete" and self._practice is not None:
+            if self.on_rehearsed is not None:
+                self.on_rehearsed()
         elif kind == "calibration_start":
             measured = self._measure(data)
             if measured is None:
@@ -493,6 +565,7 @@ class WebcamHost:
                     options = {"nonce": self._nonce, "module": (self.assets / "package/vision_bundle.mjs").as_uri(),
                                "wasm": (self.assets / "package/wasm").as_uri(), "model": (self.assets / "face_landmarker.task").as_uri(),
                                "calibrated": self.profile is not None,
+                               "setup": self._setup,
                                "calibration_notice": _OLD_MODEL_WINDOW if self._calibration_notice else (_BAD_PROFILE_WINDOW if self.error else ""),
                                **self.runtime_options}
                     result = self._command("Runtime.evaluate", {"expression": self.runtime_source.read_text() + "(" + json.dumps(options) + ")",
@@ -501,7 +574,11 @@ class WebcamHost:
                         raise RuntimeError("Tracker runtime failed to initialize")
                     while not self._stop.is_set():
                         while not self._commands.empty():
-                            method, params = self._commands.get_nowait(); self._send(method, params)
+                            method, params = self._commands.get_nowait()
+                            if method == "_return_result":
+                                self._return_result(*params)
+                            else:
+                                self._send(method, params)
                         try:
                             self._event(json.loads(self._ws.recv(timeout=.1)))
                         except TimeoutError:
@@ -525,3 +602,4 @@ class WebcamHost:
             self._ws = None; self._ready.set()
             if self.state != "failed":
                 self.state = "stopped"
+            self._publish_state()

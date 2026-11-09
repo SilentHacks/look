@@ -79,7 +79,7 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
         "A tap scrolls. Right Option opens typed questions without a microphone. "
         "Q recalls answers; Esc stops or dismisses; hold Space on an answer to follow up.",
         "Then try eye tracking, beta: /gaze calibrate switches to webcam mode and opens the separate camera window. "
-        "Click Begin (Recalibrate for a saved setup), then follow the dots, check and practice before asking with your eyes. "
+        "Click Start calibration (Calibrate again for a saved setup), then follow the dots, check and practice before asking with your eyes. "
         "Use one display and English; move the pointer once in each page and after resizing or zooming. "
         "Broad areas only, not precise controls. /gaze tracker stop returns to cursor.",
         "Read aloud is optional: quit Hermes and run hermes gaze setup-speech in your terminal to download "
@@ -172,7 +172,7 @@ def _handle_slash_command(raw_args: str) -> str:
         if status["state"] in ("running", "failed"):
             status = session.webcam.calibrate()
         if status["state"] == "running":
-            guidance = ("In the webcam window, click Begin (Recalibrate for a saved setup). "
+            guidance = ("In the webcam window, click Start calibration (Calibrate again for a saved setup). "
                         "Look at each dot, tap Space and keep looking, then follow the check and practice.")
         elif status["state"] == "starting":
             guidance = "Camera is still starting. Check /gaze tracker; if it stops, try again with /gaze calibrate."

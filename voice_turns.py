@@ -73,7 +73,7 @@ class VoiceTurns:
         self._speech_thread = None
         self.speaking = ""
         # One-time hints live with the inbox, so they follow navigation and tabs.
-        self.coach = dict(greeted=False, heard=0, answered=0, retreated=False)
+        self.coach = dict(greeted=False, heard=0, answered=0, retreated=False, rehearsed=False)
         self.host_refused = False
 
     @property
@@ -153,6 +153,8 @@ class VoiceTurns:
                  "speech_error": self.speech_error, "speaking_item_id": self.speaking,
                  "speech_backend": self.speech_backend, "speech_status": self.speech_status,
                  "coach": dict(self.coach), "waiting": len(self.pending)}
+        webcam = getattr(self.session, "webcam", None)
+        event["tracker"] = {"state": webcam.state if webcam is not None else "stopped"}
         try:
             self.session.display_session_event(event)
         except Exception:
@@ -460,7 +462,7 @@ class VoiceTurns:
         with self.lock:
             if isinstance(fields, dict):
                 for key, value in fields.items():
-                    if key in ("greeted", "retreated"):
+                    if key in ("greeted", "retreated", "rehearsed"):
                         self.coach[key] = bool(value)
                     elif key in ("heard", "answered") and type(value) is int and 0 <= value < 100000:
                         self.coach[key] = value
@@ -805,6 +807,9 @@ class VoiceTurns:
             if item:
                 item["unread"] = True
         self.binding = None
+        revoke = getattr(self.session, "revoke_webcam", None)
+        if revoke:
+            revoke()
         self.session.clear_hover_snapshot()
         self.publish()
 

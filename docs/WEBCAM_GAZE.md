@@ -45,8 +45,10 @@ unload and owned-document replacement close only the camera process we started.
 `/gaze calibrate` switches to webcam mode, starts the owned camera window and
 brings it forward; `/gaze mode webcam` opens the same flow. Maximize it, keep its zoom at
 100%, and click **Start calibration** (**Calibrate again** for a saved setup). At each dot, look at it, tap Space and keep looking for
-about one second. One current-target count advances only after Python accepts the observation.
-A dot without enough usable frames asks again. Esc or **Cancel** cancels; moving/resizing/hiding the window
+about one second. Each dot keeps its concise instruction underneath: **Tap Space**,
+**Keep looking**, or a retry cue. One current-target count advances only after Python
+accepts the observation. A dot without enough usable frames asks again.
+Esc or **Cancel** cancels; moving/resizing/hiding the window
 cancels rather than applying wrong screen targets. The trusted opening click
 measures the actual viewport origin, including browser chrome. Nine targets are
 converted to desktop logical coordinates using that origin, not a fullscreen or
@@ -73,15 +75,31 @@ Moving, resizing or hiding the window during measurement or at the stopped bound
 discards the candidate. Saved setup offers **Check** or **Calibrate again**;
 checking goes straight to ten targets and never rewrites the saved profile.
 
-Practice runs only in the owned window: six cards with gaze shading. Python maps
-each estimate to the window; the page retains its coarse 8×6 display mapping.
-Off-window estimates and missing faces remove shading, never clamp it. Practice
-and checks deliver nothing to websites.
+**Try a question** opens the guided Saturn example. It is silent practice only:
+no microphone, transcription, model call or question injection. A tap or early
+release asks you to try the hold again; a completed hold shows **Listening**,
+the suggested question, then a labelled example answer on release. Escape, blur
+or face loss interrupts rehearsal without claiming completion. Completed practice
+uses the inbox's existing coach state so browsing does not repeat the hold lesson;
+skipping does not claim that it was taught. Real browsing **Listening** still
+requires the first native microphone buffer.
 
-**Continue** or practice **Done** teaches hold-to-ask once. The silent rehearsal
-shows **Listening** after a 220ms hold; releasing clears it without recording,
-speech, model calls or message injection. **Return to Chrome** leaves an empty
-camera window open; switch back to the companion browser yourself.
+**Return to browsing** and **Skip practice** activate the exact companion page
+captured before opening setup, including its document, route, bound Hermes connection
+and setup generation. One foreground request is followed by at most three seconds
+of focus/visibility observations and a protected-renderer check. An acknowledgement
+alone is not success. A closed/replaced page, disconnect, changed setup or unobserved
+focus keeps explicit recovery; **Try again** rechecks the same destination.
+**Open start page** explicitly creates/reuses a small local Telepathy page in the
+owned companion, waits for attachment and checks foreground ownership. It never
+navigates an unrelated tab or restores a missing source by URL.
+
+The same camera process, document and video stream stay live behind browsing.
+Its retained **Eye tracking** page offers return, recalibration and **Use cursor**.
+In the companion, press **Q** before the first answer, or choose **Eye tracking**
+in an answer's footer, to open camera controls and **Use cursor**. Camera/session
+loss revokes setup return and stops the corresponding runtime without joining
+the camera reader under the inbox lock. The saved calibration remains unchanged.
 
 **Use cursor** is available at entry and on unsuccessful results/recovery.
 Camera errors stay on screen with a plain state and **Try again**.
@@ -108,6 +126,10 @@ to page CSS pixels is `page.devicePixelRatio / calibration.devicePixelRatio`;
 Retina pixels are not multiplied twice. The mapper adds the current scroll offset
 for document coordinates. A different display or pinch zoom is rejected rather
 than guessed. This initial pointer measurement is a deliberate usability limit.
+After setup, **Move the pointer in this page.** appears only when that destination's
+measured anchor is actually missing/changed. It lives in the protected renderer
+and clears only on a trusted fresh pointer measurement, not a timer or synthetic
+event. An already anchored page gets no pointer hint.
 
 Observations use `(performance.timeOrigin + performance.now()) / 1000` at inference
 start, compatible with audio word epochs. Camera exposure-to-inference latency is
@@ -210,6 +232,12 @@ instruction. Missing gaze still blocks talking; there is no cursor/center fallba
 `tests/calibration_chrome.py --out DIR` is headless and exercises every calibration,
 check, practice, failure and restart state with a fake camera; only `predict` is scripted
 for the passing path. The headed probe below still needs a separate serial run.
+`tests/calibration_return_chrome.py --headed --out DIR` checks the real completion
+binding and native foreground return with fake video and a synthetic saved fit:
+silent rehearsal, replay/forgery rejection, retained background inference/delivery,
+replaced-source recovery, explicit start-page failure/retry, private origin guidance
+and the companion's stop control. Run headed probes serially. Unit ownership races
+and late replies are in `tests/test_calibration_return.py`.
 
 The probe uses `--use-fake-device-for-media-stream` and
 `--use-file-for-fake-video-capture`, a hash-pinned NASA public-domain portrait

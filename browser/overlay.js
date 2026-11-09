@@ -59,7 +59,7 @@
     items: [], cur: "", view: null, pos: null, capSpot: null, hoverCard: false, retreatTimer: 0, retreatAt: 0,
     advanceTimer: 0, engagedUntil: 0,
     ids: 0, sizes: {prevH: 0, cardH: 0, nextH: 0, contentH: 0, bodyH: 0}, maxBody: 420, dark: false, dir: null,
-    coach: {greeted: false, heard: 0, answered: 0, retreated: false}, pillMode: "none", pillW: 96, pillLast: "",
+    coach: {greeted: false, heard: 0, answered: 0, retreated: false, rehearsed: false}, pillMode: "none", pillW: 96, pillLast: "",
     micReady: false, micWarning: "", localPending: [], compose: null, note: null, frameY: 0, frameH: 0,
     wasBusy: false, cardFade: 0, shown: new Set(), reposition: new Set(), ready: false,
   };
@@ -1445,7 +1445,7 @@
     return i.presented ? "" : "Ready";
   }
   function hintFor(item) {
-    if (S.coach.answered > 6 || item.turns.at(-1)?.error) return "";
+    if (S.coach.rehearsed || S.coach.answered > 6 || item.turns.at(-1)?.error) return "";
     return "Hold Space to ask more";
   }
   const viewItem = () => {
@@ -1467,6 +1467,10 @@
     if (S.view === "confirm") { rawSend({...base, view: "confirm", id: confirmation.actionId, label: confirmation.label,
       summary: confirmation.summary, destination: confirmation.destination, doing: !!actionTask}); return; }
     if (S.view === "doing") { rawSend({...base, view: "doing", label: actionTask?.label || "Working on this page"}); return; }
+    if (S.view === "tracking") {
+      rawSend({...base, view: "tracking", running: inbox?.tracker?.state === "running"});
+      return;
+    }
     if (S.view === "lens") {
       rawSend({...base, view: "lens", id: state.resolutionId, dwell: state.dwellMs,
         options: state.lensCandidates.map(c => humanName(c.label || c.summary || "", 44))});
@@ -1482,6 +1486,7 @@
       hint: (inbox?.speaking_item_id === item.id && inbox?.speech_status) || hintFor(item),
       alert: inbox?.speech_error || "",
       reading: inbox?.speaking_item_id === item.id, autoRead: !!inbox?.auto_speak, canRead: hasAnswer,
+      eyeTracking: state.mode === "webcam",
       paused: !!inbox?.paused && !item.turns.some(t => t.error) && (inbox?.waiting || 0) > 0,
       prev: peek(list[i - 1]), next: peek(list[i + 1]),
       item: {id: item.id, subject: item.subject, notice: item.notice, lost: !item.local, host: item.host, gone: isGone(item),
@@ -1754,6 +1759,7 @@
     go(target, delta > 0 ? "next" : "prev");
   }
   function recallNotes() {
+    if (state.mode === "webcam" && !S.items.some(i => i.turns.length)) { openView("tracking", null); return; }
     if (!S.items.some(i => i.turns.length)) { coachLine("Nothing here yet. Point at something and hold Space", 2800); return; }
     for (const i of S.items) i.archived = false;
     control("recall");
@@ -1863,6 +1869,7 @@
     wake();
   }
   function coachLine(text, ms) {
+    S.coachText = text;
     clearTimeout(S.coachTimer);
     S.pillMode = "coach";
     const w = Math.ceil((text.length * 6.6 + 34) / 16) * 16, vw = innerWidth;
@@ -1871,11 +1878,11 @@
     setTone(darkAt(vw / 2 - w / 2, innerHeight - 76, w, PILL_H));
     raise();
     pushPill("coach", text, false);
-    S.coachTimer = setTimeout(() => {
+    S.coachTimer = ms ? setTimeout(() => {
       S.coachTimer = 0;
       if (S.pillMode === "coach") hidePill();
       updateCapsule();
-    }, ms);
+    }, ms) : -1;
     wake();
   }
 
@@ -2228,6 +2235,9 @@
     else if (a === "prev") step(-1);
     else if (a === "dismiss") dismissNote();
     else if (a === "go") { goBack(item); releaseFrameFocus(); }
+    else if (a === "tracking") openView("tracking", null);
+    else if (a === "use_cursor") { _emit({type: "tracker", action: "cursor"}); dismissNote(); }
+    else if (a === "show_camera") _emit({type: "tracker", action: "show"});
     else if (a === "read" && item) control(inbox?.speaking_item_id === item.id ? "stop_speaking" : "speak", item.id);
     else if (a === "autoread") control("auto_speak");
     else if (a === "retry" && item) control("retry", item.id, m.turn || "");
@@ -2253,9 +2263,14 @@
     inboxRevision = event.revision;
     inbox = event;
     if (event.coach) {
+      if (event.coach.rehearsed && !S.coach.rehearsed && S.pillMode === "coach" &&
+          S.coachText === "Hold Space. Wait for Listening. Leave fields or keyboard-focused controls.") {
+        clearTimeout(S.coachTimer); S.coachTimer = 0; hidePill(true);
+      }
       for (const key of ["heard", "answered"]) S.coach[key] = Math.max(S.coach[key], event.coach[key] || 0);
       S.coach.retreated = S.coach.retreated || !!event.coach.retreated;
       S.coach.greeted = S.coach.greeted || !!event.coach.greeted;
+      S.coach.rehearsed = S.coach.rehearsed || !!event.coach.rehearsed;
     }
     S.items = event.items.map(itemView);
     if ((!previous || previous.selected_item_id !== event.selected_item_id) &&
@@ -2270,7 +2285,7 @@
         coachLine("Hermes is disconnected. Run /gaze in Hermes to reconnect", 6000);
       }
     }
-    if (event.session_connected && !S.coach.greeted && !event.items.length) {
+    if (event.session_connected && !S.coach.greeted && !S.coach.rehearsed && !event.items.length) {
       S.coach.greeted = true;
       sendCoach({greeted: true});
       if (!S.hold) coachLine("Hold Space. Wait for Listening. Leave fields or keyboard-focused controls.", 11000);
@@ -2406,6 +2421,15 @@
     }
   }
   let webcamAnchor = null, webcamAskedAt = null, lastWebcamAt = 0;
+  let originHint = false;
+  function returnFromCalibration() {
+    if (!S.ready || state.mode !== "webcam") return false;
+    const reason = webcamViewport(devicePixelRatio).drop_reason;
+    originHint = reason === "no_page_anchor" || reason === "viewport_changed";
+    if (originHint && !S.hold && !S.view && document.visibilityState === "visible" && document.hasFocus())
+      coachLine("Move the pointer in this page.", 0);
+    return true;
+  }
   function freshWebcam() { return performance.now() - lastWebcamAt < 800 && lastWebcamAt > 0; }
   function webcamBlockMessage() {
     const reason = webcamViewport(devicePixelRatio).drop_reason;
@@ -2458,6 +2482,10 @@
     if (state.mode === "webcam") {
       webcamAnchor = {sx: e.screenX, sy: e.screenY, x: e.clientX, y: e.clientY, windowX: screenX, windowY: screenY,
         dpr: devicePixelRatio, width: innerWidth, height: innerHeight, outerWidth, outerHeight};
+      if (originHint) {
+        originHint = false;
+        if (S.coachTimer === -1) { S.coachTimer = 0; hidePill(true); updateCapsule(); }
+      }
       return;
     }
     if (typeof state.pointerX === "number") S.pointer.moved += Math.hypot(e.clientX - state.pointerX, e.clientY - state.pointerY);
@@ -2574,7 +2602,7 @@
       return;
     }
     if (requestOwner.has(msg.id) && (msg.item_id || msg.ok === false || msg.delivery)) settleRequest(msg);
-    if (msg.type === "inbox" || msg.type === "followup" || msg.type === "open_link" || msg.type === "show_source") {
+    if (msg.type === "inbox" || msg.type === "followup" || msg.type === "open_link" || msg.type === "show_source" || msg.type === "tracker") {
       if (!msg.ok && msg.error) showPlainMessage(msg.error);
       return;
     }
@@ -3116,6 +3144,7 @@
   window.addEventListener("scroll", onMotionScroll, {capture: true, passive: true});
   function onViewportResize() {
     uiFrame.style.height = `${Math.max(900, innerHeight)}px`;
+    if (state.mode === "webcam") returnFromCalibration();
     if (S.view) {
       const item = viewItem();
       const spot = place(item, S.sizes.cardH || 200);
@@ -3277,6 +3306,8 @@
           state.pointerX = state.pointerY = null; state.armed = false;
           state.lockedX = state.lockedY = null; lockedNode = null;
           cursorHistory.length = 0; webcamAnchor = null;
+          originHint = false;
+          if (S.coachTimer === -1) { S.coachTimer = 0; hidePill(true); }
         }
       }
       Object.assign(state, opts || {});
@@ -3306,6 +3337,7 @@
     onSessionEvent,
     recordPoint,
     webcamViewport,
+    returnFromCalibration,
     acceptWebcamSample,
     captureNoisyContext,
     extractTableData,

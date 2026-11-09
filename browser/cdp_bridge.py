@@ -740,14 +740,46 @@ class GazeSession:
 
     def start_webcam(self) -> dict:
         from ..webcam import WebcamHost
+        from .. import service
+        self._cdp.connect()
+        turns = service._VOICE_TURNS
+        binding = turns.binding if turns is not None else None
+        # Capture before the separate process takes focus. Never accept a destination from JS.
+        destination = self._cdp.capture_return_owner()
+        def publish_tracker():
+            if turns is not None and service._VOICE_TURNS is turns:
+                with turns.lock:
+                    turns.publish()
         with self._lock:
             if self.webcam is None:
-                self.webcam = WebcamHost(self._accept_webcam_point, on_use_cursor=lambda: self.configure(mode="hover"))
-        return self.webcam.start()
+                self.webcam = WebcamHost(self._accept_webcam_point, on_use_cursor=lambda: self.configure(mode="hover"),
+                                         on_state=publish_tracker)
+            host = self.webcam
+            host.on_state = publish_tracker
+        def connected():
+            return (self.webcam is host and self.tracker.mode == "webcam" and binding is not None
+                    and service._VOICE_TURNS is turns and turns.binding is binding and turns.connected)
+        def return_to_browser(start_page, valid):
+            owned = lambda: valid() and connected()
+            if not owned():
+                return {"ok": False, "error": "Setup connection changed. Run /gaze calibrate in Hermes again."}
+            owner = self._cdp.open_start_page(owned) if start_page else destination
+            return self._cdp.return_to_document(owner, owned)
+        def rehearsed():
+            if connected():
+                with turns.lock:
+                    if connected():
+                        turns.set_coach({"rehearsed": True, "greeted": True})
+        host.begin_setup(return_to_browser, rehearsed, connected)
+        return host.start()
 
     def stop_webcam(self) -> None:
         if self.webcam is not None:
             self.webcam.stop()
+
+    def revoke_webcam(self) -> None:
+        if self.webcam is not None:
+            self.webcam.cancel()
 
     def webcam_status(self) -> dict:
         return self.webcam.status() if self.webcam is not None else {"state": "stopped", "calibrated": False}

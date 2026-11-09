@@ -117,8 +117,6 @@ class Window:
                 self.key("keyDown")  # Stray/repeated input during observation cannot skip a point.
                 self.key("keyUp")
                 assert self.state()["index"] == index
-                if index:
-                    assert "Tap Space" not in self.text()
                 if shots and index == 4:
                     self.shot("progress", .15)
                 time.sleep(1.4)
@@ -151,8 +149,6 @@ class Window:
                 # A full real observation fits between the portrait's movements.
                 until(lambda: .45 <= self.clock() % SPOT < .55 and self.clock() < FACE_SECONDS - 1.7 and self.state()["face"], PERIOD + 8)
                 assert f"{index + 1} of 10" in self.text()
-                if index:
-                    assert "Tap Space" not in self.text()
                 self.tap()
                 trace = []
                 for _ in range(18):
@@ -307,8 +303,8 @@ def main_flow(tmp, video, out, report, scheme="light"):
             make_recording(window.tab, out)
         # Optional practice uses real-frame Python predictions, never page delivery.
         def at(_f, t):
-            s = host.profile["screen"]
-            return ScreenPoint(s["left"] + .3 * s["width"], s["top"] + .35 * s["height"], t)
+            v = host._practice or {"left": 0, "top": 0, "width": 1440, "height": 900}
+            return ScreenPoint(v["left"] + .75 * v["width"], v["top"] + .35 * v["height"], t)
         Scripted.script = at
         until(lambda: .1 <= window.clock() < 12, PERIOD + 8)
         window.click("practise"); window.wait("practice")
@@ -321,29 +317,30 @@ def main_flow(tmp, video, out, report, scheme="light"):
         until(lambda: FACE_SECONDS + .8 <= window.clock(), PERIOD + 8)
         until(lambda: "Bring your face into view." in window.text())
         check(selected() == 0, "face loss removes highlight")
-        window.click("done"); window.wait("handoff")
-        check("Hold Space to ask" in " ".join(window.text().split()), "handoff gesture once")
-        window.shot("handoff")
-        window.tap(); time.sleep(.3)
-        check("Hold Space to ask" in " ".join(window.text().split()), "short tap does not rehearse")
+        until(lambda: window.state()["face"], PERIOD + 8)
+        window.tap()
+        check(window.state()["practiceStep"] == "tap", "tap repairs without an example")
+        window.key("keyDown"); time.sleep(.2); window.key("keyUp")
+        check(window.state()["practiceStep"] == "early", "early release waits for readiness")
+        window.key("keyDown"); time.sleep(.2); window.tap("Escape"); window.key("keyUp")
+        check(window.state()["practiceStep"] == "cancelled", "Escape cancels only rehearsal")
+        until(lambda: .35 < window.clock() % SPOT < .65 and window.clock() < 25 and window.state()["face"], PERIOD + 8)
         window.key("keyDown")
-        until(lambda: window.tab.main("document.querySelector('#say').textContent") == "Listening", 3)
+        until(lambda: window.state()["practiceStep"] == "listening", 3)
         window.shot("listening", .1)
         window.key("keyUp")
-        check(window.text().strip() == "Return to Chrome", "release silently clears rehearsal")
+        check(window.state()["practiceStep"] == "answer", "release shows a silent labelled example")
         window.shot("released", .1)
-        window.click("finish"); window.wait("finished")
-        check(window.text().strip() == "" and window.state()["active"], "one finish leaves empty live window")
-        window.tap(); time.sleep(.3)
-        check(window.text().strip() == "", "finished cannot restart rehearsal")
-        window.shot("finished", .1)
+        window.click("return"); window.wait("return-error")
+        check(window.state()["active"] and host._practice is None and host.state == "running", "standalone host retains inference and honest recovery")
+        window.shot("return-recovery", .1)
         window.close()
-        # New process, same profile: direct checking teaches its first tap once.
+        # New process, same profile: direct checking skips training.
         host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS)
         window = Window(host, out, scheme)
         window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
         window.click("check"); window.wait("checkIntro")
-        check("1 of 10" in window.text() and "Tap Space" in window.text(), "saved entry skips training and teaches once")
+        check(window.state()["checkIndex"] == 0 and host._calibration is None, "saved entry skips training")
         window.tab.main("document.getElementById('cancel').focus()")
         window.tap(); window.wait("home"); until(lambda: host._check is None)
         check(path.read_bytes() == saved, "focused Cancel Space cancels checking without changing profile")
@@ -353,11 +350,10 @@ def main_flow(tmp, video, out, report, scheme="light"):
         check(window.state()["checkIndex"] == 1, "completed trial survives face loss before acknowledgement")
         window.finish_check(start=1)
         check("Saved calibration passed" in window.text() and path.read_bytes() == saved, "saved pass never rewrites profile")
-        window.click("done"); window.wait("handoff")
-        # Optional rehearsal: finish using native Space on its focused button.
-        window.tab.main("document.querySelector('[data-action=finish]').focus()")
-        window.tap(); window.wait("finished")
-        check(window.text().strip() == "", "focused finish Space does not rehearse")
+        # Optional practice can be skipped with native Space on its focused button.
+        window.tab.main("document.querySelector('[data-action=done]').focus()")
+        window.tap(); window.wait("return-error")
+        check(window.state()["active"] and host._practice is None, "focused skip does not rehearse or stop inference")
         window.close()
         host = WebcamHost(lambda *_: False, estimator=Scripted(), profile_path=path, fake_video=video, chrome_args=HEADLESS)
         window = Window(host, out, scheme)

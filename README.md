@@ -104,6 +104,12 @@ webcam mode and opens the separate local camera window. Click **Start calibratio
 until it moves. After nine accepted targets, **Ready to check** waits for your
 **Start accuracy check** action before ten checks. **Check** tests a saved setup
 directly without replacing it.
+Optional **Try a question** rehearses a silent guided example. **Return to browsing**
+or **Skip practice** brings the captured companion page forward while the camera
+keeps running behind it. Missing/replaced pages or uncertain focus stay in recovery;
+**Open start page** is an explicit owned fallback, not a claim to restore the old page.
+Press **Q** before the first answer, or **Eye tracking** in an answer's footer,
+for **Use cursor** and the camera window.
 `/gaze mode webcam` opens the same flow. Move the pointer once in every page,
 and again after zooming or resizing. Use one display, good light and broad page
 regions; recalibrate after moving or changing camera, posture or glasses.
