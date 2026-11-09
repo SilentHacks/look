@@ -179,6 +179,7 @@ class ConsentChrome:
             finally:
                 probe.close()
             sock = self._tcp(family, address, port)
+            sock.settimeout(None)  # The WebSocket deadline, not the TCP dial bound, owns human consent.
             with self._lock:
                 if self._stopped.is_set():
                     raise OwnershipError("Chrome connection cancelled.")

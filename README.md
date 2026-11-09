@@ -174,6 +174,8 @@ The disposable wire probe uses an independently token-verified owned browser;
 it does **not** prove native human approval. Native Allow/deny/revoke and the
 user-operated existing signed-in session trial remain release gates. No real
 devices or personal browser/account were accessed by these probes.
+Fake-server deadline and immediate Stop/Start regressions:
+`HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python -m unittest tests.test_chrome_consent tests.test_profile_highlight`.
 
 ### Commands
 

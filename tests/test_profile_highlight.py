@@ -48,6 +48,7 @@ class ProfileHighlight(unittest.TestCase):
         run('start --existing --accept')
         until(lambda: fake.upgrades == 2)
         self.assertFalse(old_root.live)
+        old_worker.join(3)
         self.assertFalse(old_worker.is_alive())
         fake.allow.set()
         until(lambda: turns.connected)

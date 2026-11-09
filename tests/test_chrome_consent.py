@@ -222,6 +222,16 @@ class ConsentWire(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await tab._connect_async())
         return tab
 
+    async def test_human_approval_outlasts_tcp_connect_timeout(self):
+        self.fake.allow.clear()
+        attempt = asyncio.create_task(self.start(timeout=10))
+        self.assertTrue(await asyncio.to_thread(self.fake.requested.wait, 2))
+        await asyncio.sleep(2.2)  # Human consent may exceed the two-second TCP dial bound.
+        self.fake.allow.set()
+        await attempt
+        self.assertTrue(self.root.live)
+        self.assertEqual(self.fake.upgrades, 1)
+
     async def test_one_approval_precedes_all_page_access_and_stop_cleans_sessions(self):
         self.fake.allow.clear()
         attempt = asyncio.create_task(self.start())
