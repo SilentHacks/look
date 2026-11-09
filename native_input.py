@@ -37,7 +37,8 @@ def consent(home, plugin_id):
     try:
         config = yaml.safe_load((home / "config.yaml").read_text()) or {}
         plugins = config.get("plugins") or {}
-        return (plugins.get("isolation") == "in_process" and
+        # Stock Hermes defaults to in_process when this key is omitted.
+        return (plugins.get("isolation", "in_process") == "in_process" and
                 plugins.get("entries", {}).get(plugin_id, {}).get("allow_gateway_injection") is True)
     except Exception:
         return False

@@ -129,6 +129,8 @@ def child(args):
         browser_calls = []
         def start_browser(raw, **kw):
             browser_calls.append(raw)
+            if raw.startswith("start --existing"):
+                return cli._handle_slash_command(raw, **kw)
             if raw == "stop":
                 return "Look stopped."
             return "Fixture Chrome connected."
@@ -165,8 +167,47 @@ def child(args):
                         return turns.runs[-1]
                     sid = await create("first-real")
                     assert (await rpc("session.info", session_id=sid))["lazy"]
-                    initial = await look(sid)
-                    assert turns.connected, initial
+                    # Match a normal stock profile: injection granted, isolation omitted.
+                    config_path = home / "config.yaml"
+                    config = json.loads(config_path.read_text())
+                    assert "isolation" not in config["plugins"]
+                    assert ctx._gateway_injection_allowed()
+                    from hermes_cli.plugin_isolation import isolation_mode
+                    assert isolation_mode() == "in_process"
+                    before = len(browser_calls)
+                    denied = []
+                    for isolation, grant in ((None, None), (None, False), ("host", True), ("invalid", True)):
+                        blocked = json.loads(config_path.read_text())
+                        if isolation is not None:
+                            blocked["plugins"]["isolation"] = isolation
+                        entry = blocked["plugins"]["entries"]["hermes-gaze"]
+                        if grant is None:
+                            entry.pop("allow_gateway_injection")
+                        else:
+                            entry["allow_gateway_injection"] = grant
+                        config_path.write_text(json.dumps(blocked))
+                        response = await look(sid, "start --existing")
+                        assert "gateway_injection_not_granted" in str(response), response
+                        assert not turns.connected and len(browser_calls) == before
+                        assert not calls and not hooks
+                        denied.append(dict(isolation=isolation, grant=grant))
+                        config_path.write_text(json.dumps(config))
+                    output["permission_refusals_before_browser"] = denied
+
+                    # Real registered command and CLI disclosure; only Chrome attachment is fake.
+                    def attach_existing(*, on_ready):
+                        browser.cdp.source = "existing"
+                        assert on_ready()
+                    with patch.object(browser.cdp, "start_existing", side_effect=attach_existing) as attach, \
+                            patch.object(type(browser.cdp), "connection_status",
+                                property(lambda _: dict(source="existing", state="connected", error=""))):
+                        disclosure = await look(sid, "start --existing")
+                        assert "/look start --existing --accept" in str(disclosure), disclosure
+                        assert not turns.connected and not calls and not hooks
+                        attach.assert_not_called()
+                        initial = await look(sid, "start --existing --accept")
+                        assert turns.connected and turns.native_input is not None, initial
+                        attach.assert_called_once()
                     assert not calls and not hooks
                     assert (await rpc("session.info", session_id=sid))["lazy"]
                     first = await asyncio.to_thread(question, "Explain this rate")
@@ -186,6 +227,11 @@ def child(args):
                     assert calls[0]["agent"] == calls[1]["agent"]
                     output["cold_first_and_second"] = dict(inferences=2, no_dummy=True, exact_hook=True,
                         frozen_evidence=True, guarded_tools=names, real_native_auth=True)
+                    output["stock_default_existing_chrome"] = dict(
+                        isolation_omitted=True, disclosure_before_attach=True, first_question_complete=True)
+                    # The explicit setting remains supported for the other admission scenarios.
+                    config["plugins"]["isolation"] = "in_process"
+                    config_path.write_text(json.dumps(config))
 
                     # An actual stock constructor failure settles before Look's pre hook.
                     await look(sid, "stop")
@@ -403,7 +449,7 @@ def main():
             "model": {"default": "offline-fixture", "provider": "custom", "base_url": "http://127.0.0.1:9/v1"},
             "gateway": {"multiplex_profiles": False}, "streaming": {"enabled": False},
             "auxiliary": {"title_generation": {"enabled": False}},
-            "plugins": {"isolation": "in_process", "entries": {"hermes-gaze": {
+            "plugins": {"entries": {"hermes-gaze": {
                 "allow_gateway_injection": True, "settings": {"early_highlight": False}}}}}))
         env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ") if k in os.environ}
         env.update(HOME=str(root / "home"), HERMES_HOME=str(root / "state"), TMPDIR=str(root / "tmp"),

@@ -95,15 +95,19 @@ plugins:
       allow_gateway_injection: true
 ```
 
-This changes Hermes's plugin-isolation policy. Restart Hermes after configuration
-changes. Shell commands need in-process isolation and do **not** bind an interactive
-conversation.
+Stock Hermes defaults to `in_process` when `isolation` is omitted; Look honors
+that default. An explicit `host` setting is unsupported for native input.
+Injection still requires the explicit `true` grant above. Restart Hermes and its
+gateway after plugin code or configuration changes; a new conversation alone
+does not reload them. Shell commands do **not** bind an interactive conversation.
 
 In a new Hermes conversation:
 
-1. Run `/look start --existing` for the **Use my Chrome** disclosure, or
-   `/look start --separate` for separate Look Chrome. Bare `/look` keeps the
-   current process's source (separate Chrome by default).
+1. Run `/look start --existing` for the **Use my Chrome** disclosure, then
+   `/look start --existing --accept` if you agree. Enable remote debugging at
+   `chrome://inspect/#remote-debugging` and approve your connection in Chrome.
+   Alternatively, `/look start --separate` uses separate Look Chrome. Bare `/look`
+   keeps the current process's source (separate Chrome by default).
 2. Use Right Option to type the first real question. That question initializes
    Hermes's lazy canonical agent; `/look` sends no startup turn or inference.
 3. For voice, run `/look setup` once to prepare local recognition. Downloads are
@@ -118,6 +122,12 @@ fallback socket-pointer layouts, host isolation, remote clients and mismatched
 owners are refused; Look starts no gateway or second agent. Other frontends
 retain the stock Boolean SDK injector, which cannot observe pre-hook failures.
 Use ordinary Hermes input there if Look cannot deliver; never auto-resend.
+
+If an older Look build reports `gateway_injection_not_granted` despite the
+explicit injection grant, update Look and restart Hermes and its gateway.
+That build incorrectly rejected profiles with an omitted `isolation` key;
+adding `plugins.isolation: in_process` is an alternative to updating, not
+permission to bypass an absent or revoked injection grant.
 
 Each saved question has one stable submission ID. The existing inbox remains
 the only Look FIFO; native terminal receipts release it, including constructor
