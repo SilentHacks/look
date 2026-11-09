@@ -207,6 +207,7 @@ class FirstRunTests(unittest.TestCase):
         session = GazeSession('http://127.0.0.1:1')
         self.addCleanup(session.close)
         with patch.object(cli, 'get_shared_session', return_value=session), \
+             patch.object(cli, 'apple_silicon_mac', return_value=True), \
              patch.object(session, 'start_webcam', return_value={'state': 'stopped', 'error': ''}):
             for command in ('calibrate', 'mode webcam'):
                 with self.subTest(command=command):

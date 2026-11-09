@@ -177,7 +177,10 @@ class CameraCompletion(unittest.TestCase):
                 host._context, host._nonce = 8, "private"
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
             generations = []
-            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), patch.object(host, "_run", side_effect=camera):
+            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("hermes_gaze.webcam.apple_silicon_mac", return_value=True), \
+                 patch("hermes_gaze.webcam.Path.is_file", return_value=True), \
+                 patch.object(host, "_run", side_effect=camera):
                 for _ in range(2):
                     host.start(wait=2); generations.append(host._setup)
                     host.start()

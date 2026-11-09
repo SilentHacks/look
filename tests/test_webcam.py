@@ -140,6 +140,8 @@ class WebcamContracts(unittest.TestCase):
             def camera():
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
             with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("hermes_gaze.webcam.apple_silicon_mac", return_value=True), \
+                 patch("hermes_gaze.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 status = host.start(wait=2)
                 self.assertEqual(status["state"], "running")
@@ -271,6 +273,8 @@ class WebcamContracts(unittest.TestCase):
                 host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
                     "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", "setup": host._setup, **data})}})
             with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("hermes_gaze.webcam.apple_silicon_mac", return_value=True), \
+                 patch("hermes_gaze.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 host.start(wait=2)
                 event("calibration_start", screen=SCREEN, viewport={"left": 0, "top": 0, "width": 1440, "height": 900})
