@@ -71,8 +71,8 @@ def run(out, headed=False):
                 return ScreenPoint(screen["left"] + screen["width"] * .5, screen["top"] + screen["height"] * .5, t)
             Scripted.script = predict
             result(); window.click("practise"); window.wait("practice")
-            until(lambda: window.state()["face"], PERIOD + 8)
-            window.tap(); check(window.state()["practiceStep"] == "tap", "tap cannot complete rehearsal")
+            until(lambda: .35 < window.clock() % 3 < .65 and window.clock() < 25 and window.state()["face"], PERIOD + 8)
+            window.tap(); check(window.state()["practiceStep"] in ("tap", "early"), "short release cannot complete rehearsal")
             window.key("keyDown"); time.sleep(.2); window.key("keyUp")
             check(window.state()["practiceStep"] == "early", "early release cannot complete rehearsal")
             window.key("keyDown"); time.sleep(.2); window.tap("Escape"); window.key("keyUp")
@@ -107,6 +107,14 @@ def run(out, headed=False):
             # An actual changed anchor produces persistent private guidance, not a timer.
             rig.iso("window.__HERMES_GAZE_OVERLAY__.Configure({mode:'hover'});window.__HERMES_GAZE_OVERLAY__.Configure({mode:'webcam'});window.__HERMES_GAZE_OVERLAY__.returnFromCalibration()")
             until(lambda: "Move the pointer in this page." in rig.text("pill"))
+            rig.press("AltRight", "Alt"); until(lambda: rig.dbg()["view"] == "compose")
+            rig.iso("window.__HERMES_GAZE_OVERLAY__.returnFromCalibration()")
+            rig.press("Escape", "Escape")
+            until(lambda: "Move the pointer in this page." in rig.text("pill"))
+            check(True, "origin guidance resumes after composer closes or return arrives during compose")
+            rig.space_down(); time.sleep(.25); rig.space_up()
+            until(lambda: "Move the pointer in this page." in rig.text("pill"), 6)
+            check(rig.session.microphone._stream is None, "origin guidance resumes after temporary Space repair without capture")
             rig.page("document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:5,clientY:5}))")
             time.sleep(.2)
             check("Move the pointer in this page." in rig.text("pill"), "synthetic pointer cannot dismiss missing-anchor guidance")
@@ -115,6 +123,26 @@ def run(out, headed=False):
             check(True, "accepted trusted origin clears private pointer guidance")
             rig.iso("window.__HERMES_GAZE_OVERLAY__.returnFromCalibration()")
             check("Move the pointer" not in rig.text("pill"), "anchored page gets no pointer coaching")
+            # A real private answer fixture exercises native footer keyboard activation.
+            from tests.test_companion_ui import snapshot
+            rig.host.answers = [{"text": "## Rings\n\nA scripted answer for keyboard controls.", "think": .1}]
+            rig.turns.submit("Keyboard controls fixture", snapshot())
+            until(lambda: rig.dbg()["view"] == "answer")
+            until(lambda: rig.turns.active is None and rig.turns.runs[-1]["status"] == "complete")
+            for key in ("Enter", "Space"):
+                rig.panel("card", "document.querySelector('[data-act=tracking]').focus()")
+                check(rig.panel("card", "document.activeElement?.dataset.act") == "tracking", f"footer receives keyboard focus for {key}")
+                rig.press(key, " " if key == "Space" else key)
+                until(lambda: rig.dbg()["view"] == "tracking")
+                check(rig.session.microphone._stream is None, f"focused answer footer accepts trusted {key} without capture")
+                rig.press("Escape", "Escape"); rig.press("KeyQ", "q")
+                until(lambda: rig.dbg()["view"] == "answer")
+            rig.press("Escape", "Escape")
+            # Cached initialization cannot acknowledge a website-removed protected host.
+            rig.iso("window.__HERMES_GAZE_OVERLAY__.uiFrame.getRootNode().host.remove()")
+            camera.send("Page.bringToFront", {})
+            window.click("return"); window.wait("return-error")
+            check("Couldn’t bring your page forward" in window.text(), "missing protected renderer cannot report return success")
             # Returning to the camera is explicit; a replaced source must not be silently retargeted.
             camera.send("Page.bringToFront", {})
             old_document = source._context_unique_id
@@ -135,7 +163,16 @@ def run(out, headed=False):
             check("Start browsing" in rig.page("document.body.innerText") and rig.page("document.hasFocus()"), "explicit owned start surface foreground with protected renderer")
             rig.move(500, 350)
             rig.press("KeyQ", "q")
-            until(lambda: "Eye tracking" in rig.text())
+            until(lambda: rig.dbg()["view"] == "answer")
+            check("Hold Space" not in rig.text("pill"), "new destination renderer does not repeat completed practice")
+            rig.panel("card", "document.querySelector('[data-act=tracking]').focus()")
+            rig.press("Enter", "Enter")
+            until(lambda: rig.dbg()["view"] == "tracking")
+            # Stop only the fake camera track; watchdog state must repaint the OPEN controls.
+            camera.iso("document.getElementById('feed').srcObject.getVideoTracks()[0].stop()", ctx)
+            until(lambda: host.state == "failed", 10)
+            until(lambda: "Camera stopped" in rig.text(), 5)
+            check(True, "open companion controls update when fake camera frames actually stop")
             rig.click_panel('[data-act="use_cursor"]')
             until(lambda: rig.session.tracker.mode == "hover" and host.state == "stopped")
             check(host._process.poll() is not None, "companion protected Use cursor stops only owned camera")

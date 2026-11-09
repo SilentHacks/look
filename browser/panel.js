@@ -591,7 +591,9 @@
   }
 
   function renderTracking(m) {
-    clearView(); shownKey = 'tracking'; view = 'tracking';
+    const key = `tracking:${!!m.running}`;
+    if (shownKey === key) return;
+    clearView(); shownKey = key; view = 'tracking';
     const card = h('div', 'card quiet');
     const head = h('div', 'head'); head.append(h('div', 'title', m.running ? 'Eye tracking' : 'Camera stopped'));
     const choices = h('div', 'choices');
@@ -639,6 +641,9 @@
 
   // ---------- trusted input only; nothing reaches the page ----------
   const inField = n => !!n?.closest?.('input,textarea');
+  const activateButton = (button, facts = {}) => send({t: 'ui', action: button.dataset.act, turn: button.dataset.turn,
+    value: button.dataset.act === 'submit' ? root.querySelector('#hg-input')?.value || '' : button.dataset.value, ...facts});
+  let spaceButton = null;
   document.addEventListener('click', e => {
     if (!e.isTrusted) return;
     const facts = {button: e.button, detail: e.detail, pointerType: e.pointerType || ''};
@@ -646,8 +651,7 @@
     if (link?.dataset.url) { send({t: 'ui', action: 'link', url: link.dataset.url, ...facts}); return; }
     const t = e.target.closest?.('[data-act]');
     if (t) {
-      send({t: 'ui', action: t.dataset.act, turn: t.dataset.turn, value: t.dataset.act === 'submit'
-        ? root.querySelector('#hg-input')?.value || '' : t.dataset.value, ...facts});
+      activateButton(t, facts);
       return;
     }
     if (view === 'answer' && e.target.closest?.('.card') && !String(getSelection())) send({t: 'ui', action: 'go', ...facts});
@@ -662,13 +666,29 @@
       else if (type === 'keydown' && c === 'Escape') { e.target.blur(); send({t: 'ui', action: 'cancel'}); }
       return;
     }
-    if (document.activeElement?.closest?.('button') && (c === 'Enter' || c === 'Space') && view !== 'answer') return;
+    const button = document.activeElement?.closest?.('button[data-act]');
+    if (button && (c === 'Enter' || c === 'Space')) {
+      // Script-disabled frames have no native button key activation. Forward the
+      // trusted gesture, not a synthetic click; keys never carry approval facts.
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      if (c === 'Enter' && type === 'keydown' && !e.repeat) activateButton(button);
+      if (c === 'Space') {
+        if (type === 'keydown' && !e.repeat) spaceButton = button;
+        if (type === 'keyup') {
+          if (spaceButton === button) activateButton(button);
+          spaceButton = null;
+        }
+      }
+      return;
+    }
     if (c === 'Space' || c.startsWith('Arrow') || c === 'Escape' || c === 'KeyQ' || c === 'Enter' || c.startsWith('Alt') ||
         c === 'Backquote' || /^F\d+$/.test(c) || /^Digit[1-9]$/.test(c)) {
       if (!e.metaKey && !e.ctrlKey && !e.altKey) e.preventDefault();
       send({t: 'key', type, code: c, key: e.key, repeat: e.repeat, shift: e.shiftKey, meta: e.metaKey, ctrl: e.ctrlKey, alt: e.altKey});
     }
   }, true);
+  document.addEventListener('blur', () => { spaceButton = null; }, true);
   // Report only interaction, never selection text or scroll position.
   document.addEventListener('wheel', e => {
     if (e.isTrusted && view === 'answer') send({t: 'engaged'});

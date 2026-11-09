@@ -33,7 +33,7 @@ globalThis.document = {createElement: element, createElementNS: (_ns, tag) => el
 globalThis.Image = class { constructor() { this.naturalWidth = width; this.naturalHeight = height; } async decode() {} };
 globalThis.addEventListener = () => {};
 Object.defineProperty(globalThis, "navigator", {value: {mediaDevices: {
-  async getUserMedia(options) { assert.equal(options.audio, false); return {getTracks: () => [{stop() {}}]}; }
+  async getUserMedia(options) { assert.equal(options.audio, false); return {getTracks: () => [{stop() {}}], getVideoTracks: () => [{readyState: "live"}]}; }
 }}, configurable: true});
 globalThis.setInterval = callback => { if (callback.name === "tick") interval = callback; return 1; };
 globalThis.clearInterval = () => {};

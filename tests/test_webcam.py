@@ -269,7 +269,7 @@ class WebcamContracts(unittest.TestCase):
                 host._stop.wait(5)
             def event(kind, **data):
                 host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
-                    "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", **data})}})
+                    "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", "setup": host._setup, **data})}})
             with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
                  patch.object(host, "_run", side_effect=camera):
                 host.start()

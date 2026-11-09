@@ -1537,6 +1537,7 @@
     pushCard();
     layout();
     if (view === "note") armNoteRetreat();
+    updateCapsule();
   }
   function enterPlates(W) {
     const pos = S.pos;
@@ -1822,13 +1823,20 @@
     return `Looking into ${things} things`;
   }
   function updateCapsule(releaseId = 0) {
-    if (S.hold || S.coachTimer) return;
+    if (S.hold || S.coachTimer > 0) return;
     const text = capsuleText();
     if (!text) {
+      if (originHint && !S.view && document.visibilityState === "visible" && document.hasFocus()) {
+        if (S.pillMode !== "coach" || S.coachText !== "Move the pointer in this page.")
+          coachLine("Move the pointer in this page.", 0);
+        return;
+      }
+      if (S.coachTimer === -1) { S.coachTimer = 0; hidePill(); }
       if (S.pillMode === "capsule") hidePill();
       if (releaseId) pushPill("off", "", false, releaseId); // Follow-up: removing Listening is the release update.
       return;
     }
+    if (S.coachTimer === -1) S.coachTimer = 0;
     S.pillMode = "capsule";
     P.pill.o.to(1);
     pushPill("capsule", text, !inbox?.paused, releaseId);
@@ -2299,6 +2307,7 @@
       if (first) { openStack(first); updateCapsule(); return; }
     }
     updateCapsule();
+    if (S.view === "tracking") { pushCard(); layout(); return; }
     if (S.view === "answer") {
       const item = current();
       if (!item || !visible().includes(item)) {
@@ -2423,11 +2432,10 @@
   let webcamAnchor = null, webcamAskedAt = null, lastWebcamAt = 0;
   let originHint = false;
   function returnFromCalibration() {
-    if (!S.ready || state.mode !== "webcam") return false;
+    if (!S.ready || !surfaceIntact() || !uiFrame.isConnected || !pillFrame.isConnected || state.mode !== "webcam") return false;
     const reason = webcamViewport(devicePixelRatio).drop_reason;
-    originHint = reason === "no_page_anchor" || reason === "viewport_changed";
-    if (originHint && !S.hold && !S.view && document.visibilityState === "visible" && document.hasFocus())
-      coachLine("Move the pointer in this page.", 0);
+    if (reason === "no_page_anchor" || reason === "viewport_changed") originHint = true;
+    updateCapsule();
     return true;
   }
   function freshWebcam() { return performance.now() - lastWebcamAt < 800 && lastWebcamAt > 0; }
@@ -2482,7 +2490,7 @@
     if (state.mode === "webcam") {
       webcamAnchor = {sx: e.screenX, sy: e.screenY, x: e.clientX, y: e.clientY, windowX: screenX, windowY: screenY,
         dpr: devicePixelRatio, width: innerWidth, height: innerHeight, outerWidth, outerHeight};
-      if (originHint) {
+      if (originHint && !webcamViewport(devicePixelRatio).drop_reason) {
         originHint = false;
         if (S.coachTimer === -1) { S.coachTimer = 0; hidePill(true); updateCapsule(); }
       }

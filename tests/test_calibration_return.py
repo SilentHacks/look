@@ -1,6 +1,7 @@
 """Calibration return authority and recovery; no devices, downloads or model calls."""
 import json
 from pathlib import Path
+import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
@@ -17,7 +18,7 @@ class OwnedReturn(unittest.TestCase):
     def setUp(self):
         self.companion = Companion("http://127.0.0.1:1")
         self.tab = SimpleNamespace(_target_id="source", _context_unique_id="document", _route_id=3,
-                                   is_connected=True, _ui_frames={"card": True, "pill": True},
+                                   is_connected=True, _ui_frames={"card": (1, "card"), "pill": (2, "pill")},
                                    _main_frame_loading=False, eval_js_once=Mock(return_value=True))
         self.owner = self.companion._document_owner(self.tab)
         self.companion._tabs["source"] = self.tab
@@ -34,6 +35,13 @@ class OwnedReturn(unittest.TestCase):
             result = self.companion.return_to_document(self.owner, lambda: True)
         self.assertFalse(result["ok"])
         self.activate.assert_called_once()  # Acknowledged activation is not observed focus.
+
+    def test_foreground_with_a_dead_protected_renderer_does_not_succeed(self):
+        self.tab.eval_js_once.side_effect = lambda expression, **kwargs: kwargs["context_id"] != "card"
+        with patch("hermes_gaze.browser.companion.time.monotonic", side_effect=[0, 0, 4]):
+            result = self.companion.return_to_document(self.owner, lambda: True)
+        self.assertFalse(result["ok"])
+        self.activate.assert_called_once()
 
     def test_closed_replaced_or_changed_route_never_targets_a_different_page(self):
         for field, value in (("_context_unique_id", "replacement"), ("_route_id", 5)):
@@ -162,6 +170,30 @@ class CameraCompletion(unittest.TestCase):
         self.host.on_return = lambda *_: {"ok": True}
         self.event("return_browsing", flow=2); self.result()
         self.assertTrue(self.ui[-1][1]["ok"])
+
+    def test_dead_camera_restart_changes_generation_but_live_foregrounding_does_not(self):
+        from tests.test_webcam import SCREEN, appearance_observations
+        from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator
+        with tempfile.TemporaryDirectory() as directory:
+            host = self.host = WebcamHost(lambda *_: True, profile_path=Path(directory) / "saved.json",
+                                          on_return=lambda *_: {"ok": True})
+            self.addCleanup(host.stop)
+            host._save(AppearanceEstimator().calibrate(appearance_observations(), SCREEN))
+            host._ui = lambda method, value="": self.ui.append((method, value))
+            def camera():
+                host._context, host._nonce = 8, "private"
+                host.state = "running"; host._ready.set(); host._stop.wait(5)
+            generations = []
+            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), patch.object(host, "_run", side_effect=camera):
+                for _ in range(2):
+                    host.start(); generations.append(host._setup)
+                    host.start()
+                    self.assertEqual(host._setup, generations[-1])
+                    self.event("return_browsing", flow=3); self.result()
+                    self.assertTrue(self.ui[-1][1]["ok"])
+                    host.stop()
+            self.assertNotEqual(*generations)
+            self.assertEqual(len(self.ui), 2)
 
 
 class SetupConnection(unittest.TestCase):

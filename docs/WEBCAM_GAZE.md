@@ -100,6 +100,10 @@ In the companion, press **Q** before the first answer, or choose **Eye tracking*
 in an answer's footer, to open camera controls and **Use cursor**. Camera/session
 loss revokes setup return and stops the corresponding runtime without joining
 the camera reader under the inbox lock. The saved calibration remains unchanged.
+Focused companion buttons accept trusted Enter/Space input; those keys never approve
+website actions. Status commands do not replace an ongoing setup's connection;
+explicit reconnects do. Restarting a closed camera document gives completion a
+fresh setup generation rather than reusing an earlier return attempt.
 
 **Use cursor** is available at entry and on unsuccessful results/recovery.
 Camera errors stay on screen with a plain state and **Try again**.

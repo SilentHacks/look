@@ -429,6 +429,9 @@
   };
   function tick() {
     if (!active) return;
+    if (stream && stream.getVideoTracks().every(track => track.readyState === "ended")) {
+      emit("error", {error: "Camera video track stopped"}); fatal("Camera stopped"); return;
+    }
     if (locked && ["calibrate", "boundary", "waiting", "checkIntro", "check", "practice"].includes(phase) &&
         ((document.hidden && phase !== "practice") || locked.some((v, i) => v !== windowNow()[i]))) {
       flow++; emit("calibration_cancel"); hideFlow(); locked = null; phase = "moved";

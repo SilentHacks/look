@@ -141,12 +141,18 @@ class Companion:
             if self._return_tab(owner) is not tab:
                 return {"ok": False, "missing": True}
             if tab.is_connected and tab._ui_frames and not tab._main_frame_loading:
+                frames = dict(tab._ui_frames)
                 try:
                     ready = tab.eval_js_once(
                         "document.visibilityState === 'visible' && document.hasFocus() && "
                         "!!window.__HERMES_GAZE_OVERLAY__?.returnFromCalibration()",
                         timeout=.4, context_id=owner["browser_document"])
-                    if ready and valid() and self._return_tab(owner) is tab:
+                    if (ready and set(frames) == {"card", "pill"} and
+                            all(tab.eval_js_once("!!window.__HERMES_GAZE_PANEL__", timeout=.4, context_id=context[1])
+                                for context in frames.values()) and frames == tab._ui_frames
+                            and tab.eval_js_once("document.visibilityState === 'visible' && document.hasFocus()",
+                                                 timeout=.4, context_id=owner["browser_document"])
+                            and valid() and self._return_tab(owner) is tab):
                         self._last_foreground = dict(owner)
                         return {"ok": True}
                 except (ConnectionError, RuntimeError, TimeoutError):

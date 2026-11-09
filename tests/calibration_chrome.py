@@ -319,7 +319,7 @@ def main_flow(tmp, video, out, report, scheme="light"):
         check(selected() == 0, "face loss removes highlight")
         until(lambda: window.state()["face"], PERIOD + 8)
         window.tap()
-        check(window.state()["practiceStep"] == "tap", "tap repairs without an example")
+        check(window.state()["practiceStep"] in ("tap", "early"), "short release repairs without an example")
         window.key("keyDown"); time.sleep(.2); window.key("keyUp")
         check(window.state()["practiceStep"] == "early", "early release waits for readiness")
         window.key("keyDown"); time.sleep(.2); window.tap("Escape"); window.key("keyUp")

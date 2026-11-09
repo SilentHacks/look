@@ -181,6 +181,10 @@ class WebcamHost:
     def _start(self) -> dict:
         if self._thread and self._thread.is_alive():
             return self.status()
+        self._setup = secrets.token_hex(16)  # A new camera document gets a fresh completion generation.
+        self._return_seen.clear()
+        self._return_pending = None
+        self._commands = queue.Queue()
         self._flow = 0
         self._stop.clear(); self._ready.clear(); self.error = ""; self.state = "starting"
         self.last_sample = 0.

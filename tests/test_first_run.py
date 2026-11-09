@@ -38,6 +38,7 @@ class FirstRunTests(unittest.TestCase):
             plugin.register(ctx)
             turns = service._VOICE_TURNS
         self.addCleanup(turns.close)
+        ctx.turns = turns
         return plugin, session, ctx, commands['gaze'], hooks
 
     def test_first_guide_prepares_without_connecting_and_reopen_does_not_rebind(self):
@@ -73,6 +74,18 @@ class FirstRunTests(unittest.TestCase):
                     result = command('')
                     self.assertEqual('Hermes Gaze first run' in result, guide_expected)
                     self.assertEqual(start.called, not guide_expected)
+
+    def test_status_during_setup_preserves_connection_but_explicit_connect_replaces_it(self):
+        from unittest.mock import PropertyMock
+        plugin, session, ctx, command, _ = self.register(SimpleNamespace(get=lambda *a: True))
+        ctx.turns.bind(session_key="key", session_id="session")
+        binding = ctx.turns.binding
+        with patch.object(plugin, "_handle_slash_command", return_value="Tracker status"), \
+             patch.object(type(session.cdp), "is_connected", new_callable=PropertyMock, return_value=True):
+            command("tracker", session_key="key", session_id="session")
+            self.assertIs(ctx.turns.binding, binding)
+            command("connect", session_key="key", session_id="session")
+            self.assertIsNot(ctx.turns.binding, binding)
 
 
     def test_microphone_and_recognition_failures_stay_distinct_on_tool_path(self):

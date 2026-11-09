@@ -173,7 +173,10 @@ def register(ctx: Any) -> None:
             session.microphone.cancel()
             session.stop_webcam()
             return turns.bind("disconnect", **kwargs)
-        bound = turns.bind("", **kwargs)
+        with turns.lock:
+            same_connection = (turns.connected and turns.binding["session_id"] == kwargs.get("session_id")
+                               and turns.binding["session_key"] == kwargs.get("session_key"))
+            bound = turns.bind("status" if same_connection else "", **kwargs)
         result = _handle_slash_command(raw_args)
         return result + "\n" + bound
 
