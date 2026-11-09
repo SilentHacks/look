@@ -10,10 +10,11 @@ for primary sources, pinned versions, hashes and the full upstream licence.
 No GazeFollower/GazeFollower2, Glance, EyeTrax or WebEyeTrack code is used.
 
 This avoids uncertain gaze-checkpoint provenance and Python MediaPipe wheel
-compatibility. Python remains 3.14; inference uses Tasks Vision 0.10.32 WASM/SIMD
-on CPU in a **separate Chrome process and private temporary profile**. This host
-currently supports macOS's standard Google Chrome installation. No new Python
-runtime or Python dependency is installed.
+compatibility. Tasks Vision 0.10.32 WASM/SIMD runs on CPU in a **separate Chrome
+process and private temporary profile**. The supported beta requires native arm64
+Python on an Apple Silicon Mac and standard Google Chrome in Applications;
+platform/Chrome preflight runs before asset preparation. No new Python runtime or
+Python dependency is installed. See the README for version evidence and unverified platforms.
 
 Before updating or reloading the plugin, quit Hermes and run `hermes gateway stop`
 first, then restart Hermes. Hermes runs a background gateway that keeps old code

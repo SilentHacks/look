@@ -4,28 +4,64 @@ Point or look at a page in Chrome, hold Space, wait for **Listening**, then ask.
 Hermes answers in a private card or uses guarded browser actions. Eye tracking is
 **beta**: a local, personally calibrated estimate of broad regions, not a precise pointer.
 
-## Install on Mac
+## Install: supported Mac beta
 
-Supported lane for this beta: **Apple Silicon Mac, standard Google Chrome in
-Applications, one display, English**. Hermes Agent must already be installed and
-able to answer a normal message. Metadata requires Hermes `>=0.22.0` and Python
-`>=3.11,<3.15`; that is not a claim that every version has been tested. Intel Macs,
-Linux, alternate Chrome builds and multiple displays are outside this release lane.
+The supported beta lane is **native arm64 Python on an Apple Silicon Mac,
+standard Google Chrome in Applications, one display, English**. Hermes Agent
+must already answer a normal message. This is a developer beta, not a standalone
+launcher or a claim of verified physical microphone/camera operation.
 
-Until a catalogue listing is accepted, install the published GitHub release pin:
+| Platform | Status before installing dependencies |
+|---|---|
+| Apple Silicon Mac, native arm64 Python | Supported beta lane; physical-device release checks still required |
+| Intel Mac or x86_64 Python under Rosetta | Outside the beta lane. Cursor/typed questions and faster-whisper remain available but unverified; no Apple-only ASR or eye tracking |
+| Linux | Outside the beta lane. Existing cursor/typed and faster-whisper paths remain available but unverified; `google-chrome` must be on PATH; no eye tracking or macOS `say` fallback |
+| Windows, alternate Chrome builds, multiple displays | Unsupported by this beta; no compatibility claim |
+
+`plugin.yaml` keeps macOS/Linux **loader eligibility**, not a tested-platform
+matrix. Python dependency markers exclude Apple-only ASR packages on Intel and
+Rosetta; camera startup rejects incompatible platforms or missing standard Chrome
+before preparing assets. Recognition setup on Linux/Intel uses faster-whisper.
+Check the Python environment used by **Hermes**, not another shell Python:
+`python -c 'import platform; print(platform.system(), platform.machine())'`.
+
+### Before a public release pin exists
+
+**There is no published, reviewed release SHA or catalogue install command yet.**
+Do not paste a placeholder, substitute a moving branch, or treat a local commit
+as a public release. For development, review a local Git checkout and install its
+committed revision through Hermes's normal validator and package manager:
 
 ```bash
-hermes plugins install https://github.com/SilentHacks/hermes-gaze --ref '<RELEASE_SHA>' --enable
+# Run from the reviewed hermes-gaze checkout; only committed files are installed.
+LOOK_SOURCE="$(pwd -P)"
+LOOK_REF="$(git rev-parse --verify HEAD)"
+hermes plugins install "file://$LOOK_SOURCE" --ref "$LOOK_REF" --enable
 ```
 
-**Replace `<RELEASE_SHA>` with the release's full forty-character commit SHA.**
-This is a clearly marked placeholder, not a published release or a catalogue
-availability claim. Do not substitute a branch or install an unreviewed moving head.
-Review Hermes's security and dependency prompts; consent to preparing the declared
-Python packages through Hermes PM. Do not bypass a dangerous security finding.
-If you decline dependencies, the plugin stays disabled; later run
-`hermes plugins enable hermes-gaze` and accept preparation. Noninteractive
-installs do not imply consent.
+Run this interactively in the intended Hermes profile. Review security findings
+and the declared Python/native dependencies; approve preparation only if you agree.
+Do not bypass a dangerous security finding. Declining dependencies leaves the
+plugin disabled; later run `hermes plugins enable hermes-gaze` and accept preparation.
+If the installer instead refuses publication (notably an active replacement),
+resolve the reported cause and repeat the same pinned install; enabling a missing
+installation cannot recover it. Noninteractive installation is not consent.
+
+A future authorized release must publish a reviewed immutable commit and replace
+this development route with its exact GitHub pin. A fresh temporary-home install
+from that public pin, including declined-consent recovery, remains a release gate.
+
+### Version evidence, not a compatibility promise
+
+Metadata allows Hermes `>=0.22.0` and Python `>=3.11,<3.15`; those ranges are
+dependency/loader constraints, **not** proof for every version in the range.
+The 2026-11-09 platform/preflight unit checks used Python **3.14.9** on macOS
+**27.0.1 arm64**. The installed host source was
+`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` (its package version is `0.0.0`);
+its install/consent code was inspected, not executed in a fresh install here.
+Installed Chrome was **156.0.8078.81**; it was not launched for these checks.
+These inventory versions are not an end-to-end compatibility matrix.
+No Linux, Intel/Rosetta or physical-device trial is claimed.
 
 If Hermes reports an out-of-sync environment, missing packages or a stale lock,
 quit Hermes and run this in the terminal that normally launches it:
@@ -115,7 +151,7 @@ through Hermes's public APIs. Under host isolation, shell plugin commands are un
 
 Plugin registration **never downloads models**. Supported cached models are
 checksum-verified and loaded asynchronously in preference order: CoreML → MLX →
-configured faster-whisper on Mac, configured faster-whisper elsewhere. CoreML also
+configured faster-whisper on native Apple Silicon Mac; configured faster-whisper elsewhere. CoreML also
 runs a silent warmup prediction. Explicit recognition setup tries every usable
 verified cache before downloading missing assets, so an offline cached fallback
 does not require a preferred-backend download. Integrity failures stop setup
@@ -216,9 +252,9 @@ recorded immutable Git blob IDs; weight checksums come from publisher LFS metada
 
 | Download / publisher | Trigger | Immutable revision / integrity | Approximate size | Cache / licences |
 |---|---|---|---|---|
-| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit recognition setup; preferred macOS backend | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39); SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub; weights CC-BY-4.0, vendored runner MIT |
-| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Same explicit setup, only if CoreML unavailable on macOS | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487); SHA-256 manifest | 2.47 GB | Shared HF hub; weights CC-BY-4.0, runtime Apache-2.0 |
-| faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux, or after both macOS backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba); SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub; converted weights/runtime MIT |
+| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit recognition setup; preferred native Apple Silicon backend | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39); SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub; weights CC-BY-4.0, vendored runner MIT |
+| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Same explicit setup, only if CoreML unavailable on native Apple Silicon | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487); SHA-256 manifest | 2.47 GB | Shared HF hub; weights CC-BY-4.0, runtime Apache-2.0 |
+| faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux/Intel/Rosetta, or after both Apple Silicon backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba); SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub; converted weights/runtime MIT |
 | Phonon-31M English q8, Gradium | Explicit `hermes look setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d); SHA-256 manifest | 65 MB | Plugin phonon cache; assets Apache-2.0, ptts MIT OR Apache-2.0 |
 | Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7); SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache; Apache-2.0 |
 | MediaPipe Tasks Vision JS/WASM, Google npm | Only explicit `/look setup eyes`; ordinary start and offline evaluation are cache-only | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32); SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 6.6 MB compressed; 23.6 MB unpacked | Plugin webcam cache; Apache-2.0 |
@@ -233,7 +269,7 @@ Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
 `whisper_model` supports **base.en (default) and tiny.en only**; other aliases,
 arbitrary repositories and local custom models are unsupported and rejected before
 loading. Each includes a verified local tokenizer: there is no OpenAI tokenizer
-fallback download. Backend order remains CoreML v2 → MLX v2 → faster-whisper on Mac.
+fallback download. Backend order on native Apple Silicon remains CoreML v2 → MLX v2 → faster-whisper.
 Fallback preparation can add the listed sizes; recognition never downloads while
 holding or releasing Space.
 

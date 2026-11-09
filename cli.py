@@ -13,6 +13,7 @@ from . import service
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
 from .browser.cdp_bridge import get_shared_session
 from .config import GazeConfig
+from .platform_support import apple_silicon_mac, platform_notice
 from .server import get_shared_server
 from .tools import handle_gaze_resolve
 
@@ -47,10 +48,14 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
     """Explicit downloads only; never connect or open a device."""
     from . import voice
 
-    lines = ["Local speech setup may download ~465 MB on Mac (fallbacks up to 2.47 GB). No devices open."]
-    if platform.system() != "Darwin" or platform.machine() != "arm64":
-        lines.append("This beta supports Apple Silicon Mac.")
-    if not Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file():
+    if platform.system() not in ("Darwin", "Linux"):
+        return platform_notice()
+    lines = [platform_notice()] if not apple_silicon_mac() else []
+    lines.append("Local speech setup may download " + (
+        "~465 MB (fallbacks up to 2.47 GB)." if apple_silicon_mac() else
+        "~148 MB for base.en (~78 MB for tiny.en).") + " No devices open.")
+    if platform.system() == "Darwin" and not Path(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file():
         lines.append("Install Google Chrome in Applications.")
     if _missing_modules():
         lines.append("Dependencies missing. Quit Hermes; run hermes pm install and "
@@ -68,7 +73,7 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
 
 def _missing_modules() -> list[str]:
     modules = ["websockets", "numpy", "sounddevice", "faster_whisper", "ptts", "huggingface_hub"]
-    if platform.system() == "Darwin":
+    if apple_silicon_mac():
         modules.extend(("parakeet_mlx", "CoreML"))
     return [name for name in modules if importlib.util.find_spec(name) is None]
 
@@ -78,6 +83,8 @@ def _tracker_summary(session) -> str:
     state = status["state"]
     if status.get("error", "").startswith("Eye tracking files missing"):
         return "Eye tracking files missing. /look setup eyes downloads them and opens the camera; /look cursor to use the pointer."
+    if status.get("diagnostic", {}).get("stage") == "preflight":
+        return status["error"]  # Static, server-owned platform/Chrome guidance.
     if state == "preparing":
         return "Preparing eye tracking files. /look cursor to cancel."
     if state == "stopping":
@@ -120,7 +127,8 @@ def _handle_slash_command(raw_args: str) -> str:
             "webcam": session.webcam_status(),
             "recognition": voice.recognition_status(_config().whisper_model),
             "missing_dependencies": _missing_modules(),
-            "supported_mac": platform.system() == "Darwin" and platform.machine() == "arm64",
+            "supported_mac": apple_silicon_mac(),
+            "platform_notice": platform_notice(),
         }, indent=2)
 
     if sub == "timing" and not tail:
@@ -138,6 +146,8 @@ def _handle_slash_command(raw_args: str) -> str:
         return "\n".join(lines)
 
     if sub in ("start", "connect") and not tail:
+        if platform.system() not in ("Darwin", "Linux"):
+            return platform_notice()
         get_shared_server().start()
         try:
             ready = session.cdp.start()
@@ -146,8 +156,9 @@ def _handle_slash_command(raw_args: str) -> str:
                 ready = session.ensure_overlay()
         except (OSError, ValueError) as exc:
             return str(exc)
-        return ("Look is ready in Chrome. Hold Space; wait for Listening, then speak."
-                if ready else "Chrome could not attach. Open an ordinary page in the companion, then /look start.")
+        result = ("Look is ready in Chrome. Hold Space; wait for Listening, then speak."
+                  if ready else "Chrome could not attach. Open an ordinary page in the companion, then /look start.")
+        return "\n".join(filter(None, (platform_notice(), result)))
 
     if sub in ("stop", "disconnect") and not tail:
         # Detach every overlay and its input handlers, not just the voice binding.
@@ -194,6 +205,8 @@ def _handle_slash_command(raw_args: str) -> str:
         mode = tail[0] if sub == "mode" else "webcam"
         if mode not in ("hover", "simulated", "webcam"):
             return "Usage: /look mode hover|simulated|webcam"
+        if mode == "webcam" and not apple_silicon_mac():
+            return platform_notice()
         session.configure(mode=mode)
         if mode != "webcam":
             return "Using the pointer. Camera off." if mode == "hover" else "Using simulated gaze. Camera off."

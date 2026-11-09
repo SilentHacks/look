@@ -41,7 +41,7 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.enterContext(patch.object(voice, "_PREPARATION_ERROR", ""))
         self.enterContext(patch.object(voice, "_PREPARE_DOWNLOAD", False))
         self.enterContext(patch.object(voice, "_PREPARE_REPORT", None))
-        self.enterContext(patch.object(voice.sys, "platform", "darwin"))
+        self.enterContext(patch.object(voice, "apple_silicon_mac", return_value=True))
         self.enterContext(patch("huggingface_hub.try_to_load_from_cache", side_effect=self.cached))
         self.download = self.enterContext(patch("huggingface_hub.hf_hub_download", side_effect=self.fetch))
         self.enterContext(patch("socket.create_connection", side_effect=AssertionError("network forbidden")))
@@ -108,6 +108,18 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.finish_warmup()
         self.assertIs(voice._PARAKEET_MODEL, mlx.return_value)
         self.download.assert_not_called()
+
+    def test_non_apple_setup_never_prepares_apple_assets(self):
+        coreml, mlx, whisper = self.fake_loaders()
+        with patch.object(voice, "apple_silicon_mac", return_value=False):
+            voice.prepare_recognition()
+            self.finish_warmup()
+            self.assertTrue(voice.recognition_ready())
+            self.assertEqual({call.args[0] for call in self.download.call_args_list},
+                             {cache.WHISPER["base.en"]})
+            whisper.assert_called_once()
+            coreml.assert_not_called()
+            mlx.assert_not_called()
 
     def test_explicit_setup_uses_offline_fallback_before_missing_preferred(self):
         coreml, mlx, whisper = self.fake_loaders()
@@ -189,7 +201,7 @@ class PinnedDownloadsTests(unittest.TestCase):
     def test_linux_restart_loads_configured_whisper_and_first_hold_sees_ready(self):
         _, _, whisper = self.fake_loaders()
         self.populate(cache.WHISPER["tiny.en"])
-        with patch.object(voice.sys, "platform", "linux"):
+        with patch.object(voice, "apple_silicon_mac", return_value=False):
             voice.prewarm("tiny.en")
             self.finish_warmup()
             self.assertTrue(voice.recognition_ready("tiny.en"))

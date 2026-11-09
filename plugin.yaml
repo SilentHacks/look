@@ -1,10 +1,11 @@
 name: hermes-gaze
 version: "0.1.0"
-description: "Look — ask about what you point at in Chrome, with private answers and guarded browser actions. Start with /look; /gaze remains an alias."
+description: "Look — private Chrome questions and guarded actions. Supported beta: Apple Silicon Mac; Linux/Intel cursor paths are unverified, not full-platform support. /look starts; /gaze is an alias."
 author: "Abid"
 kind: standalone
 license: MIT
 requires_hermes: ">=0.22.0"
+# Loader eligibility, not a tested-platform matrix. Linux cursor paths remain available.
 platforms:
   - macos
   - linux

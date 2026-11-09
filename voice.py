@@ -5,15 +5,15 @@ Three transcription backends behind one contract (``transcribe_audio_buffer``
 ``audio_epoch``):
 
 - Parakeet TDT on CoreML/ANE **in-process** via ``asr.parakeet_coreml``
-  (macOS only, ~65-75ms for a 3s clip). coremltools ships no cp314 wheels, so
+  (native Apple Silicon Mac only, ~65-75ms for a 3s clip). coremltools ships no cp314 wheels, so
   ``asr.coreml_model`` drives ``.mlmodelc`` models through pyobjc instead.
   SentencePiece tokens with start times are grouped on ``▁`` boundaries into
   words.
-- ``parakeet-mlx`` Parakeet TDT 0.6B on Apple-silicon MLX (macOS only,
+- ``parakeet-mlx`` Parakeet TDT 0.6B on Apple-silicon MLX (native arm64 macOS only,
   ~180ms for a 3s clip) — in-process middle tier when the CoreML runner
   cannot load. Downloads happen only during explicit preparation.
-- ``faster-whisper`` (tiny.en / base.en) — fallback on Linux or when both
-  Parakeet paths fail to load.
+- ``faster-whisper`` (tiny.en / base.en) — used on Linux, Intel/Rosetta Macs,
+  or when both Parakeet paths fail to load.
 
 Plus sounddevice microphone capture from the default OS audio input. Optional
 dependencies (numpy, faster-whisper, parakeet-mlx, pyobjc, sounddevice) are
@@ -26,7 +26,6 @@ from __future__ import annotations
 import io
 import logging
 import os
-import sys
 import tempfile
 import threading
 import time
@@ -34,6 +33,7 @@ import wave
 from typing import Any, Dict, List, Optional, Tuple
 
 from .asset_cache import AssetIntegrityError, AssetsMissing, COREML, MLX, WHISPER, prepare
+from .platform_support import apple_silicon_mac
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ def get_whisper_model(model_name: str = _DEFAULT_MODEL) -> Any:
 def _get_parakeet_model() -> Any:
     """Lazy singleton for the parakeet-mlx model; None when unavailable."""
     global _PARAKEET_MODEL
-    if sys.platform != "darwin":
+    if not apple_silicon_mac():
         return None
     with _PARAKEET_LOCK:
         if _PARAKEET_MODEL is None:
@@ -108,7 +108,7 @@ def _get_parakeet_model() -> Any:
 def _get_coreml_runner() -> Any:
     """Lazy singleton for the in-process CoreML/ANE runner; None when unavailable."""
     global _COREML_RUNNER
-    if sys.platform != "darwin":
+    if not apple_silicon_mac():
         return None
     with _COREML_LOCK:
         if _COREML_RUNNER is None:
@@ -133,7 +133,7 @@ def _get_coreml_runner() -> Any:
 
 def recognition_ready(model_name=_DEFAULT_MODEL):
     """Constant-time capture gate: never take a model loader lock or touch disk."""
-    return (sys.platform == "darwin" and (
+    return (apple_silicon_mac() and (
         _COREML_RUNNER is not None and _COREML_RUNNER is not False or
         _PARAKEET_MODEL is not None and _PARAKEET_MODEL is not False)
         or model_name in _WHISPER_MODELS)
@@ -204,7 +204,7 @@ def _prepare_recognition(model_name, *, download, report=None):
                     if _PARAKEET_MODEL is False:
                         _PARAKEET_MODEL = None
             loaders = ([(COREML, _get_coreml_runner), (MLX, _get_parakeet_model)]
-                       if sys.platform == "darwin" else [])
+                       if apple_silicon_mac() else [])
             loaders.append((WHISPER[model_name], lambda: get_whisper_model(model_name)))
             for repo, load in loaders:
                 if try_load(repo, load):
@@ -421,7 +421,7 @@ def transcribe_audio_buffer(
     given, the audio-relative word times are shifted to wall-clock epochs so
     the temporal aligner can weight them against real fixations.
 
-    ``backend``: ``"auto"`` (CoreML Parakeet on macOS when available, else
+    ``backend``: ``"auto"`` (CoreML Parakeet on native Apple Silicon when available, else
     faster-whisper), ``"parakeet"`` (try CoreML first, same fallback), or
     ``"whisper"`` (force the faster-whisper path)."""
     import numpy as np

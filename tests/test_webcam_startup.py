@@ -18,6 +18,8 @@ from hermes_gaze.voice_turns import VoiceTurns
 class Startup(unittest.TestCase):
     def setUp(self):
         self.tmp = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.object(webcam, "apple_silicon_mac", return_value=True))
+        self.enterContext(patch.object(webcam.Path, "is_file", return_value=True))
         self.host = webcam.WebcamHost(lambda *_: False, assets=Path(self.tmp),
                                      profile_path=Path(self.tmp) / "saved.json")
         self.addCleanup(self.host.stop)
@@ -75,13 +77,25 @@ class Startup(unittest.TestCase):
             self.host.stop(); self.finish()
 
     def test_missing_chrome_fails_without_popen_and_keeps_cursor_choice_explicit(self):
-        with patch.object(webcam, "prepare_assets", return_value=Path(self.tmp)), \
-             patch.object(webcam, "_CHROME", str(Path(self.tmp) / "absent-chrome")), \
+        with patch.object(webcam, "prepare_assets") as prepare, \
+             patch.object(webcam.Path, "is_file", return_value=False), \
              patch.object(webcam.subprocess, "Popen") as launch:
             self.host.start(wait=1); self.finish()
             self.assertEqual(self.host.state, "failed")
             self.assertIn("Google Chrome", self.host.error)
-            self.assertEqual(self.host.diagnostic["stage"], "starting")
+            self.assertEqual(self.host.diagnostic["stage"], "preflight")
+            prepare.assert_not_called()
+            launch.assert_not_called()
+
+    def test_unsupported_camera_setup_never_prepares_assets_or_launches(self):
+        with patch.object(webcam, "apple_silicon_mac", return_value=False), \
+             patch.object(webcam, "prepare_assets") as prepare, \
+             patch.object(self.host, "_run") as launch:
+            self.host.start(download=True, wait=1); self.finish()
+            self.assertEqual(self.host.state, "failed")
+            self.assertEqual(self.host.diagnostic["reason"], "unsupported_platform")
+            self.assertIn("/look cursor", self.host.error)
+            prepare.assert_not_called()
             launch.assert_not_called()
 
     def test_cancel_between_setup_capture_and_start_cannot_revive_generation(self):
@@ -116,6 +130,8 @@ class Startup(unittest.TestCase):
 
 class SessionStartup(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.object(webcam, "apple_silicon_mac", return_value=True))
+        self.enterContext(patch.object(webcam.Path, "is_file", return_value=True))
         self.session = GazeSession("http://127.0.0.1:1")
         self.addCleanup(self.session.close)
         self.turns = VoiceTurns(SimpleNamespace(), self.session)

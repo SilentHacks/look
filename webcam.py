@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.request
 
+from .platform_support import apple_silicon_mac
 from .tracker.webcam_gaze import (CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator,
                                   GazeEstimator, LandmarkEstimator, score_check_trial, summarize_check)
 
@@ -259,6 +260,17 @@ class WebcamHost:
 
     def _bootstrap(self, download: bool) -> None:
         try:
+            # Reject before even preparing/downloading assets, including protected-UI starts.
+            if not apple_silicon_mac():
+                self.state = "failed"
+                self.error = "Eye tracking requires an Apple Silicon Mac. Use /look cursor."
+                self.diagnostic = {"stage": "preflight", "reason": "unsupported_platform"}
+                return
+            if not Path(_CHROME).is_file():
+                self.state = "failed"
+                self.error = "Install Google Chrome in Applications, then retry /look calibrate; or use /look cursor."
+                self.diagnostic = {"stage": "preflight", "reason": "chrome_missing"}
+                return
             self.assets = prepare_assets(self.assets, download=download, cancelled=lambda: not self._live())
             if not self._live():
                 return
