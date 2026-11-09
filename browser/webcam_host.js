@@ -47,7 +47,7 @@
       transition:left .22s ease,top .22s ease,width .22s ease,height .22s ease,opacity .25s ease; }
     .face.placed .guide { opacity:0; }
     .note { max-width:390px; margin:0; font-size:15px; line-height:1.5; color:var(--secondary); text-align:center; }
-    .note.kept { color:var(--tertiary); margin-top:-8px; }
+    .note.kept { color:var(--secondary); font-size:13px; margin-top:14px; }
     .row { display:inline-flex; flex-wrap:wrap; justify-content:center; align-items:center; gap:3px; padding:5px; border-radius:28px; margin-top:24px; max-width:calc(100vw - 32px); }
     button { all:unset; box-sizing:border-box; cursor:pointer; white-space:nowrap; padding:11px 19px; border-radius:22px; font-size:14px; font-weight:400; color:var(--secondary); transition:background-color .16s ease,opacity .16s ease; }
     button:hover { background-color:var(--hover); }
@@ -160,7 +160,7 @@
     if (phase === "home") faceNote.textContent = !visible ? "Bring your face into view." : notice;
     if (phase === "boundary") faceNote.textContent = visible ? "" : "Bring your face into view.";
     if (["calibrate", "checkIntro", "check"].includes(phase)) {
-      if (!visible && (collecting || checkObserving || phase === "check")) {
+      if (!visible && !awaiting && (collecting || checkObserving || phase === "check")) {
         collecting = awaiting = checkObserving = false; clearTimeout(checkTimer); dot.classList.remove("collect");
         if (phase === "check") phase = "checkIntro";
         emit("observation_cancel");
@@ -181,6 +181,7 @@
   }
   function home() {
     phase = "home"; locked = null; hideFlow();
+    faceNote.className = "note";
     const outdated = notice === "Eye tracker updated. Start a new calibration." || notice === "The eye tracker has changed.";
     notice = outdated ? "The eye tracker has changed." : notice;
     page({camera: "live", status: calibrated ? "Saved calibration" : outdated ? "Recalibration needed" : "Set up eye tracking",
@@ -295,6 +296,7 @@
     if (e.code !== "Space") return;
     const fresh = !spaceDown && !e.repeat; spaceDown = true;
     if (["calibrate", "checkIntro", "check"].includes(phase)) {
+      if (e.target.closest("button")) return;
       e.preventDefault();
       if (!fresh || !faceVisible() || collecting || awaiting) return;
       if (phase === "checkIntro") { startCheckRun(); return; }
@@ -339,7 +341,8 @@
     checkBoundary(value) {
       if (phase !== "calibrate") return;
       taught = true; hideFlow(); check = value; phase = "boundary";
-      page({status: "Ready to check", extra: [faceNote], actions: [["start-check", "Start accuracy check"], ["cancel", "Cancel"]]});
+      page({status: "Ready to check", actions: [["start-check", "Start accuracy check"], ["cancel", "Cancel"]]});
+      faceNote.className = "note kept"; main.append(faceNote);
       document.activeElement?.blur();
     },
     checkReady(value) {

@@ -142,10 +142,10 @@ class Window:
         until(lambda: .1 <= self.clock() < 1.2, PERIOD + 8)  # All sixteen seconds fall inside the face footage.
         self.tap(); self.wait("check", 4)
 
-    def finish_check(self):
+    def finish_check(self, start=0):
         if self.state()["phase"] == "boundary":
             self.click("start-check"); self.wait("checkIntro")
-        for index in range(10):
+        for index in range(start, 10):
             until(lambda: self.state()["phase"] == "checkIntro" and self.state()["checkIndex"] == index, 5)
             for attempt in range(4):
                 # A full real observation fits between the portrait's movements.
@@ -170,6 +170,25 @@ class Window:
     def close(self):
         self.tab.ws.close(); self.host.stop()
 
+
+def delayed_check_ack(window):
+    """Face loss after a completed trial cannot undo a pending Python acknowledgement."""
+    host, queued, original = window.host, [], window.host._ui
+    def delay(method, value=""):
+        if method == "checkAccepted":
+            queued.append((method, value))
+        else:
+            original(method, value)
+    with patch.object(host, "_ui", side_effect=delay):
+        until(lambda: .45 <= window.clock() % SPOT < .55 and window.clock() < FACE_SECONDS - 1.7 and window.state()["face"], PERIOD + 8)
+        window.tap()
+        until(lambda: queued, 5)
+        assert host._check["trial"] == 1 and window.state()["checkIndex"] == 0
+        until(lambda: not window.state()["face"], PERIOD + 8)
+        assert window.state()["phase"] == "check", "completed observation must wait for its acknowledgement"
+        original(*queued[0])
+        until(lambda: window.state()["checkIndex"] == 1)
+        assert window.state()["phase"] == "checkIntro"
 
 def jittered(host, misses=()):
     """Scripted estimates near each target; trials in `misses` land clearly elsewhere."""
@@ -243,6 +262,10 @@ def main_flow(tmp, video, out, report, scheme="light"):
         # No observation advances merely because Space repeats or the face disappears.
         window.click("calibrate"); window.wait("calibrate")
         check("1 of 9" in window.text() and "Tap Space" in window.text(), "single initial instruction")
+        window.tab.main("document.getElementById('cancel').focus()")
+        window.tap(); window.wait("home"); until(lambda: host._calibration is None)
+        check(not path.exists(), "focused Cancel Space cancels training without observing")
+        window.click("calibrate"); window.wait("calibrate")
         until(lambda: FACE_SECONDS + .8 <= window.clock(), PERIOD + 8)
         window.tap(); time.sleep(1.3)
         check(window.state()["index"] == 0 and not window.state()["collecting"], "missing face cannot collect")
@@ -321,8 +344,14 @@ def main_flow(tmp, video, out, report, scheme="light"):
         window.wait("home"); until(lambda: window.state()["face"], PERIOD + 8)
         window.click("check"); window.wait("checkIntro")
         check("1 of 10" in window.text() and "Tap Space" in window.text(), "saved entry skips training and teaches once")
+        window.tab.main("document.getElementById('cancel').focus()")
+        window.tap(); window.wait("home"); until(lambda: host._check is None)
+        check(path.read_bytes() == saved, "focused Cancel Space cancels checking without changing profile")
+        window.click("check"); window.wait("checkIntro")
         Scripted.script = jittered(host)
-        window.finish_check()
+        delayed_check_ack(window)
+        check(window.state()["checkIndex"] == 1, "completed trial survives face loss before acknowledgement")
+        window.finish_check(start=1)
         check("Saved calibration passed" in window.text() and path.read_bytes() == saved, "saved pass never rewrites profile")
         window.click("done"); window.wait("handoff")
         # Optional rehearsal: finish using native Space on its focused button.
