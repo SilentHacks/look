@@ -238,6 +238,18 @@ def register(ctx: Any) -> None:
                     elif native is not None and native is not turns.native_input:
                         native.close()
                     return False
+            def failed(text):
+                with turns.lock:
+                    if (turns.closed or turns.binding_generation != generation
+                            or session.cdp.source != requested_source):
+                        return
+                    if native is not None and native is not turns.native_input:
+                        if turns.connecting_native is native:
+                            turns.connecting_native = None
+                        native.close()
+                    post = getattr(ctx, "post_message", None)
+                    if callable(post):
+                        secret_context.run(post, text)
             # Serialize launch with the companion's existing Stop boundary. The original
             # generation is never refreshed after auth, even if Stop closed the new client.
             with session.cdp._lifecycle:
@@ -250,7 +262,7 @@ def register(ctx: Any) -> None:
                     if not ready():
                         return "Look start was cancelled."
                     return _handle_slash_command(raw_args)
-                result = (_handle_slash_command(command, on_ready=ready)
+                result = (_handle_slash_command(command, on_ready=ready, on_error=failed)
                           if "--existing" in command else _handle_slash_command(command or "start"))
             if (command.endswith("--existing") or session.cdp.source != requested_source
                     or not session.cdp.is_connected):

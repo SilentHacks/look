@@ -86,7 +86,7 @@ class FirstRunTests(unittest.TestCase):
     def test_late_ready_cannot_replace_newer_binding_or_revive_stop(self):
         plugin, session, ctx, command, _ = self.register(None)
         callbacks = []
-        def pending(raw, *, on_ready=None):
+        def pending(raw, *, on_ready=None, on_error=None):
             session.cdp.source = "existing"
             if on_ready:
                 callbacks.append(on_ready)
@@ -103,6 +103,34 @@ class FirstRunTests(unittest.TestCase):
             command("stop", session_key="new", session_id="new")
             callbacks.pop()()
             self.assertIsNone(ctx.turns.binding)
+
+    def test_connection_failure_posts_to_captured_context_unless_stopped_or_rebound(self):
+        from contextvars import ContextVar
+        destination = ContextVar("destination", default="other")
+        for outcome in ("failed", "stopped", "rebound"):
+            with self.subTest(outcome=outcome):
+                plugin, session, ctx, command, _ = self.register(None)
+                callbacks, messages = [], []
+                ctx.post_message = lambda text: messages.append((destination.get(), text))
+                def pending(raw, *, on_ready=None, on_error=None):
+                    session.cdp.source = "existing"
+                    if on_error:
+                        callbacks.append(on_error)
+                    return "Looking for Chrome"
+                token = destination.set("original")
+                try:
+                    with patch.object(plugin, "_handle_slash_command", side_effect=pending):
+                        command("start --existing --accept", session_key="key", session_id="owner")
+                        if outcome == "stopped":
+                            command("stop", session_key="key", session_id="owner")
+                        elif outcome == "rebound":
+                            ctx.turns.bind(session_key="new", session_id="new")
+                finally:
+                    destination.reset(token)
+                callbacks[0]("Chrome discovery is unavailable.")
+                self.assertEqual(messages, [("original", "Chrome discovery is unavailable.")]
+                                 if outcome == "failed" else [])
+                ctx.inject_message.assert_not_called()
 
     def test_read_only_commands_do_not_steal_another_conversation(self):
         plugin, session, ctx, command, _ = self.register(None)

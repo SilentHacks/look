@@ -413,12 +413,50 @@ class Integration(unittest.TestCase):
         session = GazeSession("http://127.0.0.1:1")
         self.addCleanup(session.close)
         with patch.object(cli, "get_shared_session", return_value=session), \
+             patch.object(cli.platform, "system", return_value="Darwin"), \
+             patch.object(cli.platform, "machine", return_value="arm64"), \
              patch("hermes_gaze.browser.consent.discovery_port", side_effect=AssertionError("personal read")):
             text = cli._handle_slash_command("start --existing")
             self.assertIn("broad debugger access", text)
             self.assertIn("--accept", text)
+            self.assertNotIn("\\n", text)
+            self.assertEqual(len(text.splitlines()), 3)
             self.assertEqual(session.cdp.source, "owned")
             self.assertFalse(session.cdp._tabs)
+
+    def test_delayed_discovery_reports_progress_then_failure_without_approval_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = GazeSession("http://127.0.0.1:1", profile_dir=Path(directory) / "look")
+            self.addCleanup(session.close)
+            entered, release, reported = threading.Event(), threading.Event(), threading.Event()
+            errors = []
+            def discover(path):
+                entered.set()
+                if not release.wait(3):
+                    raise AssertionError("discovery fixture was not released")
+                return discovery_port(path)
+            def failed(text):
+                errors.append(text)
+                reported.set()
+            with patch("hermes_gaze.browser.consent.discovery_port", side_effect=discover), \
+                 patch("websockets.sync.client.connect") as request:
+                try:
+                    session.cdp.start_existing(metadata_path=Path(directory) / "missing", on_error=failed)
+                    self.assertTrue(entered.wait(2))
+                    with patch.object(cli, "get_shared_session", return_value=session):
+                        progress = cli._handle_slash_command("status")
+                    self.assertIn("Looking for Chrome", progress)
+                    self.assertNotIn("approval", progress)
+                finally:
+                    release.set()
+                self.assertTrue(reported.wait(3))
+                session.cdp._consent_worker.join(3)
+                self.assertEqual(session.cdp.connection_status["state"], "failed")
+                self.assertEqual(errors, [session.cdp.chrome.error])
+                self.assertIn("Chrome discovery", errors[0])
+                with patch.object(cli, "get_shared_session", return_value=session):
+                    self.assertEqual(cli._handle_slash_command("status"), errors[0])
+                request.assert_not_called()
 
     def test_stop_during_renderer_initialization_cleans_before_root_close(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -485,8 +523,12 @@ class Integration(unittest.TestCase):
             self.addCleanup(fake.close)
             session = GazeSession("http://127.0.0.1:1", profile_dir=Path(directory) / "look")
             self.addCleanup(session.close)
-            session.cdp.start_existing(metadata_path=fake.metadata)
+            failed, ready = Mock(), Mock()
+            session.cdp.start_existing(metadata_path=fake.metadata, on_ready=ready, on_error=failed)
             self.assertTrue(fake.requested.wait(2))
+            with patch.object(cli, "get_shared_session", return_value=session):
+                waiting = cli._handle_slash_command("status")
+            self.assertIn("Waiting for Chrome approval", waiting)
             first = session.cdp.chrome
             session.cdp.start_existing(metadata_path=fake.metadata)
             self.assertIs(session.cdp.chrome, first)
@@ -500,6 +542,8 @@ class Integration(unittest.TestCase):
             self.assertFalse(session.cdp._tabs)
             self.assertEqual(fake.commands, [])
             self.assertEqual(fake.upgrades, 1)
+            failed.assert_not_called()
+            ready.assert_not_called()
             competitor._acquire()
             competitor.close()
             with self.assertRaises(OwnershipError):

@@ -104,7 +104,7 @@ def _tracker_summary(session) -> str:
     return "Eye tracking is on."
 
 
-def _handle_slash_command(raw_args: str, *, on_ready=None) -> str:
+def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str:
     argv = (raw_args or "").strip().split()
     sub = argv[0].lower() if argv else "start"
     tail = [arg.lower() for arg in argv[1:]]
@@ -160,9 +160,9 @@ def _handle_slash_command(raw_args: str, *, on_ready=None) -> str:
         if tail != ["--existing", "--accept"]:
             if session.cdp.source == "existing" and session.cdp.is_connected:
                 return "Look is ready in your Chrome."
-            return DISCLOSURE + "\\n" + PREPARE + "\\nTo connect: /look start --existing --accept"
+            return DISCLOSURE + "\n" + PREPARE + "\nTo connect: /look start --existing --accept"
         try:
-            session.cdp.start_existing(on_ready=on_ready)
+            session.cdp.start_existing(on_ready=on_ready, on_error=on_error)
         except OSError as exc:
             return str(exc)
         return _existing_status(session)
@@ -261,7 +261,9 @@ def _existing_status(session) -> str:
     status = session.cdp.connection_status
     if session.cdp.is_connected:
         return "Look is ready in your Chrome. Point and ask."
-    if status["state"] in ("idle", "discovering", "waiting"):
+    if status["state"] in ("idle", "discovering"):
+        return "Looking for Chrome. /look status checks progress; /look stop cancels."
+    if status["state"] == "waiting":
         return "Waiting for Chrome approval (up to 120 seconds). Approve only your request. /look stop to cancel."
     if status["state"] in ("connecting", "connected"):
         return "Connecting to your Chrome. Open an ordinary web page; /look status checks readiness, /look stop cancels."

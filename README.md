@@ -152,9 +152,11 @@ auxiliary inference. Questions/evidence may persist in Hermes history.
    `/look start --existing --accept`. Approve only the Chrome request you just
    initiated. One connection serves all supported tabs; approval can take up to
    120 seconds. `/look stop` cancels; cancel any remaining native prompt too.
-3. `/look status` distinguishes waiting, connecting, ready and failure. Open an
-   ordinary HTTP(S) tab in the authorized profile. No local-file tabs, private/
-   guest contexts or unidentifiable profiles. Chrome must expose a provable
+3. `/look status` distinguishes discovery, approval waiting, connecting, ready
+   and failure. Startup failures also appear as Hermes notices when supported
+   by the frontend. Open an ordinary HTTP(S) tab in the authorized profile.
+   No local-file tabs, private/guest contexts or unidentifiable profiles.
+   Chrome must expose a provable
    regular-context identity; some older 144+ builds may require an update.
 4. `/look stop` removes Look's overlays/scripts/sessions and cancels capture,
    output and action approvals. Chrome, tabs and data remain. Remote debugging

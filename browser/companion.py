@@ -68,7 +68,7 @@ class Companion:
             return dict(source=self.source, state=self.chrome.state, error=self.chrome.error)
         return dict(source=self.source, state="connected" if self.is_connected else "stopped", error="")
 
-    def start_existing(self, *, metadata_path=None, timeout=120, on_ready=None) -> dict:
+    def start_existing(self, *, metadata_path=None, timeout=120, on_ready=None, on_error=None) -> dict:
         """Explicit disclosed action only; return immediately so Stop can cancel consent."""
         with self._lifecycle:
             if self.source == "owned" and (self.is_connected or self._thread and self._thread.is_alive()):
@@ -82,6 +82,7 @@ class Companion:
             self.source = "existing"
             chrome = ConsentChrome(metadata_path=metadata_path, lease_dir=self._owned_chrome.profile)
             self.chrome = chrome
+            stopped = self._stop = threading.Event()
             chrome.on_loss = lambda: self._consent_lost(chrome)
 
             def run():
@@ -100,7 +101,9 @@ class Companion:
                             break
                         self._stop.wait(.1)
                 except (OSError, ValueError):
-                    pass  # Sanitized error/state belongs to this attempt, read by status.
+                    with self._lifecycle:
+                        if chrome is self.chrome and not stopped.is_set() and chrome.error and on_error:
+                            on_error(chrome.error)
             self._consent_worker = threading.Thread(target=run, name="look-chrome-approval", daemon=True)
             self._consent_worker.start()
             return self.connection_status
