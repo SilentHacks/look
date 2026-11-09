@@ -90,6 +90,8 @@ Hermes conversation. It removes input interception, revokes action/approval
 authority and pauses the inbox; retained answers remain in memory. It does not
 undo typing/navigation or cancel a Hermes turn already accepted by the host.
 Start reconnects in cursor mode; eye tracking always needs an explicit start.
+Closing companion tabs alone does not stop the separate camera. `/look status`
+reports camera activity even without an attached page; `/look stop` releases both.
 
 **Compatibility:** `/gaze` and `hermes gaze` remain aliases. `connect` means `start`,
 `disconnect` now performs the full `stop`, and `tracker stop` means `cursor`.

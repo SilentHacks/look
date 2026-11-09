@@ -76,7 +76,9 @@ def _missing_modules() -> list[str]:
 def _tracker_summary(session) -> str:
     status = session.webcam_status()
     state = status["state"]
-    if state in ("failed", "stopped", "stopping"):
+    if state == "stopping":
+        return "Camera is stopping."
+    if state in ("failed", "stopped"):
         if status.get("error") or state == "failed":
             return "Camera unavailable. Try /look calibrate again; /look diagnostics has details."
         return "Camera stopped. Try /look calibrate for eye tracking."
@@ -159,6 +161,11 @@ def _handle_slash_command(raw_args: str) -> str:
 
     if sub == "status" and not tail:
         if not session.cdp.is_connected:
+            state = session.webcam_status()["state"]
+            if state in ("starting", "running", "stopping", "failed"):
+                camera = {"starting": "Camera is starting", "running": "Camera is still on",
+                          "stopping": "Camera is stopping", "failed": "Camera needs attention"}[state]
+                return f"Chrome is disconnected. {camera}. /look stop to close it."
             return "Look is stopped. /look start to begin."
         if session.tracker.mode == "webcam":
             return _tracker_summary(session)

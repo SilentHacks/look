@@ -1,7 +1,7 @@
 """Regression tests for defects found by the independent branch review.
 
 Covers: intent nonce auth, whisper audio_epoch -> wall-clock word times, falsy
-``start`` handling in the temporal aligner, session reopen after unload,
+``start`` handling in the temporal aligner, terminal per-tab transport teardown,
 non-blocking configure, honest no-pointer/no-candidate behaviour, choose
 consuming its resolution, and LLM rerank actually re-ordering ``primary_ranked``.
 """
@@ -90,15 +90,36 @@ class TestIntentNonce(unittest.TestCase):
 
 
 class TestSessionLifecycle(unittest.TestCase):
-    def test_cdp_session_reopens_after_close(self) -> None:
-        """ctx.on_unload(session.close) must not permanently brick the shared session."""
-        cdp = CdpSession("http://127.0.0.1:1")
-        cdp._ensure_thread()
-        self.assertTrue(cdp._thread is not None and cdp._thread.is_alive())
-        cdp.close()
-        cdp._ensure_thread()  # must reopen, not raise "CdpSession is closed"
-        self.assertTrue(cdp._thread is not None and cdp._thread.is_alive())
-        cdp.close()
+    def test_closed_tab_cannot_reopen_on_delayed_attachment_or_read(self) -> None:
+        import threading
+        from hermes_gaze.browser.companion import Companion
+        companion = Companion("http://127.0.0.1:1")
+        tab = CdpSession(companion.http_url)
+        companion._tabs["tab"] = tab
+        entered, release, finished = (threading.Event() for _ in range(3))
+        original = tab.connect
+        connected = []
+        def delayed():
+            entered.set()
+            release.wait(2)
+            try:
+                connected.append(original())
+            finally:
+                finished.set()
+        with mock.patch.object(tab, "connect", side_effect=delayed):
+            companion._attach(tab)
+            self.assertTrue(entered.wait(1))
+            try:
+                companion.close()
+            finally:
+                release.set()
+            self.assertTrue(finished.wait(2))
+        self.assertEqual(connected, [False])
+        self.assertEqual(companion._tabs, {})
+        self.assertIsNone(tab._thread)
+        with self.assertRaises(ConnectionError):
+            tab.eval_js("true")
+        self.assertIsNone(tab._thread)
 
     def test_close_discards_queued_capture_intents(self) -> None:
         """An old record_start cannot open the microphone after Stop returns."""

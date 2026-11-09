@@ -129,6 +129,19 @@ class FirstRunTests(unittest.TestCase):
             detailed = json.loads(cli._handle_slash_command('diagnostics'))
             self.assertEqual(detailed['webcam'], status)
 
+    def test_disconnected_companion_still_reports_independent_camera_activity(self):
+        session = GazeSession('http://127.0.0.1:1')
+        self.addCleanup(session.close)
+        with patch.object(cli, 'get_shared_session', return_value=session):
+            for state in ('starting', 'running', 'stopping', 'failed'):
+                with self.subTest(state=state), \
+                     patch.object(session, 'webcam_status', return_value={'state': state}):
+                    result = cli._handle_slash_command('status')
+                    self.assertIn('Camera', result)
+                    self.assertIn('/look stop', result)
+                    self.assertNotIn('Look is stopped', result)
+
+
     def test_status_during_setup_preserves_connection_but_explicit_connect_replaces_it(self):
         from unittest.mock import PropertyMock
         plugin, session, ctx, command, _ = self.register(SimpleNamespace(get=lambda *a: True))

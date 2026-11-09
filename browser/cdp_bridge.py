@@ -138,14 +138,9 @@ class CdpSession:
     def _ensure_thread(self) -> None:
         with self._state_lock:
             if self._closed:
-                if self._thread is not None and self._thread.is_alive():
-                    raise RuntimeError("CdpSession is closing")
-                # Reopen after close(): the shared session outlives plugin unload/reload
-                # cycles, so the transport must be restartable rather than one-shot.
-                self._closed = False
-                self._handler_pool = concurrent.futures.ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="hermes-gaze-intent"
-                )
+                # Per-tab transports are terminal. Companion Start creates fresh ones;
+                # a delayed attachment/read must never revive an untracked overlay.
+                raise ConnectionError("CDP transport is closed")
             if self._thread is None or not self._thread.is_alive():
                 self._loop_ready.clear()
                 self._thread = threading.Thread(target=self._thread_main, name="hermes-gaze-cdp", daemon=True)
@@ -156,10 +151,11 @@ class CdpSession:
     def _submit(self, coro: Any, timeout: float) -> Any:
         try:
             self._ensure_thread()
-            loop = self._loop
-            if loop is None or not loop.is_running():
-                raise ConnectionError("CDP worker loop is not running")
-            fut = asyncio.run_coroutine_threadsafe(coro, loop)
+            with self._state_lock:
+                loop = self._loop
+                if self._closed or loop is None or not loop.is_running():
+                    raise ConnectionError("CDP worker loop is not running")
+                fut = asyncio.run_coroutine_threadsafe(coro, loop)
         except Exception:
             coro.close()
             raise
@@ -225,6 +221,8 @@ class CdpSession:
 
 
     async def _connect_async(self) -> bool:
+        if self._closed:
+            return False
         try:
             import websockets
         except ImportError:
@@ -237,6 +235,9 @@ class CdpSession:
         self._target_id = str(tab.get("id") or "") or None
         # 32 MiB > the service's max transcribe payload (~16.9M base64 chars + envelope)
         self._ws = await websockets.connect(str(tab["webSocketDebuggerUrl"]), max_size=32 * 1024 * 1024)
+        if self._closed:
+            await self._drop_ws()
+            return False
         self._pump_task = asyncio.ensure_future(self._pump(self._ws))
         try:
             for method, params in (
@@ -415,6 +416,8 @@ class CdpSession:
                 self._fail_pending(ConnectionError("CDP websocket closed"))
 
     def _handle_event(self, method: str, params: Dict[str, Any]) -> None:
+        if self._closed:
+            return
         if method == "Runtime.bindingCalled" and params.get("name") == _INTENT_BINDING:
             context = params.get("executionContextId")
             frame = next((name for name, (uid, _) in self._ui_frames.items() if uid == context), "")
@@ -464,13 +467,13 @@ class CdpSession:
         Serialized, and retried: during a navigation a frame or context can be momentarily
         missing, and a half-armed page would swallow keys with nowhere to send them.
         """
-        if self._ws is None:
+        if self._closed or self._ws is None:
             return False
         if self._arm_lock is None:
             self._arm_lock = asyncio.Lock()
         async with self._arm_lock:
             for attempt in range(5):
-                if self._ws is None:
+                if self._closed or self._ws is None:
                     return False
                 try:
                     tree = await self._send_cmd("Page.getFrameTree", {}, timeout=5.0)
@@ -480,8 +483,12 @@ class CdpSession:
                                                  {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
                     self._context_id = world["executionContextId"]
                     self._context_unique_id = await self._context_key(self._context_id)
+                    if self._closed:
+                        return False
                     src = _overlay_source()
                     if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
+                        if self._closed:
+                            return False
                         await self._eval_coro(src, timeout=8.0)
                     await self._init_ui()
                     await self._push_overlay_config()
@@ -607,7 +614,7 @@ class CdpSession:
 
 class GazeSession:
     """Machine-scoped shared state: buffer + tracker + recalibrator + last
-    resolution + the CdpSession. Deliberately process-global — owned Chrome and
+    resolution + the Companion. Deliberately process-global — owned Chrome and
     the camera are OS resources shared across Hermes profiles."""
 
     def __init__(self, cdp_http_url: str = "http://127.0.0.1:9333") -> None:
