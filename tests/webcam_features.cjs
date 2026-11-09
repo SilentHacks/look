@@ -95,5 +95,20 @@ function legacyAppearance(features) {
   video.currentTime += .1; interval();
   assert.equal(messages.at(-1).features, null);
   globalThis.__HERMES_WEBCAM__.stop();
+  // Stop while model initialization is pending must not request even a fake camera.
+  let releaseModel, closed = false, cameraCalls = 0;
+  globalThis.pendingModel = new Promise(resolve => { releaseModel = resolve; });
+  navigator.mediaDevices.getUserMedia = async () => { cameraCalls++; throw Error("Late camera request"); };
+  const pendingModule = "data:text/javascript," + encodeURIComponent(`export class FaceLandmarker {
+    static async createFromOptions() { return await globalThis.pendingModel; }
+  }`);
+  const pending = (0, eval)(fs.readFileSync(path.join(root, "webcam_host.js"), "utf8"))({
+    module: pendingModule, wasm: "unused", nonce: "test"});
+  await new Promise(resolve => setImmediate(resolve));
+  globalThis.__HERMES_WEBCAM__.stop();
+  releaseModel({close() { closed = true; }});
+  await pending;
+  assert.equal(cameraCalls, 0);
+  assert.equal(closed, true);
   console.log("Shared extraction: legacy layout, live/offline equivalence, flat patch and blink rejection OK");
 })().catch(error => { console.error(error); process.exitCode = 1; });

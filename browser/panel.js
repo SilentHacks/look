@@ -595,13 +595,19 @@
   }
 
   function renderTracking(m) {
-    const key = `tracking:${!!m.running}`;
+    const state = m.trackerState || 'stopped', key = `tracking:${state}:${!!m.setupRequired}`;
     if (shownKey === key) return;
     clearView(); shownKey = key; view = 'tracking';
+    const titles = {preparing: 'Preparing eye tracking', starting: 'Opening camera window',
+      loading: 'Loading eye tracking', camera: 'Opening camera — allow access if asked',
+      running: 'Eye tracking', stopping: 'Camera is stopping', failed: 'Camera unavailable', stopped: 'Camera stopped'};
     const card = h('div', 'card quiet');
-    const head = h('div', 'head'); head.append(h('div', 'title', m.running ? 'Eye tracking' : 'Camera stopped'));
+    const head = h('div', 'head'); head.append(h('div', 'title',
+      m.setupRequired ? 'Files missing — /look setup eyes' : titles[state] || 'Camera stopped'));
     const choices = h('div', 'choices');
-    for (const [action, label] of [['show_camera', 'Open camera window'], ['use_cursor', 'Use cursor'], ['dismiss', 'Dismiss']]) {
+    const actions = m.setupRequired || ['preparing', 'starting', 'loading', 'camera', 'stopping'].includes(state)
+      ? [] : [['show_camera', state === 'failed' || state === 'stopped' ? 'Try again' : 'Open camera window']];
+    for (const [action, label] of [...actions, ['use_cursor', 'Use cursor'], ['dismiss', 'Dismiss']]) {
       const button = h('button', 'choice', label); button.dataset.act = action; choices.append(button);
     }
     card.append(head, choices); root.append(card);

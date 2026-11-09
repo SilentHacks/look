@@ -502,7 +502,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 session.configure(mode="hover")
                 reply({"ok": True})
             elif intent.get("action") == "show" and session.webcam is not None:
-                session.webcam.calibrate()
+                session.start_webcam()
                 reply({"ok": True})
             else:
                 reply({"ok": False, "error": "Camera window is unavailable. Run /look calibrate in Hermes."})

@@ -141,7 +141,7 @@ class WebcamContracts(unittest.TestCase):
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
             with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
                  patch.object(host, "_run", side_effect=camera):
-                status = host.start()
+                status = host.start(wait=2)
                 self.assertEqual(status["state"], "running")
                 self.assertFalse(status["calibrated"])
                 self.assertEqual(status["error"], "")
@@ -272,11 +272,12 @@ class WebcamContracts(unittest.TestCase):
                     "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", "setup": host._setup, **data})}})
             with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
                  patch.object(host, "_run", side_effect=camera):
-                host.start()
+                host.start(wait=2)
                 event("calibration_start", screen=SCREEN, viewport={"left": 0, "top": 0, "width": 1440, "height": 900})
                 event("sample", t=time.time(), features=appearance_features(.3, .7), calibration=0)
                 host.stop()
-                host.start()
+                host._thread.join(2)
+                host.start(wait=2)
                 event("sample", t=time.time(), features=appearance_features(.3, .7), calibration=-1)
                 self.assertEqual(len(received), 1)
                 self.assertAlmostEqual(received[0].x, 432, delta=12)
@@ -526,7 +527,9 @@ class CalibrationCheckFlow(unittest.TestCase):
         self.assertIn("NotReadableError", self.host.status()["error"])
         self.assertFalse(self.host._stop.is_set())
         self.event("retry_camera")
-        self.assertEqual((self.host.state, self.host.error), ("starting", ""))
+        self.assertEqual(self.host.error, "")
+        self.event("opening_camera")
+        self.assertEqual(self.host.state, "camera")
         self.event("use_cursor")
         until = time.monotonic() + 2
         while not self.cursor and time.monotonic() < until:

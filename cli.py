@@ -23,6 +23,7 @@ HELP = """/look · /look start     Start in Chrome
 /look calibrate         Set up eye tracking
 /look cursor            Turn off the camera; use the pointer
 /look setup             Prepare local speech recognition
+/look setup eyes        Prepare eye tracking and open its camera
 /look diagnostics       Show technical details
 /look help advanced     More commands"""
 
@@ -75,14 +76,22 @@ def _missing_modules() -> list[str]:
 def _tracker_summary(session) -> str:
     status = session.webcam_status()
     state = status["state"]
+    if status.get("error", "").startswith("Eye tracking files missing"):
+        return "Eye tracking files missing. /look setup eyes downloads them and opens the camera; /look cursor to use the pointer."
+    if state == "preparing":
+        return "Preparing eye tracking files. /look cursor to cancel."
     if state == "stopping":
-        return "Camera is stopping."
+        return "Camera is stopping. /look cursor to use the pointer."
     if state in ("failed", "stopped"):
         if status.get("error") or state == "failed":
-            return "Camera unavailable. Try /look calibrate again; /look diagnostics has details."
-        return "Camera stopped. Try /look calibrate for eye tracking."
+            return "Camera unavailable. /look calibrate to retry; /look cursor to use the pointer. Details: /look diagnostics."
+        return "Camera stopped. /look calibrate to retry; /look cursor to use the pointer."
     if state == "starting":
-        return "Camera is starting. Continue in the camera window."
+        return "Opening the camera window. /look cursor to cancel."
+    if state == "loading":
+        return "Loading eye tracking. /look cursor to cancel."
+    if state == "camera":
+        return "Opening camera. Allow access if asked; /look cursor to cancel."
     if not status.get("calibrated") or status.get("calibration_message"):
         return "Eye tracking needs calibration. Continue in the camera window."
     return "Eye tracking is on."
@@ -150,9 +159,11 @@ def _handle_slash_command(raw_args: str) -> str:
     if sub == "status" and not tail:
         if not session.cdp.is_connected:
             state = session.webcam_status()["state"]
-            if state in ("starting", "running", "stopping", "failed"):
-                camera = {"starting": "Camera is starting", "running": "Camera is still on",
-                          "stopping": "Camera is stopping", "failed": "Camera needs attention"}[state]
+            if state in ("preparing", "starting", "loading", "camera", "running", "stopping", "failed"):
+                camera = {"preparing": "Camera preparation is pending", "starting": "Camera is starting",
+                          "loading": "Camera tracker is loading", "camera": "Camera is opening",
+                          "running": "Camera is still on", "stopping": "Camera is stopping",
+                          "failed": "Camera needs attention"}[state]
                 return f"Chrome is disconnected. {camera}. /look stop to close it."
             return "Look is stopped. /look start to begin."
         if session.tracker.mode == "webcam":
@@ -178,21 +189,20 @@ def _handle_slash_command(raw_args: str) -> str:
             time.sleep(0.5)
         return "Practice page could not attach. /look diagnostics has connection details."
 
-    if (sub == "calibrate" and not tail) or sub == "mode" and len(tail) == 1:
-        mode = "webcam" if sub == "calibrate" else tail[0]
+    if ((sub == "calibrate" and not tail) or sub == "mode" and len(tail) == 1
+            or sub == "setup" and tail == ["eyes"]):
+        mode = tail[0] if sub == "mode" else "webcam"
         if mode not in ("hover", "simulated", "webcam"):
             return "Usage: /look mode hover|simulated|webcam"
         session.configure(mode=mode)
         if mode != "webcam":
             return "Using the pointer. Camera off." if mode == "hover" else "Using simulated gaze. Camera off."
-        status = session.start_webcam()
-        if status["state"] in ("running", "failed"):
-            status = session.webcam.calibrate()
+        status = session.start_webcam(download=sub == "setup")
+        if sub == "setup" and status["state"] == "preparing":
+            return "Preparing eye tracking; may download ~11 MB, then open the camera. /look cursor to cancel."
         if status["state"] == "running":
             return "Continue in the camera window."
-        if status["state"] == "starting":
-            return "Camera is starting. Continue in the camera window."
-        return "Camera stopped or could not start. Try /look calibrate again; /look diagnostics has details."
+        return _tracker_summary(session)
 
     if sub == "cursor" and not tail or sub == "tracker" and tail == ["stop"]:
         session.configure(mode="hover")

@@ -63,7 +63,7 @@ def fixture(directory):
 class Window:
     def __init__(self, host, out, scheme="light"):
         self.host, self.out, self.scheme = host, out, scheme
-        status = host.start()
+        status = host.start(wait=25)
         assert status["state"] in ("running", "failed"), status
         self.tab = tracker_tab(host)
         self.tab.send("Emulation.setEmulatedMedia", {"features": [{"name": "prefers-color-scheme", "value": scheme}]})
@@ -217,7 +217,7 @@ def camera_failure(tmp, video, out, report):
         window.wait("error")
         words = window.text()
         assert "Camera in use" in words and "Try again" in words and "Use cursor" in words, words
-        assert host.status()["state"] == "failed" and "Could not start" in host.status()["error"]
+        assert host.status()["state"] == "failed"
         window.shot("01-camera-error")
         window.click("retry"); until(lambda: "Camera in use" in window.text()); window.wait("error")
         window.click("cursor"); until(lambda: used)

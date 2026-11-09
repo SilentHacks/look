@@ -762,14 +762,12 @@ class GazeSession:
             logger.debug("overlay Configure failed: %s", exc)
             return False
 
-    def start_webcam(self) -> dict:
+    def start_webcam(self, *, download: bool = False) -> dict:
         from ..webcam import WebcamHost
         from .. import service
-        self._cdp.connect()
         turns = service._VOICE_TURNS
         binding = turns.binding if turns is not None else None
-        # Capture before the separate process takes focus. Never accept a destination from JS.
-        destination = self._cdp.capture_return_owner()
+        destination = None
         def publish_tracker():
             if turns is not None and service._VOICE_TURNS is turns:
                 with turns.lock:
@@ -780,9 +778,15 @@ class GazeSession:
                                          on_state=publish_tracker)
             host = self.webcam
             host.on_state = publish_tracker
+        if host._thread and host._thread.is_alive():
+            if not host._live():
+                host.cancel()
+            if host.state not in ("running", "failed"):
+                return host.status()
         def connected():
             return (self.webcam is host and self.tracker.mode == "webcam" and binding is not None
-                    and service._VOICE_TURNS is turns and turns.binding is binding and turns.connected)
+                    and service._VOICE_TURNS is turns and turns.binding is binding
+                    and not turns.closed and self._cdp.is_connected)
         def return_to_browser(start_page, valid):
             owned = lambda: valid() and connected()
             if not owned():
@@ -794,8 +798,14 @@ class GazeSession:
                 with turns.lock:
                     if connected():
                         turns.set_coach({"rehearsed": True, "greeted": True})
-        host.begin_setup(return_to_browser, rehearsed, connected)
-        return host.start()
+        setup = host.begin_setup(return_to_browser, rehearsed, connected)
+        if connected():
+            # Capture before the separate process takes focus, never from camera JS.
+            destination = self._cdp.capture_return_owner()
+        status = host.start(setup=setup, download=download)
+        if host._context is not None and status["state"] in ("running", "failed"):
+            host._commands.put(("Page.bringToFront", {}))
+        return status
 
     def stop_webcam(self) -> None:
         if self.webcam is not None:
@@ -999,6 +1009,7 @@ class GazeSession:
     def close(self) -> None:
         TIMINGS.stop()
         self.tasks.stop()
+        self.revoke_webcam()  # Revoke before transport teardown can block.
         # Remove the input source first. A start already inside the microphone lock
         # is then cancelled below; a later start sees its captured tab is closed.
         self._cdp.close()

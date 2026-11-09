@@ -219,7 +219,7 @@ def main():
                          device=args.device, note=args.note, blocks=blocks, duration=args.duration,
                          fake_video=args.fake_video, geometry=physical, dataset_root=root)
     try:
-        state = host.start()
+        state = host.start(wait=25)
         if state["state"] != "running":
             raise RuntimeError(state["error"])
         print("Guided recorder ready. Consent, instructions and breaks are in the owned window; no audio.", flush=True)

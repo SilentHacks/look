@@ -39,6 +39,10 @@ def run(out, headed=False):
         try:
             source = rig.new_tab()
             rig.cmd("Emulation.clearDeviceMetricsOverride", {}, source)
+            if not headed:
+                # Both private processes simulate the same display; don't weaken the display guard.
+                rig.cmd("Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 900,
+                    "deviceScaleFactor": 1, "mobile": False, "screenWidth": 1440, "screenHeight": 900}, source)
             rig.cmd("Emulation.setFocusEmulationEnabled", {"enabled": False}, source)
             rig.page("document.body.textContent='A captured reading page';document.body.style.height='100vh'")
             until(lambda: rig.page("document.hasFocus() && !document.hidden"))
@@ -50,7 +54,9 @@ def run(out, headed=False):
                 on_use_cursor=lambda: rig.session.configure(mode="hover"))
             host._save(AppearanceEstimator().calibrate(appearance_observations(), screen))
             rig.session.webcam = host
-            check(rig.session.start_webcam()["state"] == "running", "owned fake camera started")
+            rig.session.start_webcam()
+            until(lambda: host.state in ("running", "failed"), 25)
+            check(host.state == "running", "owned fake camera started")
             window = Window(host, out)
             camera, ctx = window.tab, host._context
             host.calibrate()
@@ -100,6 +106,8 @@ def run(out, headed=False):
             check(host._practice is None and host._calibration is None and host._check is None, "return discards only unfinished setup work")
             rig.move(430, 310)
             until(lambda: host.delivered > 0, 10)
+            if rig.dbg()["view"] == "tracking":
+                rig.press("Escape", "Escape")
             count = host.samples
             time.sleep(1.2)
             check(host.samples > count + 3 and host.delivered > 0, "background camera continues real-frame inference and foreground delivery")
@@ -171,7 +179,7 @@ def run(out, headed=False):
             # Stop only the fake camera track; watchdog state must repaint the OPEN controls.
             camera.iso("document.getElementById('feed').srcObject.getVideoTracks()[0].stop()", ctx)
             until(lambda: host.state == "failed", 10)
-            until(lambda: "Camera stopped" in rig.text(), 5)
+            until(lambda: "Camera unavailable" in rig.text(), 5)
             check(True, "open companion controls update when fake camera frames actually stop")
             rig.click_panel('[data-act="use_cursor"]')
             until(lambda: rig.session.tracker.mode == "hover" and host.state == "stopped")

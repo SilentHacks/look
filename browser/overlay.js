@@ -1469,7 +1469,8 @@
       summary: confirmation.summary, destination: confirmation.destination, doing: !!actionTask}); return; }
     if (S.view === "doing") { rawSend({...base, view: "doing", label: actionTask?.label || "Working on this page"}); return; }
     if (S.view === "tracking") {
-      rawSend({...base, view: "tracking", running: inbox?.tracker?.state === "running"});
+      rawSend({...base, view: "tracking", trackerState: inbox?.tracker?.state || "stopped",
+        setupRequired: !!inbox?.tracker?.setup_required});
       return;
     }
     if (S.view === "lens") {
@@ -2299,6 +2300,9 @@
       sendCoach({greeted: true});
       if (!S.hold) coachLine("Hold Space. Wait for Listening. Leave fields or keyboard-focused controls.", 11000);
     }
+    if (event.session_connected && state.mode === "webcam" && event.tracker?.state !== previous?.tracker?.state &&
+        ["preparing", "failed"].includes(event.tracker?.state) && !S.hold &&
+        (!S.view || S.view === "tracking")) openView("tracking", null);
     refresh();
   }
   // Answers that have started arrive by themselves, one at a time, in question order.

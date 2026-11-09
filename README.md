@@ -78,9 +78,10 @@ In a new Hermes conversation:
 |`/look` or `/look start`|Start/connect in Chrome|
 |`/look stop`|Stop capture, camera, read-aloud and overlay; keep browser tabs|
 |`/look status`|Current state, without diagnostic counters|
-|`/look calibrate`|Set up optional eye tracking|
+|`/look calibrate`|Start optional eye tracking from verified cached files|
 |`/look cursor`|Stop the camera and return to the pointer|
 |`/look setup`|Prepare/retry local recognition|
+|`/look setup eyes`|Download missing eye-tracking files (~11 MB), then open the camera|
 |`/look diagnostics`|Technical connection, recognition, dependency and tracker details|
 |`/look diagnostics timing`|Save the recent release traces|
 |`/look help advanced`|Practice, simulation, evidence inspection and benchmarks|
@@ -139,7 +140,13 @@ typing or navigation already performed.
 ### Try eyes, beta
 
 After a useful cursor answer, explicitly enter `/look calibrate`. It switches to
-webcam mode and opens the separate local camera window. Click **Start calibration**
+webcam mode and verifies cached files asynchronously before opening the separate camera.
+If files are missing, `/look setup eyes` explicitly permits their download and camera startup.
+Preparation, window startup, model loading, camera access and failures appear in
+`/look tracker` and the protected **Eye tracking** controls. **Use cursor** or `/look cursor`
+cancels immediately; a blocked network read may finish later, but cannot open a camera.
+Failures keep webcam selected until you choose cursor; no cursor evidence is fabricated.
+Click **Start calibration**
 (**Calibrate again** for a saved setup). Look at each dot, tap Space, and keep looking
 until it moves. After nine accepted targets, **Ready to check** waits for your
 **Start accuracy check** action before ten checks. **Check** tests a saved setup
@@ -214,7 +221,7 @@ recorded immutable Git blob IDs; weight checksums come from publisher LFS metada
 | faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux, or after both macOS backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba); SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub; converted weights/runtime MIT |
 | Phonon-31M English q8, Gradium | Explicit `hermes look setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d); SHA-256 manifest | 65 MB | Plugin phonon cache; assets Apache-2.0, ptts MIT OR Apache-2.0 |
 | Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7); SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache; Apache-2.0 |
-| MediaPipe Tasks Vision JS/WASM, Google npm | Explicit optional webcam start or offline developer evaluation | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32); SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 23.6 MB unpacked; compressed size unverified | Plugin webcam cache; Apache-2.0 |
+| MediaPipe Tasks Vision JS/WASM, Google npm | Only explicit `/look setup eyes`; ordinary start and offline evaluation are cache-only | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32); SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 6.6 MB compressed; 23.6 MB unpacked | Plugin webcam cache; Apache-2.0 |
 | Face Landmarker, Google storage | Same explicit optional webcam setup | [float16 version 1](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task); SHA-256 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` | 3.76 MB | Plugin webcam cache; Apache-2.0 |
 
 The shared Hugging Face hub defaults to `${HF_HOME:-${XDG_CACHE_HOME:-~/.cache}/huggingface}/hub`;

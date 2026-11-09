@@ -156,7 +156,9 @@ class VoiceTurns:
                  "speech_backend": self.speech_backend, "speech_status": self.speech_status,
                  "coach": dict(self.coach), "waiting": len(self.pending)}
         webcam = getattr(self.session, "webcam", None)
-        event["tracker"] = {"state": webcam.state if webcam is not None else "stopped"}
+        event["tracker"] = {"state": webcam.state if webcam is not None else "stopped",
+                            "setup_required": bool(webcam is not None and
+                                webcam.error.startswith("Eye tracking files missing"))}
         try:
             self.session.display_session_event(event)
         except Exception:

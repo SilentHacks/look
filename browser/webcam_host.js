@@ -468,6 +468,8 @@
       if (owner !== flow) { loaded.close(); return; }
       model = loaded;
     }
+    if (owner !== flow) return;
+    emit("opening_camera");
     const acquired = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480}, audio: false});
     if (owner !== flow) { acquired.getTracks().forEach(t => t.stop()); return; }
     stream = acquired;

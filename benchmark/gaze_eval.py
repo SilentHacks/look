@@ -112,7 +112,7 @@ class FrameExtractor:
         self.host = WebcamHost(lambda *_: False, profile_path=Path(self.tmp.name) / "unused.json",
                                runtime_source=BROWSER / "gaze_eval.js")
         try:
-            state = self.host.start()
+            state = self.host.start(wait=25)
             if state["state"] != "running":
                 raise RuntimeError(state["error"])
             from websockets.sync.client import connect

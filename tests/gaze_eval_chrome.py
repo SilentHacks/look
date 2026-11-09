@@ -37,7 +37,7 @@ def run(out, duration=36):
                                  blocks=blocks, duration=duration, fake_video=video, dataset_root=recordings)
             tab = None
             try:
-                assert host.start()["state"] == "running", host.status()
+                assert host.start(wait=25)["state"] == "running", host.status()
                 tab = tracker_tab(host)
                 if consent:
                     assert tab.main("Boolean(document.querySelector('#consent'))")

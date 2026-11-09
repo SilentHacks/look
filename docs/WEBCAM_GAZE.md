@@ -19,8 +19,9 @@ Before updating or reloading the plugin, quit Hermes and run `hermes gateway sto
 first, then restart Hermes. Hermes runs a background gateway that keeps old code
 loaded even after the terminal closes; closing the terminal alone is not a reload.
 
-During ordinary plugin use, only `/look mode webcam` or `/look calibrate` starts
-the camera. Registration, model tools, status and changing configuration do not.
+During ordinary plugin use, only explicit `/look mode webcam`, `/look calibrate`,
+`/look setup eyes` or protected camera controls start the camera. Registration,
+model tools, status and changing configuration do not.
 The owned window requests video only, never audio. It captures and infers locally;
 images never leave it in ordinary tracking mode. The separate, explicit
 [guided dataset recorder](GAZE_RECORDING.md) saves camera video locally.
@@ -30,8 +31,20 @@ by that eye's two iris coordinates. No raw pixels, canvas patches or images cros
 the live binding. Features are never logged or included in `/look diagnostics`.
 There is no HTTP sample endpoint. The camera
 profile has extensions disabled and HTTP(S) requests blocked after startup.
-Downloads happen in Python, before the camera starts, from official sources;
-verified cached assets work offline.
+Only `/look setup eyes` authorizes Python to download missing pinned files (~11 MB)
+from official sources, then open the camera. Normal startup and developer
+evaluation/recording verify cache-only assets; verified caches work offline.
+Preparation runs in a worker. `/look tracker` and the protected Eye tracking
+controls distinguish preparing files, opening the window, loading the model,
+opening camera access and failure. No percentage or permission outcome is invented.
+**Use cursor**, `/look cursor`, Stop and disconnect revoke startup before slow work
+can launch Chrome or hand off to camera access. A blocked network read may take
+up to its 60-second socket timeout to finish; cursor use does not wait for it.
+Retry waits until that cancelled worker exits; it never starts a second worker.
+Failures do not silently switch the evidence source or overwrite saved calibration.
+`/look diagnostics` retains the failure stage, exception/error category, optional
+OS error/exit code and bounded native failure categories. No raw Chrome stderr,
+paths, URLs, device details or biometric values are retained or printed.
 
 The owned process disables background timer/renderer/occlusion throttling and
 uses a 100ms timer rather than animation frames. This is not imposed on the
@@ -177,7 +190,8 @@ nine-point recalibration after moving instead.
 ## Hands-on checklist (real hardware: user only)
 
 1. Start a normal Hermes conversation, then `/look`.
-2. `/look mode webcam`: allow **camera only** in the separate tracker window.
+2. `/look setup eyes` on first use (may download ~11 MB); later `/look mode webcam`
+   uses verified cached files. Allow **camera only** in the separate tracker window.
    Confirm the camera indicator; no website needs a camera permission.
 3. `/look calibrate`: maximize that window and complete the dots and the short
    check. Note the plain result and whether it matched how well it followed you.
@@ -200,6 +214,12 @@ nine-point recalibration after moving instead.
 instance, retained across stop/restart. Compare two readings while the companion
 page has focus; old counts from calibration or another application are normal.
 No coordinates, features, images or calibration values are included.
+
+Startup regressions use mocked slow assets, cancellation, missing Chrome and
+connection races; `tests/webcam_startup_chrome.py` exercises protected recovery
+without opening capture devices. `tests/calibration_return_chrome.py` uses fake
+video and a synthetic saved fit for camera/handoff checks. These do not establish
+real macOS permission behavior, physical camera release timing or live gaze accuracy.
 
 - `no_features`: no usable face/eyes, including blinks.
 - `uncalibrated`, `calibrating`: waiting for a profile or collecting calibration;

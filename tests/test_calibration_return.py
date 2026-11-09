@@ -5,7 +5,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 from hermes_gaze import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
@@ -179,12 +179,13 @@ class CameraCompletion(unittest.TestCase):
             generations = []
             with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), patch.object(host, "_run", side_effect=camera):
                 for _ in range(2):
-                    host.start(); generations.append(host._setup)
+                    host.start(wait=2); generations.append(host._setup)
                     host.start()
                     self.assertEqual(host._setup, generations[-1])
                     self.event("return_browsing", flow=3); self.result()
                     self.assertTrue(self.ui[-1][1]["ok"])
                     host.stop()
+                    host._thread.join(2)
             self.assertNotEqual(*generations)
             self.assertEqual(len(self.ui), 2)
 
@@ -216,7 +217,8 @@ class SetupConnection(unittest.TestCase):
         host = WebcamHost(lambda *_: False)
         session.webcam = host
         returned = []
-        with patch.object(service, "_VOICE_TURNS", turns), patch.object(session.cdp, "connect", return_value=True), \
+        with patch.object(service, "_VOICE_TURNS", turns), \
+             patch.object(type(session.cdp), "is_connected", new_callable=PropertyMock, return_value=True), \
              patch.object(session.cdp, "capture_return_owner", return_value=source), \
              patch.object(host, "start", return_value=host.status()), \
              patch.object(session.cdp, "return_to_document", side_effect=lambda owner, valid: returned.append(dict(owner)) or {"ok": valid()}):

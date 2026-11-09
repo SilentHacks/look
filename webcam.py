@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import queue
+import re
 import secrets
 import subprocess
 import tarfile
@@ -44,15 +45,31 @@ def asset_directory() -> Path:
     return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "hermes-gaze" / "webcam-0.10.32"
 
 
-def prepare_assets(directory: Path | None = None) -> Path:
-    """Official, version-pinned downloads; verify before unpacking and on each start."""
+def prepare_assets(directory: Path | None = None, *, download: bool = False,
+                   cancelled=lambda: False) -> Path:
+    """Verify cached assets; only explicit setup may fetch pinned official bytes."""
     directory = directory or asset_directory()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     for name, (url, expected) in _ASSETS.items():
         path = directory / name
+        if cancelled():
+            raise InterruptedError("Eye tracking preparation cancelled")
         if not path.exists():
+            if not download:
+                raise FileNotFoundError("Eye tracking files missing. Run /look setup eyes.")
             with urllib.request.urlopen(url, timeout=60) as response:
-                data = response.read(32 * 1024 * 1024)
+                chunks, size = [], 0
+                while not cancelled():
+                    chunk = response.read1(1024 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > 32 * 1024 * 1024:
+                        raise ValueError("Webcam asset exceeds size limit")
+                    chunks.append(chunk)
+                data = b"".join(chunks)
+            if cancelled():
+                raise InterruptedError("Eye tracking preparation cancelled")
             if hashlib.sha256(data).hexdigest() != expected:
                 raise ValueError("Webcam asset checksum mismatch: " + name)
             with tempfile.NamedTemporaryFile(dir=directory, delete=False) as f:
@@ -63,6 +80,8 @@ def prepare_assets(directory: Path | None = None) -> Path:
     # Re-extract the verified bytes: modified cached JS/WASM must never execute.
     with tarfile.open(fileobj=io.BytesIO((directory / "tasks.tgz").read_bytes())) as archive:
         for member in archive.getmembers():
+            if cancelled():
+                raise InterruptedError("Eye tracking preparation cancelled")
             if member.name in ("package/vision_bundle.mjs", "package/wasm/vision_wasm_internal.js",
                                "package/wasm/vision_wasm_internal.wasm", "package/wasm/vision_wasm_nosimd_internal.js",
                                "package/wasm/vision_wasm_nosimd_internal.wasm"):
@@ -92,6 +111,9 @@ class WebcamHost:
         self._calibration_notice = ""
         self.error = ""
         self.state = "stopped"
+        self.diagnostic = {}
+        self._stage = ""
+        self._native_notes = []
         self.samples = self.predictions = self.delivered = self.hidden_samples = 0
         self.drops = dict.fromkeys((
             "stale_sample", "no_features", "uncalibrated", "calibrating", "offscreen", "prediction_rejected",
@@ -102,7 +124,7 @@ class WebcamHost:
         self.last_sample = 0.
         self._ready = threading.Event()
         self._stop = threading.Event()
-        self._start_lock = threading.Lock()
+        self._start_lock = threading.RLock()
         self._commands: queue.Queue = queue.Queue()
         self._thread = self._process = self._ws = None
         self._nonce = ""
@@ -118,19 +140,22 @@ class WebcamHost:
         self._setup = ""
         self._return_pending = None
         self._setup_valid = lambda: True
+        self._run_valid = lambda: True
         self._return_seen = set()
 
-    def begin_setup(self, on_return, on_rehearsed=None, valid=lambda: True) -> None:
-        """Replace setup authority before foregrounding the camera, including a reused host."""
-        self._setup = secrets.token_hex(16)
-        self.on_return, self.on_rehearsed = on_return, on_rehearsed
-        self._return_pending = None
-        self._setup_valid = valid
-        self._return_seen.clear()
-        if self._thread and self._thread.is_alive():
-            self._commands.put(("Runtime.evaluate", {
-                "expression": "globalThis.__HERMES_WEBCAM__?.beginSetup(" + json.dumps(self._setup) + ")",
-                "contextId": self._context}))
+    def begin_setup(self, on_return, on_rehearsed=None, valid=lambda: True) -> str:
+        """Replace setup authority before foregrounding the camera."""
+        with self._start_lock:
+            self._setup = secrets.token_hex(16)
+            self.on_return, self.on_rehearsed = on_return, on_rehearsed
+            self._return_pending = None
+            self._setup_valid = valid
+            self._return_seen.clear()
+            if self._thread and self._thread.is_alive() and self._context is not None:
+                self._commands.put(("Runtime.evaluate", {
+                    "expression": "globalThis.__HERMES_WEBCAM__?.beginSetup(" + json.dumps(self._setup) + ")",
+                    "contextId": self._context}))
+            return self._setup
 
     def _begin_return(self, data: dict) -> None:
         owner = (self._setup, self._flow)
@@ -172,57 +197,112 @@ class WebcamHost:
                 "drops": dict(self.drops),
                 "sample_age_seconds": round(time.time() - self.last_sample, 2) if self.last_sample else None,
                 "error": self.error, "model": self.estimator.model_id,
+                "diagnostic": {**self.diagnostic, "native": list(self._native_notes)} if self.diagnostic else {},
                 "calibration_message": self._calibration_notice}
 
-    def start(self) -> dict:
+    def start(self, *, setup: str | None = None, download: bool = False, wait: float = 0) -> dict:
         with self._start_lock:
-            return self._start()
-
-    def _start(self) -> dict:
-        if self._thread and self._thread.is_alive():
-            return self.status()
-        self._setup = secrets.token_hex(16)  # A new camera document gets a fresh completion generation.
-        self._return_seen.clear()
-        self._return_pending = None
-        self._commands = queue.Queue()
-        self._flow = 0
-        self._stop.clear(); self._ready.clear(); self.error = ""; self.state = "starting"
-        self.last_sample = 0.
-        self._clear_flow()
-        try:
-            self.assets = prepare_assets(self.assets)
-        except (OSError, ValueError) as exc:
-            self.state = "failed"; self.error = str(exc)
-            return self.status()
-        self.profile = None
-        self._calibration_notice = ""
-        try:
-            if self.profile_path.exists():
-                if self.profile_path.stat().st_size > 65536:
-                    raise ValueError("Calibration file too large")
-                profile = json.loads(self.profile_path.read_text())
-                if not isinstance(profile, dict):
-                    raise ValueError("Invalid calibration profile")
-                if profile.get("model_id") != self.estimator.model_id:
-                    self._calibration_notice = _OLD_MODEL
-                    profile = None
-                if profile is not None:
-                    self.estimator.load(profile); self.profile = profile
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            self.error = "Calibration could not be loaded; run /look calibrate"
-        if self._stop.is_set():
-            self.state = "stopped"
-            return self.status()
-        self._thread = threading.Thread(target=self._run, name="hermes-webcam", daemon=True)
-        self._thread.start()
-        self._ready.wait(25)
+            if setup is not None and setup != self._setup:
+                return self.status()
+            if self._thread and self._thread.is_alive():
+                return self.status()
+            if setup is None:
+                self._setup = secrets.token_hex(16)
+            if not self._setup_valid():
+                self.state = "failed"
+                self.error = "Connect Look in Hermes before starting eye tracking."
+                self.diagnostic = {"stage": "connection", "reason": "connection_changed"}
+                return self.status()
+            self._return_seen.clear()
+            self._return_pending = None
+            self._run_valid = self._setup_valid
+            self._process = None
+            self._commands = queue.Queue()
+            self._context = None
+            self._flow = 0
+            self._stop = threading.Event()
+            self._ready.clear()
+            self.error = ""; self.diagnostic = {}; self._native_notes = []
+            self.state = self._stage = "preparing"
+            self.last_sample = 0.
+            self._clear_flow()
+            self._thread = threading.Thread(target=self._bootstrap, args=(download,),
+                                            name="hermes-webcam", daemon=True)
+            self._thread.start()
+        self._publish_state()
+        if wait:
+            self._ready.wait(wait)
         return self.status()
+
+    def _live(self) -> bool:
+        return not self._stop.is_set() and self._run_valid() and self._setup_valid()
+
+    def _fail(self, exc) -> None:
+        # Only bounded categories cross status; never native paths, URLs or device details.
+        reason = type(exc).__name__
+        if isinstance(exc, FileNotFoundError):
+            message = ("Eye tracking files missing. Run /look setup eyes." if self._stage == "preparing"
+                       else "Google Chrome is missing. Install it in Applications.")
+        elif isinstance(exc, ValueError) and "checksum" in str(exc).lower():
+            message = "Eye tracking asset checksum mismatch. Remove the damaged asset before setup."
+            reason = "checksum_mismatch"
+        else:
+            message = "Eye tracking could not start. Retry /look calibrate or use /look cursor."
+        self.error = message
+        self.diagnostic = {"stage": self._stage, "reason": reason,
+                           "native": list(self._native_notes)}
+        if isinstance(exc, OSError) and exc.errno is not None:
+            self.diagnostic["errno"] = exc.errno
+        if self._process is not None:
+            self.diagnostic["exit_code"] = self._process.poll()
+        self.state = "failed"
+
+    def _bootstrap(self, download: bool) -> None:
+        try:
+            self.assets = prepare_assets(self.assets, download=download, cancelled=lambda: not self._live())
+            if not self._live():
+                return
+            self.profile = None
+            self._calibration_notice = ""
+            try:
+                if self.profile_path.exists():
+                    if self.profile_path.stat().st_size > 65536:
+                        raise ValueError("Calibration file too large")
+                    profile = json.loads(self.profile_path.read_text())
+                    if not isinstance(profile, dict):
+                        raise ValueError("Invalid calibration profile")
+                    if profile.get("model_id") != self.estimator.model_id:
+                        self._calibration_notice = _OLD_MODEL
+                        profile = None
+                    if profile is not None:
+                        self.estimator.load(profile); self.profile = profile
+            except (OSError, ValueError, KeyError, TypeError):
+                self.error = "Calibration could not be loaded; run /look calibrate"
+            if self._live():
+                self.state = self._stage = "starting"
+                self._publish_state()
+                self._run()
+        except Exception as exc:
+            if self._live():
+                self._fail(exc)
+        finally:
+            if not self._live() or self.state != "failed":
+                self.state = "stopped"
+            self._ready.set()
+            self._publish_state()
 
     def cancel(self) -> None:
         """Revoke synchronously without joining the camera reader under an inbox lock."""
-        self._stop.set()
-        self._return_pending = None
-        self.state = "stopping"
+        with self._start_lock:
+            self._stop.set()
+            self._setup = secrets.token_hex(16)
+            self._return_pending = None
+            self.state = "stopping" if self._thread and self._thread.is_alive() else "stopped"
+            if self._process is not None and self._process.poll() is None:
+                try:
+                    self._process.terminate()
+                except ProcessLookupError:
+                    pass
 
     def stop(self) -> None:
         self.cancel()
@@ -231,12 +311,12 @@ class WebcamHost:
                 self._ws.send(json.dumps({"id": 0, "method": "Browser.close"}))
             except Exception:
                 pass
-        elif self._process is not None and self._process.poll() is None:
-            self._process.terminate()
-        if self._thread and self._thread is not threading.current_thread():
-            self._thread.join(12)
-        self._clear_flow()
-        self.state = "stopped"
+        # Preparation may be inside a network read. Revoke now; never join that read.
+        if self._thread and self._thread is not threading.current_thread() and self._process is not None:
+            self._thread.join(2)
+        if not self._thread or not self._thread.is_alive():
+            self._clear_flow()
+            self.state = "stopped"
         self._publish_state()
 
     def calibrate(self) -> dict:
@@ -251,8 +331,11 @@ class WebcamHost:
         return self._seq
 
     def _command(self, method: str, params: dict) -> dict:
-        seq = self._send(method, params)
-        while not self._stop.is_set():
+        with self._start_lock:
+            if not self._live():
+                raise InterruptedError("Eye tracking stopped")
+            seq = self._send(method, params)
+        while self._live():
             message = json.loads(self._ws.recv(timeout=20))
             if message.get("id") == seq:
                 if message.get("error"):
@@ -367,7 +450,7 @@ class WebcamHost:
     def _event(self, message: dict) -> None:
         params = message.get("params", {})
         if message.get("method") == "Page.frameNavigated" and params.get("frame", {}).get("id") == self._frame:
-            self._stop.set()  # This owned document's replacement is never trusted.
+            self.cancel()  # This owned document's replacement is never trusted.
             return
         if message.get("method") != "Runtime.bindingCalled" or params.get("name") != "__hermesGazeIntent" or params.get("executionContextId") != self._context:
             return
@@ -380,6 +463,8 @@ class WebcamHost:
             return
         if not isinstance(data, dict) or data.get("nonce") != self._nonce or data.get("setup", "") != self._setup:
             return
+        if not self._live():
+            return
         kind = data.get("type")
         flow = data.get("flow", self._flow)
         if type(flow) is not int or flow < self._flow:
@@ -391,14 +476,22 @@ class WebcamHost:
         if kind == "ready":
             self.error = ""; self.state = "running"; self._ready.set()
             self._publish_state()
+        elif kind == "opening_camera":
+            self.state = self._stage = "camera"
+            self._publish_state()
         elif kind == "error":
             # The window stays open to explain this; Use cursor or Try again ends it.
-            self.error = str(data.get("error", "Tracker failed"))[:300]; self.state = "failed"
+            reason = str(data.get("error", "")).split(":", 1)[0]
+            reason = reason if re.fullmatch(r"[A-Za-z]{1,40}Error", reason) else "CameraError"
+            self.error = reason + ": Camera unavailable. Try again or use cursor."
+            self.diagnostic = {"stage": self._stage, "reason": reason}
+            self.state = "failed"
             self._clear_flow(); self._ready.set()
             self._return_pending = None
             self._publish_state()
         elif kind == "retry_camera":
-            self.error = ""; self.state = "starting"; self.last_sample = 0.
+            self.error = ""; self.state = self._stage = "loading"; self.last_sample = 0.
+            self._publish_state()
         elif kind == "use_cursor":
             self._clear_flow()
             if self.on_use_cursor is None:
@@ -523,9 +616,26 @@ class WebcamHost:
             else:
                 self.drops[result if isinstance(result, str) and result in self.drops else "rejected_by_page"] += 1
 
+    def _read_stderr(self, pipe, notes=None) -> None:
+        """Drain without terminal output or retaining arbitrary native text."""
+        notes = self._native_notes if notes is None else notes
+        with pipe:
+            while chunk := pipe.read(1024):
+                text = chunk.decode("utf-8", errors="replace").lower()
+                for needle, label in (("permission denied", "permission_denied"),
+                                      ("singleton", "profile_in_use"), ("sandbox", "sandbox"),
+                                      ("address already in use", "port_in_use"),
+                                      ("fatal", "native_fatal")):
+                    if needle in text and label not in notes:
+                        notes.append(label)
+
     def _run(self) -> None:
         from websockets.sync.client import connect
         try:
+            if not self._live():
+                return
+            if not Path(_CHROME).is_file():
+                raise FileNotFoundError("Chrome missing")
             with tempfile.TemporaryDirectory(prefix="hermes-webcam-", ignore_cleanup_errors=True) as profile:
                 host = Path(profile) / "tracker.html"
                 host.write_text('<!doctype html><meta charset="utf-8"><title>Look — Eye tracking</title>')
@@ -538,12 +648,21 @@ class WebcamHost:
                         raise ValueError("Fake camera video does not exist")
                     args += ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
                              "--use-file-for-fake-video-capture=" + str(self.fake_video.resolve())]
-                self._process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                with self._start_lock:
+                    if not self._live():
+                        return
+                    self._process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                threading.Thread(target=self._read_stderr, args=(self._process.stderr, self._native_notes),
+                                 name="hermes-webcam-stderr", daemon=True).start()
                 active = Path(profile) / "DevToolsActivePort"
                 deadline = time.monotonic() + 15
-                while not active.exists() and time.monotonic() < deadline and not self._stop.wait(.1):
+                while not active.exists() and time.monotonic() < deadline and self._live() and not self._stop.wait(.1):
                     if self._process.poll() is not None:
                         raise RuntimeError("Tracker Chrome exited before startup")
+                if not self._live():
+                    return
+                if not active.exists():
+                    raise TimeoutError("Chrome debugger did not become ready")
                 self.http_url = "http://127.0.0.1:" + active.read_text().splitlines()[0]
                 with urllib.request.urlopen(self.http_url + "/json/list", timeout=3) as response:
                     tab = next(t for t in json.load(response) if t.get("type") == "page" and t.get("url") == host.as_uri())
@@ -566,6 +685,10 @@ class WebcamHost:
                         raise RuntimeError("Tracker WASM loader failed")
                     features = Path(__file__).with_name("browser") / "webcam_features.js"
                     self._command("Runtime.evaluate", {"expression": features.read_text(), "contextId": self._context})
+                    if not self._live():
+                        return
+                    self.state = self._stage = "loading"
+                    self._publish_state()
                     options = {"nonce": self._nonce, "module": (self.assets / "package/vision_bundle.mjs").as_uri(),
                                "wasm": (self.assets / "package/wasm").as_uri(), "model": (self.assets / "face_landmarker.task").as_uri(),
                                "calibrated": self.profile is not None,
@@ -573,10 +696,10 @@ class WebcamHost:
                                "calibration_notice": _OLD_MODEL_WINDOW if self._calibration_notice else (_BAD_PROFILE_WINDOW if self.error else ""),
                                **self.runtime_options}
                     result = self._command("Runtime.evaluate", {"expression": self.runtime_source.read_text() + "(" + json.dumps(options) + ")",
-                                           "contextId": self._context, "awaitPromise": True})
+                                           "contextId": self._context, "awaitPromise": False})
                     if result.get("exceptionDetails"):
                         raise RuntimeError("Tracker runtime failed to initialize")
-                    while not self._stop.is_set():
+                    while self._live():
                         while not self._commands.empty():
                             method, params = self._commands.get_nowait()
                             if method == "_return_result":
@@ -594,8 +717,8 @@ class WebcamHost:
                     self._send("Browser.close", {})
                 self._process.wait(8)
         except Exception as exc:
-            if not self._stop.is_set():
-                self.error = str(exc)[:300]; self.state = "failed"
+            if self._live():
+                self._fail(exc)
         finally:
             if self._process and self._process.poll() is None:
                 self._process.terminate()
@@ -603,7 +726,4 @@ class WebcamHost:
                     self._process.wait(8)
                 except subprocess.TimeoutExpired:
                     self._process.kill(); self._process.wait(5)
-            self._ws = None; self._ready.set()
-            if self.state != "failed":
-                self.state = "stopped"
-            self._publish_state()
+            self._ws = None

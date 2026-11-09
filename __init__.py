@@ -170,7 +170,7 @@ def register(ctx: Any) -> None:
                 result += "\n" + recognition_status(cfg.whisper_model)
             return result
         # Read-only commands never bind, replace or steal a calibration's connection.
-        if command in ("calibrate", "mode webcam", "demo"):
+        if command in ("calibrate", "mode webcam", "setup eyes", "demo"):
             if not kwargs.get("session_id") or not kwargs.get("session_key"):
                 return "Run /look start in a live Hermes conversation first."
             with turns.lock:

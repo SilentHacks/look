@@ -85,6 +85,8 @@ def run(out):
             rig.page("document.body.style.cssText='margin:0;height:200vh';document.body.innerHTML='<article id=planet style=\"padding:32px;height:85vh;background:#eef\"><h1>Jupiter storms</h1><p>The Great Red Spot is a persistent storm on Jupiter.</p></article>'")
             rig.session.configure(mode="webcam")
             status = rig.session.start_webcam()
+            until(lambda: host.state in ("running", "failed"), 25)
+            status = host.status()
             assert status["state"] == "running", status
             assert not status["calibrated"], status
             camera = tracker_tab(host)
@@ -223,7 +225,7 @@ def run(out):
             camera.ws.close()
             rig.session.configure(mode="webcam")
             before_predictions = host.predictions
-            assert host.start()["state"] == "running"
+            assert host.start(wait=25)["state"] == "running"
             camera = tracker_tab(host); ctx = host._context
             until(lambda: host.predictions > before_predictions)
             assert host.profile_path.read_bytes() == saved_profile
