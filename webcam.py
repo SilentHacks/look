@@ -35,7 +35,7 @@ _POINTS = [(x, y) for y in (.1, .5, .9) for x in (.1, .5, .9)]
 _SCREEN_KEYS = ("left", "top", "width", "height", "screen_width", "screen_height", "screen_left", "screen_top", "dpr")
 _WRONG_WINDOW = "Move this window onto one screen"
 _WRONG_DISPLAY = "Different screen. Recalibrate here."
-_OLD_MODEL = "The gaze model changed. Please recalibrate with /gaze calibrate."
+_OLD_MODEL = "The eye tracker changed. Please recalibrate with /look calibrate."
 _OLD_MODEL_WINDOW = "Eye tracker updated. Start a new calibration."
 _BAD_PROFILE_WINDOW = "Saved calibration could not be read. Start a new calibration."
 
@@ -159,7 +159,7 @@ class WebcamHost:
         if self._stop.is_set() or self.state != "running":
             return
         if not self._setup_valid():
-            result = {"ok": False, "error": "Setup connection changed. Run /gaze calibrate in Hermes again."}
+            result = {"ok": False, "error": "Setup connection changed. Run /look calibrate in Hermes again."}
         self._ui("returnResult", result)
 
     def _publish_state(self) -> None:
@@ -209,7 +209,7 @@ class WebcamHost:
                 if profile is not None:
                     self.estimator.load(profile); self.profile = profile
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            self.error = "Calibration could not be loaded; run /gaze calibrate"
+            self.error = "Calibration could not be loaded; run /look calibrate"
         if self._stop.is_set():
             self.state = "stopped"
             return self.status()
@@ -528,7 +528,7 @@ class WebcamHost:
         try:
             with tempfile.TemporaryDirectory(prefix="hermes-webcam-", ignore_cleanup_errors=True) as profile:
                 host = Path(profile) / "tracker.html"
-                host.write_text('<!doctype html><meta charset="utf-8"><title>Hermes Gaze webcam</title>')
+                host.write_text('<!doctype html><meta charset="utf-8"><title>Look — Eye tracking</title>')
                 args = [_CHROME, f"--user-data-dir={profile}", "--remote-debugging-port=0", "--no-first-run",
                         "--no-default-browser-check", "--disable-extensions", "--allow-file-access-from-files", "--start-maximized",
                         "--disable-background-timer-throttling", "--disable-renderer-backgrounding",

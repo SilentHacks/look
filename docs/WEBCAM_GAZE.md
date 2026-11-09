@@ -19,7 +19,7 @@ Before updating or reloading the plugin, quit Hermes and run `hermes gateway sto
 first, then restart Hermes. Hermes runs a background gateway that keeps old code
 loaded even after the terminal closes; closing the terminal alone is not a reload.
 
-During ordinary plugin use, only `/gaze mode webcam` or `/gaze calibrate` starts
+During ordinary plugin use, only `/look mode webcam` or `/look calibrate` starts
 the camera. Registration, model tools, status and changing configuration do not.
 The owned window requests video only, never audio. It captures and infers locally;
 images never leave it in ordinary tracking mode. The separate, explicit
@@ -27,7 +27,7 @@ images never leave it in ordinary tracking mode. The separate, explicit
 Only 130 bounded numeric biometric features cross an exact-context, nonce-checked
 `__hermesGazeIntent` CDP binding: 128 normalized left-eye appearance values followed
 by that eye's two iris coordinates. No raw pixels, canvas patches or images cross
-the live binding. Features are never logged or included in `/gaze tracker`.
+the live binding. Features are never logged or included in `/look diagnostics`.
 There is no HTTP sample endpoint. The camera
 profile has extensions disabled and HTTP(S) requests blocked after startup.
 Downloads happen in Python, before the camera starts, from official sources;
@@ -42,8 +42,8 @@ unload and owned-document replacement close only the camera process we started.
 
 ## Calibration and coordinates
 
-`/gaze calibrate` switches to webcam mode, starts the owned camera window and
-brings it forward; `/gaze mode webcam` opens the same flow. Maximize it, keep its zoom at
+`/look calibrate` switches to webcam mode, starts the owned camera window and
+brings it forward; `/look mode webcam` opens the same flow. Maximize it, keep its zoom at
 100%, and click **Start calibration** (**Calibrate again** for a saved setup). At each dot, look at it, tap Space and keep looking for
 about one second. Each dot keeps its concise instruction underneath: **Tap Space**,
 **Keep looking**, or a retry cue. One current-target count advances only after Python
@@ -90,7 +90,7 @@ and setup generation. One foreground request is followed by at most three second
 of focus/visibility observations and a protected-renderer check. An acknowledgement
 alone is not success. A closed/replaced page, disconnect, changed setup or unobserved
 focus keeps explicit recovery; **Try again** rechecks the same destination.
-**Open start page** explicitly creates/reuses a small local Telepathy page in the
+**Open start page** explicitly creates/reuses a small local Look page in the
 owned companion, waits for attachment and checks foreground ownership. It never
 navigates an unrelated tab or restores a missing source by URL.
 
@@ -108,14 +108,14 @@ fresh setup generation rather than reusing an earlier return attempt.
 **Use cursor** is available at entry and on unsuccessful results/recovery.
 Camera errors stay on screen with a plain state and **Try again**.
 If the window closes or startup returns `stopped`, the command offers
-**Try again** with `/gaze calibrate`; it does not claim calibration is ready.
+**Try again** with `/look calibrate`; it does not claim calibration is ready.
 
 The accepted profile is stored atomically at
 `${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`, mode `0600`
 in a `0700` directory. No images, audio, raw calibration samples or profile values
 are logged or committed. Delete that file to forget calibration. The profile is
 versioned to the estimator and one display. Old iris/head-only profiles are refused
-without overwriting them: “The gaze model changed. Please recalibrate with /gaze calibrate.”
+without overwriting them: “The eye tracker changed. Please recalibrate with /look calibrate.”
 Recalibrate after moving, leaning back, changing head/lid/camera position, lighting
 or glasses, and if delivery drops. There is no automatic posture correction.
 A training-fit check is not a human accuracy measurement.
@@ -176,27 +176,27 @@ nine-point recalibration after moving instead.
 
 ## Hands-on checklist (real hardware: user only)
 
-1. Start a normal Hermes conversation, then `/gaze connect`.
-2. `/gaze mode webcam`: allow **camera only** in the separate tracker window.
+1. Start a normal Hermes conversation, then `/look`.
+2. `/look mode webcam`: allow **camera only** in the separate tracker window.
    Confirm the camera indicator; no website needs a camera permission.
-3. `/gaze calibrate`: maximize that window and complete the dots and the short
+3. `/look calibrate`: maximize that window and complete the dots and the short
    check. Note the plain result and whether it matched how well it followed you.
    Stay in the same posture and lighting. Try Practise and losing your face.
 4. Return to a supported Chrome page; move the pointer once in its content.
    Leave the pointer elsewhere, look at a broad region, hold Space, wait for
    Listening, and ask about “this”. Judge a roughly 3×3–4×4 region, not buttons.
-5. `/gaze tracker`: `samples` should rise, `sample_age_seconds` stay fresh,
+5. `/look diagnostics`: `samples` should rise, `sample_age_seconds` stay fresh,
    and `delivered` rise while a calibrated Chrome page has focus. Switch tabs,
    seed each once, and repeat. No old tab should acquire the new gaze highlight.
 6. Resize/zoom the page: move its pointer once again. Scroll and ask again.
    After moving, leaning back or changing camera position/glasses, recalibrate.
    Record actual successes/errors before making any accuracy or comfort claim.
-7. `/gaze mode hover`: confirm the camera indicator goes off and exact cursor
-   questions still work. `/gaze tracker stop` and `/gaze disconnect` also stop it.
+7. `/look cursor`: confirm the camera indicator goes off and exact cursor
+   questions still work. `/look stop` also detaches the companion; browser tabs stay open.
 
 ### When gaze is not fresh
 
-`/gaze tracker` includes cumulative numeric `drops` counters for this tracker
+`/look diagnostics` includes cumulative numeric `drops` counters for this tracker
 instance, retained across stop/restart. Compare two readings while the companion
 page has focus; old counts from calibration or another application are normal.
 No coordinates, features, images or calibration values are included.
@@ -222,7 +222,7 @@ No coordinates, features, images or calibration values are included.
   page-side refusal. Navigation/focus changes can interrupt a captured delivery.
 
 With a valid page anchor but no fresh delivery, the page says only
-“No fresh gaze. Check /gaze tracker.” A size change or pinch zoom gets its own
+“No fresh gaze. Check /look status.” A size change or pinch zoom gets its own
 instruction. Missing gaze still blocks talking; there is no cursor/center fallback.
 
 

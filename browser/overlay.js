@@ -2290,7 +2290,7 @@
       if (S.hold) holdEnd(true, "Recording cancelled: disconnected from Hermes.");
       else {
         cancelListening("Recording cancelled: disconnected from Hermes.");
-        coachLine("Hermes is disconnected. Run /gaze in Hermes to reconnect", 6000);
+        coachLine("Look is disconnected. Run /look in Hermes to reconnect", 6000);
       }
     }
     if (event.session_connected && !S.coach.greeted && !S.coach.rehearsed && !event.items.length) {
@@ -2444,7 +2444,7 @@
     if (reason === "no_page_anchor") return "Move the pointer once in this page to position webcam gaze.";
     if (reason === "viewport_changed") return "Page size changed. Move the pointer once in this page.";
     if (reason === "unsupported_zoom") return "Reset pinch zoom before asking with your eyes.";
-    return "No fresh gaze. Check /gaze tracker.";
+    return "No fresh gaze. Check /look status.";
   }
   function webcamViewport(screenDpr) {
     if (state.mode !== "webcam") return {drop_reason: "page_mode_mismatch"};
@@ -2522,7 +2522,7 @@
     intent.id = ++_intentSeq;
     intent.nonce = _intentNonce;
     if (typeof window.__hermesGazeIntent !== "function") {
-      coachLine("Hermes isn’t connected. Run /gaze in Hermes, then try again", 4600);
+      coachLine("Look isn’t connected. Run /look in Hermes, then try again", 4600);
       return false;
     }
     window.__hermesGazeIntent(JSON.stringify(intent));
@@ -2672,7 +2672,7 @@
 
     if (msg.type === "submit") {
       if (!msg.ok) {
-        showPlainMessage(msg.error || "Run /gaze in Hermes, then try again.");
+        showPlainMessage(msg.error || "Run /look in Hermes, then try again.");
       } else if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         if (msg.mode !== "hover" && Array.isArray(msg.ranked)) renderPins(msg.ranked);

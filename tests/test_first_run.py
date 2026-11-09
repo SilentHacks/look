@@ -1,5 +1,6 @@
-"""Passive onboarding and actionable audio failures; no devices or host bootstrap."""
+"""Look commands and actionable audio failures; no devices or host bootstrap."""
 import importlib.machinery
+import json
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,41 +40,94 @@ class FirstRunTests(unittest.TestCase):
             turns = service._VOICE_TURNS
         self.addCleanup(turns.close)
         ctx.turns = turns
-        return plugin, session, ctx, commands['gaze'], hooks
+        ctx.commands = commands
+        return plugin, session, ctx, commands['look'], hooks
 
-    def test_first_guide_prepares_without_connecting_and_reopen_does_not_rebind(self):
-        saved = {}
-        state = SimpleNamespace(get=saved.get, set=lambda key, value: saved.update({key: value}))
-        plugin, session, ctx, command, hooks = self.register(state)
+    def test_explicit_setup_prepares_without_connecting_or_replacing_binding(self):
+        plugin, session, ctx, command, hooks = self.register(None)
+        ctx.turns.bind(session_key="key", session_id="session")
+        binding = ctx.turns.binding
         with patch.object(plugin, '_handle_slash_command') as start, \
-             patch.object(cli.importlib.util, 'find_spec', return_value=object()), \
-             patch.object(voice, '_COREML_RUNNER', None):
-            guide = command('', session_id='new', session_key='key')
-            self.assertIn('Send a normal message', guide)
-            start.assert_not_called()
-            ctx.inject_message.assert_not_called()
+             patch.object(cli.importlib.util, 'find_spec', return_value=object()):
+            command('setup', session_id='session', session_key='key')
+            voice.prepare_recognition.assert_called_once()
+            self.assertIs(ctx.turns.binding, binding)
             self.assertFalse(session.cdp.is_connected)
-            self.assertTrue(saved['first_run_shown'])
-            # Guide remains explicitly available even after host readiness was observed.
-            hooks['pre_llm_call'](session_id='new', user_message='Hello')
-            self.assertNotIn('readiness is not confirmed', command('setup', session_id='new'))
             start.assert_not_called()
-            command('', session_id='new', session_key='key')
-            start.assert_called_once_with('start')
             ctx.inject_message.assert_not_called()
 
-    def test_persisted_guide_stays_quiet_after_reload_and_state_error_is_recoverable(self):
-        for state, guide_expected in (
-            (SimpleNamespace(get=lambda *a: True), False),
-            (SimpleNamespace(get=Mock(side_effect=RuntimeError('bad JSON')), set=Mock()), True),
-        ):
-            with self.subTest(guide_expected=guide_expected):
-                plugin, session, ctx, command, _ = self.register(state)
-                with patch.object(plugin, '_handle_slash_command', return_value='reconnect') as start, \
-                     patch.object(cli.importlib.util, 'find_spec', return_value=object()):
-                    result = command('')
-                    self.assertEqual('Hermes Gaze first run' in result, guide_expected)
-                    self.assertEqual(start.called, not guide_expected)
+    def test_start_and_legacy_alias_share_lifecycle_without_implicit_downloads(self):
+        from unittest.mock import PropertyMock
+        plugin, session, ctx, command, hooks = self.register(None)
+        with patch.object(plugin, '_handle_slash_command', return_value='Ready') as start, \
+             patch.object(type(session.cdp), 'is_connected', new_callable=PropertyMock, return_value=True):
+            for alias in ('look', 'gaze'):
+                for action in ('', 'start', 'connect', ' START '):
+                    ctx.commands[alias](action, session_key='key', session_id='session')
+                    self.assertTrue(ctx.turns.connected)
+                    self.assertEqual(ctx.turns.binding['session_id'], 'session')
+            self.assertEqual(start.call_count, 8)
+            voice.prepare_recognition.assert_not_called()
+            ctx.inject_message.assert_not_called()
+
+    def test_read_only_commands_do_not_steal_another_conversation(self):
+        plugin, session, ctx, command, _ = self.register(None)
+        ctx.turns.bind(session_key="key", session_id="owner")
+        binding = ctx.turns.binding
+        with patch.object(cli, 'get_shared_session', return_value=session), \
+             patch.object(session, 'is_chrome_reachable', return_value=False), \
+             patch.object(cli.importlib.util, 'find_spec', return_value=object()):
+            for action in ('status', 'tracker', 'diagnostics', 'help', 'help advanced', 'typo', 'stop extra'):
+                command(action, session_key='other', session_id='other')
+                self.assertIs(ctx.turns.binding, binding)
+
+    def test_stop_releases_resources_and_binding_but_retains_host_admission(self):
+        for alias, action in (('look', 'stop'), ('gaze', 'disconnect')):
+            with self.subTest(alias=alias, action=action):
+                plugin, session, ctx, command, _ = self.register(None)
+                ctx.turns.bind(session_key='key', session_id='owner')
+                ctx.turns.host_session, ctx.turns.host_turn = 'owner', 'active'
+                cancelled = threading.Event()
+                ctx.turns._speech_cancel = cancelled
+                stream = Mock()
+                session.microphone._stream = stream
+                session.microphone._audio.extend(b'private audio')
+                camera = Mock()
+                session.webcam = camera
+                tab = Mock()
+                session.cdp._tabs['tab'] = tab
+                server = Mock()
+                with patch.object(cli, 'get_shared_session', return_value=session), \
+                     patch.object(cli, 'get_shared_server', return_value=server):
+                    ctx.commands[alias](action, session_key='other', session_id='other')
+                self.assertFalse(ctx.turns.connected)
+                self.assertTrue(cancelled.is_set())
+                self.assertEqual(ctx.turns.host_turn, 'active')
+                self.assertEqual(ctx.turns.host_session, 'owner')
+                self.assertIsNone(session.microphone._stream)
+                self.assertEqual(session.microphone._audio, b'')
+                stream.abort.assert_called_once()
+                stream.close.assert_called_once()
+                camera.stop.assert_called_once()
+                tab.close.assert_called_once()
+                self.assertEqual(session.cdp._tabs, {})
+                server.stop.assert_called_once()
+
+    def test_raw_camera_diagnostics_are_explicit_not_ordinary_output(self):
+        session = GazeSession('http://127.0.0.1:1')
+        self.addCleanup(session.close)
+        session.tracker.mode = 'webcam'
+        status = dict(state='failed', error='PRIVATE_DIAGNOSTIC', samples=1234, calibrated=False)
+        with patch.object(cli, 'get_shared_session', return_value=session), \
+             patch.object(session, 'webcam_status', return_value=status), \
+             patch.object(session, 'is_chrome_reachable', return_value=False):
+            for action in ('status', 'tracker'):
+                result = cli._handle_slash_command(action)
+                self.assertNotIn('PRIVATE_DIAGNOSTIC', result)
+                self.assertNotIn('1234', result)
+                self.assertNotIn('{', result)
+            detailed = json.loads(cli._handle_slash_command('diagnostics'))
+            self.assertEqual(detailed['webcam'], status)
 
     def test_status_during_setup_preserves_connection_but_explicit_connect_replaces_it(self):
         from unittest.mock import PropertyMock
@@ -136,14 +190,6 @@ class FirstRunTests(unittest.TestCase):
             self.assertIn('permission', replies[-1]['plain_error'])
             self.assertNotIn('PRIVATE_DIAGNOSTIC', replies[-1]['plain_error'])
 
-    def test_chrome_launch_failure_returns_a_repair_action(self):
-        session = SimpleNamespace(cdp_http_url='http://127.0.0.1:1', is_chrome_reachable=lambda: False)
-        with patch.object(cli, 'get_shared_session', return_value=session), \
-             patch.object(cli, 'launch_chrome_with_cdp', side_effect=FileNotFoundError):
-            result = cli._handle_slash_command('start')
-        self.assertIn('/gaze setup', result)
-        self.assertIn('Applications', result)
-
     def test_stopped_camera_launch_offers_retry_not_calibration_instructions(self):
         session = GazeSession('http://127.0.0.1:1')
         self.addCleanup(session.close)
@@ -153,10 +199,7 @@ class FirstRunTests(unittest.TestCase):
                 with self.subTest(command=command):
                     result = cli._handle_slash_command(command)
                     self.assertEqual(session.tracker.mode, 'webcam')
-                    self.assertIn('Camera stopped', result)
-                    self.assertIn('Try again', result)
-                    self.assertIn('/gaze calibrate', result)
-                    self.assertNotIn('click Begin', result)
+                    self.assertNotIn('{', result)
 
     def test_busy_and_stopping_speech_refuse_capture_with_their_own_recovery(self):
         session = GazeSession('http://127.0.0.1:1')

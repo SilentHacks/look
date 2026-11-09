@@ -1,4 +1,4 @@
-# Hermes Gaze ("Telepathy")
+# Look
 
 Point or look at a page in Chrome, hold Space, wait for **Listening**, then ask.
 Hermes answers in a private card or uses guarded browser actions. Eye tracking is
@@ -58,29 +58,59 @@ plugins:
       allow_gateway_injection: true
 ```
 
-This changes Hermes's plugin-isolation policy, not just Gaze's appearance. The
-guide never changes it silently. Restart Hermes after configuration changes.
-The shell `hermes gaze` command needs in-process isolation and does **not** bind
-your interactive conversation.
+This changes Hermes's plugin-isolation policy. Restart Hermes after configuration
+changes. Shell commands need in-process isolation and do **not** bind an interactive
+conversation.
 
 In a new Hermes conversation:
 
-- Enter `/gaze` for the first-run checklist and explicit local recognition setup.
-  It discloses downloads without opening Chrome, the camera, microphone or speakers.
-  `/gaze setup` reopens it and retries preparation at any time.
-- Send a **normal first message**, such as `Reply only Ready.`, and wait for the
-  answer. The host cannot prepare a fresh conversation from a Chrome question;
-  connecting alone is not enough. No hidden warm-up message is sent for you.
-- Enter `/gaze connect` to open the separate companion Chrome. Later `/gaze`
-  reconnects without repeating the checklist.
-- Use `/gaze mode hover` for cursor mode. Open a page or enter `/gaze demo` for
-  the local practice dashboard. **Point at something. Hold Space. Wait for
-  Listening, then ask. Let go when you are done.**
+1. Send a normal first message and wait for its answer. The host cannot prepare a
+   fresh conversation from a Chrome question; no hidden warm-up turn is sent.
+2. Run `/look setup` once to prepare local speech recognition. Downloads are explicit;
+   setup never opens devices. Questions and page context still go to your Hermes model.
+3. Run `/look` (or `/look start`) to open the companion Chrome.
+   Point at something. Hold Space. Wait for **Listening**, then ask. Release to finish.
+
+### Commands
+
+|Command|Purpose|
+|---|---|
+|`/look` or `/look start`|Start/connect in Chrome|
+|`/look stop`|Stop capture, camera, read-aloud and overlay; keep browser tabs|
+|`/look status`|Current state, without diagnostic counters|
+|`/look calibrate`|Set up optional eye tracking|
+|`/look cursor`|Stop the camera and return to the pointer|
+|`/look setup`|Prepare/retry local recognition|
+|`/look diagnostics`|Technical connection, recognition, dependency and tracker details|
+|`/look diagnostics timing`|Save the recent release traces|
+|`/look help advanced`|Practice, simulation, evidence inspection and benchmarks|
+
+Stop affects the machine's shared companion, including a binding from another
+Hermes conversation. It removes input interception, revokes action/approval
+authority and pauses the inbox; retained answers remain in memory. It does not
+undo typing/navigation or cancel a Hermes turn already accepted by the host.
+Start reconnects in cursor mode; eye tracking always needs an explicit start.
+
+**Compatibility:** `/gaze` and `hermes gaze` remain aliases. `connect` means `start`,
+`disconnect` now performs the full `stop`, and `tracker stop` means `cursor`.
+`timing`, `voice`, `mode`, `resolve`, `listen`, `demo` and `benchmark` remain available.
+The plugin/install/config key is still `hermes-gaze`; Python packages, `gaze_*`
+tool schemas, caches, Chrome profile, calibration and bundled skill identifiers
+are unchanged. Existing configuration and saved calibration need no migration.
+The old first-run marker is no longer used: bare `/look` and `/gaze` always start;
+only explicit `setup` prepares downloads. Detailed tracker counters moved from
+ordinary `tracker`/`status` output to `diagnostics`.
+
+After updating the installed plugin, quit Hermes, run `hermes gateway stop`, then
+restart Hermes so its command registry and loaded code refresh. A separate installed
+copy must be updated first; editing another checkout does not update it.
+No host patch or new manifest command field is needed: slash/CLI names register
+through Hermes's public APIs. Under host isolation, shell plugin commands are unavailable.
 
 Plugin registration **never downloads models**. An already-cached CoreML model is
-checksum-verified and silently warmed in the background. The first `/gaze` guide,
-or `/gaze setup`, starts missing downloads and shows **Preparing local speech recognition**.
-Preparation can compile models; there is no fixed wait guarantee. Check `/gaze setup`
+checksum-verified and silently warmed in the background. Explicit `/look setup`
+starts missing downloads and shows **Preparing local speech recognition**.
+Preparation can compile models; there is no fixed wait guarantee. Check `/look setup`
 for **Local speech recognition is ready**; hosts supporting plugin messages
 also receive a completion notice. Space is refused with a plain explanation until
 a model is ready, without opening the microphone or waiting on preparation.
@@ -91,14 +121,14 @@ keep native Space: click ordinary page text before trying to talk. A tap scrolls
 a follow-up. Failure cards offer **Try again**, **Skip**, or **Continue with the rest**.
 
 Connected conversations use guarded browsing tools instead of raw terminal,
-code, generic browser or delegation tools. `/gaze disconnect` restores ordinary
+code, generic browser or delegation tools. `/look stop` restores ordinary
 Hermes tools. Send, Buy, Delete and similar actions need your mouse click on the
 protected review card; speech and gaze cannot approve them. Stop does not undo
 typing or navigation already performed.
 
 ### Try eyes, beta
 
-After a useful cursor answer, explicitly enter `/gaze calibrate`. It switches to
+After a useful cursor answer, explicitly enter `/look calibrate`. It switches to
 webcam mode and opens the separate local camera window. Click **Start calibration**
 (**Calibrate again** for a saved setup). Look at each dot, tap Space, and keep looking
 until it moves. After nine accepted targets, **Ready to check** waits for your
@@ -110,10 +140,10 @@ keeps running behind it. Missing/replaced pages or uncertain focus stay in recov
 **Open start page** is an explicit owned fallback, not a claim to restore the old page.
 Press **Q** before the first answer, or **Eye tracking** in an answer's footer,
 for **Use cursor** and the camera window.
-`/gaze mode webcam` opens the same flow. Move the pointer once in every page,
+`/look mode webcam` opens the same flow. Move the pointer once in every page,
 and again after zooming or resizing. Use one display, good light and broad page
 regions; recalibrate after moving or changing camera, posture or glasses.
-No real-camera population accuracy has been established. `/gaze tracker stop`
+No real-camera population accuracy has been established. `/look cursor`
 stops tracking and returns to cursor. See [webcam setup and limits](docs/WEBCAM_GAZE.md).
 
 ### Optional read aloud
@@ -122,7 +152,7 @@ Silent answers do not need speech-output assets. To download the pinned local
 Phonon voice, without playing sound, quit Hermes and run:
 
 ```bash
-hermes gaze setup-speech
+hermes look setup-speech
 ```
 
 Restart Hermes, obtain an answer and choose **Read aloud** when you want sound.
@@ -172,7 +202,7 @@ recorded immutable Git blob IDs; weight checksums come from publisher LFS metada
 | Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit recognition setup; preferred macOS backend | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39); SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub; weights CC-BY-4.0, vendored runner MIT |
 | Parakeet v2 MLX, mlx-community conversion of NVIDIA | Same explicit setup, only if CoreML unavailable on macOS | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487); SHA-256 manifest | 2.47 GB | Shared HF hub; weights CC-BY-4.0, runtime Apache-2.0 |
 | faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux, or after both macOS backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba); SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub; converted weights/runtime MIT |
-| Phonon-31M English q8, Gradium | Explicit `hermes gaze setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d); SHA-256 manifest | 65 MB | Plugin phonon cache; assets Apache-2.0, ptts MIT OR Apache-2.0 |
+| Phonon-31M English q8, Gradium | Explicit `hermes look setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d); SHA-256 manifest | 65 MB | Plugin phonon cache; assets Apache-2.0, ptts MIT OR Apache-2.0 |
 | Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7); SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache; Apache-2.0 |
 | MediaPipe Tasks Vision JS/WASM, Google npm | Explicit optional webcam start or offline developer evaluation | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32); SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 23.6 MB unpacked; compressed size unverified | Plugin webcam cache; Apache-2.0 |
 | Face Landmarker, Google storage | Same explicit optional webcam setup | [float16 version 1](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task); SHA-256 `64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff` | 3.76 MB | Plugin webcam cache; Apache-2.0 |
@@ -206,7 +236,7 @@ not been audited. The catalog entry PR must repeat these download/network disclo
 ## Daily use, updates and removal
 
 Start Hermes in your permitted terminal app; initialize each new conversation
-with a normal message, then `/gaze` to reconnect. Eyes stay an explicit step.
+with a normal message, then `/look` to reconnect. Eyes stay an explicit step.
 After a gaze-model change, recalibrate when asked; a saved profile is not proof
 of today's accuracy.
 
@@ -323,7 +353,7 @@ The companion's default endpoint is `127.0.0.1:9333`, not Hermes's browser tool.
 Never point `browser_exec`, `browser_cdp`, `BROWSER_CDP_URL`, `BU_CDP_URL`,
 `BU_CDP_WS` or Hermes `browser.cdp_url` at it. A connected companion session
 removes and vetoes arbitrary code/browser/terminal/delegation tools. Disconnect
-with `/gaze disconnect` to use the ordinary Hermes tool surface again. A raw
+with `/look stop` to use the ordinary Hermes tool surface again. A raw
 debugger can synthesize trusted clicks; that authority defeats the private card.
 
 Collection is bounded: 60 seconds/256 cursor intervals, 64 target identities, 32
@@ -382,8 +412,8 @@ plugins:
 Restart Hermes after changing plugin code or configuration, and start a new
 conversation so frozen system guidance is refreshed. Send one normal message
 first (for example, `Reply only Ready.`); the host cannot accept injected Chrome
-turns until its lazy agent is initialized. Run `/gaze` or `/gaze connect` in that
-conversation to open/attach the dedicated Chrome companion; `/gaze demo` opens
+turns until its lazy agent is initialized. Run `/look` or `/look start` in that
+conversation to open/attach the dedicated Chrome companion; `/look demo` opens
 the dashboard if wanted.
 Hold Space in Chrome, wait for **Listening**, speak and release. Native
 `sounddevice` capture opens only during talk and closes on release; switching
@@ -397,7 +427,7 @@ Refreshing cursor evidence through a tool does not interrupt that turn's answer 
 Followups without a fresh capture use conversation history without reattaching old
 evidence or changing its epoch. A connected non-deictic utterance without a target is delivered
 as plain text. After compaction, resolving again captures the current cursor, not
-the historical target. `/gaze disconnect` revokes pending and active action ownership;
+the historical target. `/look stop` revokes pending and active action ownership;
 it does not cancel a Hermes turn already accepted by the host.
 
 Release freezes browser evidence and seals PCM before transcription. Expensive
@@ -413,7 +443,7 @@ Hint persistence follows stop/reservation on the ordered intent worker. Capsule
 placement and visual design are unchanged. Cached CoreML prewarm still runs one
 silent prediction before sharing the runner; uncached preparation is explicit.
 
-`/gaze timing` works without recording opt-in or a connected browser. It retains
+`/look diagnostics timing` works without recording opt-in or a connected browser. It retains
 the last eight releases in memory: browser keyup (zero), evidence start/freeze/send;
 Python binding/worker receipt, microphone/PCM lock waits and seal, release-render
 wait/start/acknowledgement, capture resolution, inbox/approval/publication stages,
@@ -422,7 +452,7 @@ Browser and Python clocks are separate: subtract stages within their own group,
 never across groups. Missing stages have not happened (or that path was not used).
 The first UI push is a completed CDP render, not proof of a painted frame.
 No audio, transcript, page data, coordinates or browser/request identifiers enter
-the trace. `/gaze timing` explicitly saves its full JSON to a private
+the trace. `/look diagnostics timing` explicitly saves its full JSON to a private
 `~/.cache/hermes-gaze/release-timing.json` file and prints its path with a short
 summary; it is never sent to Chrome/model providers.
 
@@ -560,7 +590,7 @@ compressed bytes as PCM.
 
 ### Offline read-aloud setup
 
-Run `hermes gaze setup-speech` from your permitted terminal app after installing
+Run `hermes look setup-speech` from your permitted terminal app after installing
 and enabling the plugin through Hermes PM. It downloads the pinned q8 model
 (approximately 65 MB) and Russell embedding without opening an audio device.
 This shell command needs in-process plugin isolation, as does the companion.
@@ -569,7 +599,7 @@ Hermes environment's Python; that script does not import Hermes.
 Setup and Hermes must use the same OS user/cache root. Restart Hermes afterward.
 
 The plugin setting `tts_voice` defaults to `Russell`. To change it, first run
-`HERMES_DISABLE_LAZY_INSTALLS=1 hermes gaze setup-speech --voice NAME`, then set
+`HERMES_DISABLE_LAZY_INSTALLS=1 hermes look setup-speech --voice NAME`, then set
 `tts_voice: NAME` in the existing plugin config. Only downloaded English catalogue
 voices are available. No model setting, hosted TTS, cloning or prewarm is needed.
 Model revision: `8c64b55ec301728e2d1695bfea87a08a267d0c2d`;
@@ -580,12 +610,12 @@ established as cleared for publishing in a demo video.
 
 Hands-on audible check (user only):
 
-1. Connect with `/gaze connect`, obtain an answer, choose **Read aloud**. Confirm
+1. Connect with `/look`, obtain an answer, choose **Read aloud**. Confirm
    the card says **Reading with Phonon · Russell** and the voice is Russell.
 2. Start a long answer, stop it, then read another answer. Confirm immediate silence
    on Stop and no overlap, old words or stale reading state on replacement.
 3. Start again and press Esc. Confirm speech stops and the card dismisses.
-4. During speech enter `/gaze disconnect`. Confirm silence; reconnect and read again.
+4. During speech enter `/look stop`. Confirm silence; reconnect and read again.
 5. Enable automatic reading; complete a new answer. Confirm it reads once, not while
    streaming. Disable it and confirm the next completed answer remains silent.
 6. Start talking while an answer is reading. Speech closes before the microphone
@@ -630,17 +660,17 @@ The first-run route is above; simulated gaze and benchmarks are development
 tools, not steps a newcomer needs for a first answer.
 
 ```text
-/gaze setup                Prepare pinned local recognition and show readiness
-/gaze demo                 Open the local dashboard in the companion
-/gaze mode simulated       Explore noisy-gaze simulation
-/gaze tracker              Inspect eye-tracking state
-/gaze benchmark            Run the simulated accuracy benchmark
+/look setup                Prepare pinned local recognition and show readiness
+/look demo                 Open the local dashboard in the companion
+/look mode simulated       Explore noisy-gaze simulation
+/look diagnostics          Inspect technical eye-tracking state
+/look benchmark            Run the simulated accuracy benchmark
 ```
 
 ```bash
 # from the shell
-hermes gaze demo
-hermes gaze benchmark
+hermes look demo
+hermes look benchmark
 python3 -m unittest discover -s tests -t .  # full suite; no Chrome needed
 ```
 

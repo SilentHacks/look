@@ -144,7 +144,7 @@ def recognition_status(model_name=_DEFAULT_MODEL):
         return "Preparing local speech recognition. You can type with Right Option while you wait."
     if _PREPARATION_ERROR:
         return _PREPARATION_ERROR
-    return "Local speech recognition is not ready. Run /gaze setup; use Right Option to type."
+    return "Local speech recognition is not ready. Run /look setup; use Right Option to type."
 
 
 def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
@@ -176,7 +176,7 @@ def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
         except Exception as exc:
             _PREPARATION_ERROR = (str(exc) if isinstance(exc, AssetIntegrityError) or model_name not in WHISPER else
                                   "Local speech recognition could not prepare. Check internet, disk space and "
-                                  "dependencies, then run /gaze setup. Use Right Option to type.")
+                                  "dependencies, then run /look setup. Use Right Option to type.")
             logger.warning("Speech recognition preparation stopped: %s", exc)
         finally:
             _PREPARING = False

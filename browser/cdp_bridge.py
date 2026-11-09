@@ -210,7 +210,7 @@ class CdpSession:
             except Exception:
                 pass
             loop.call_soon_threadsafe(loop.stop)
-        self._handler_pool.shutdown(wait=False)
+        self._handler_pool.shutdown(wait=False, cancel_futures=True)
         if thread is not None and thread.is_alive():
             thread.join(timeout=2.0)
 
@@ -503,7 +503,7 @@ class CdpSession:
 
     def _dispatch_intent(self, payload: Any) -> None:
         handler = self._intent_handler
-        if handler is None:
+        if handler is None or self._closed:
             return
         try:
             intent = json.loads(payload)
@@ -537,13 +537,17 @@ class CdpSession:
                 logger.debug("onIntentResult reply failed: %s", exc)
 
         def run() -> None:
+            if self._closed or self._context_unique_id != context_id:
+                return
             try:
                 handler(intent, reply)
             except Exception as exc:
                 logger.warning("intent handler raised: %s", exc)
                 reply({"ok": False, "error": str(exc)})
 
-        self._handler_pool.submit(run)
+        with self._state_lock:
+            if not self._closed:
+                self._handler_pool.submit(run)
 
     # -- request/response --
 
@@ -762,7 +766,7 @@ class GazeSession:
         def return_to_browser(start_page, valid):
             owned = lambda: valid() and connected()
             if not owned():
-                return {"ok": False, "error": "Setup connection changed. Run /gaze calibrate in Hermes again."}
+                return {"ok": False, "error": "Setup connection changed. Run /look calibrate in Hermes again."}
             owner = self._cdp.open_start_page(owned) if start_page else destination
             return self._cdp.return_to_document(owner, owned)
         def rehearsed():
@@ -974,10 +978,12 @@ class GazeSession:
 
     def close(self) -> None:
         TIMINGS.stop()
+        self.tasks.stop()
+        # Remove the input source first. A start already inside the microphone lock
+        # is then cancelled below; a later start sees its captured tab is closed.
+        self._cdp.close()
         self.microphone.cancel()
         self.stop_webcam()
-        self.tasks.stop()
-        self._cdp.close()
 
 
 @lazy_singleton

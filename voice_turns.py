@@ -84,18 +84,18 @@ class VoiceTurns:
     def bind(self, raw_args="", *, session_key="", session_id="", platform="", **_) -> str:
         with self.lock:
             if self.closed:
-                return "Gaze is unloaded. Reload the plugin before connecting."
+                return "Look is unloaded. Restart Hermes before connecting."
             action = raw_args.strip().lower()
             if action == "status":
-                return "Chrome voice connected." if self.connected else "Run /gaze connect."
+                return "Look is connected." if self.connected else "Run /look start."
             if action not in ("", "connect", "disconnect", "stop"):
-                return "Usage: /gaze connect | disconnect | status"
+                return "Usage: /look start | stop | status"
             if not session_key or not session_id:
-                return "Run /gaze connect in a live Hermes TUI or desktop session."
+                return "Run /look start in a live Hermes conversation."
             if action in ("disconnect", "stop"):
                 if self.binding and self.binding["session_id"] == session_id:
                     self._disconnect()
-                return "Chrome voice disconnected from this session."
+                return "Look disconnected from this conversation."
             if self.owner_session and self.owner_session != session_id:
                 self._disconnect()
                 self.items.clear()
@@ -106,7 +106,7 @@ class VoiceTurns:
             self.owner_session = session_id
             self.binding = dict(session_key=session_key, session_id=session_id, platform=platform)
             self.publish()
-            return "Chrome voice connected. Speak or submit in Chrome."
+            return "Look is connected."
 
     def capture_status(self, status):
         with self.lock:
@@ -237,7 +237,7 @@ class VoiceTurns:
             if timing is not None:
                 timing.mark("inbox_lock_acquired")
             if not self.connected:
-                return {"ok": False, "fallback_allowed": True, "error": "Run /gaze connect."}
+                return {"ok": False, "fallback_allowed": True, "error": "Run /look start."}
             if len(self.pending) >= self.MAX_PENDING:
                 return {"ok": False, "error": "Inbox full: eight questions are waiting."}
             self._moved_on()
@@ -498,7 +498,7 @@ class VoiceTurns:
                 return {"ok": True}
             if action in ("speak", "auto_speak"):
                 if not self.connected:
-                    return {"ok": False, "error": "Reconnect with /gaze connect before speaking"}
+                    return {"ok": False, "error": "Run /look start before speaking"}
                 if action == "auto_speak":
                     self.auto_speak = not self.auto_speak
                     self.publish()
@@ -515,7 +515,7 @@ class VoiceTurns:
                 self.publish()
                 return result
             if action in ("retry", "resume") and not self.connected:
-                return {"ok": False, "error": "Reconnect with /gaze connect before resuming"}
+                return {"ok": False, "error": "Run /look start before resuming"}
             item = self._item(item_id)
             if action == "select" and item:
                 for run in self.runs:

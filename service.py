@@ -428,7 +428,7 @@ def submit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     if not delivery.get("fallback_allowed") or not snapshot.get("ok"):
         return {**delivery, "delivery": "unavailable"}
     notice = (str(delivery.get("error") or "No Hermes session connected") +
-              ". Run /gaze in your Hermes TUI/desktop session to connect. "
+              ". Run /look in your Hermes conversation to connect. "
               "One-shot questions only: no conversation follow-ups or actions.")
     if classify_utterance_intent(snapshot["utterance"]) != "read_only":
         return {"ok": False, "error": notice, "delivery": "unavailable"}
@@ -505,7 +505,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                 session.webcam.calibrate()
                 reply({"ok": True})
             else:
-                reply({"ok": False, "error": "Camera window is unavailable. Run /gaze calibrate in Hermes."})
+                reply({"ok": False, "error": "Camera window is unavailable. Run /look calibrate in Hermes."})
             return
         if itype == "show_source":
             reply(_show_source(session, str(intent.get("item_id") or ""), intent.get("_browser_target")))

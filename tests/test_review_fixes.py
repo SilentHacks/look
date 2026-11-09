@@ -100,6 +100,28 @@ class TestSessionLifecycle(unittest.TestCase):
         self.assertTrue(cdp._thread is not None and cdp._thread.is_alive())
         cdp.close()
 
+    def test_close_discards_queued_capture_intents(self) -> None:
+        """An old record_start cannot open the microphone after Stop returns."""
+        import json
+        import threading
+        cdp = CdpSession("http://127.0.0.1:1")
+        release, entered = threading.Event(), threading.Event()
+        handler = mock.Mock()
+        cdp.set_intent_handler(handler)
+        def block():
+            entered.set()
+            release.wait(2)
+        running = cdp._handler_pool.submit(block)
+        self.assertTrue(entered.wait(1))
+        try:
+            cdp._dispatch_intent(json.dumps({"type": "record_start"}))
+            cdp.close()
+        finally:
+            release.set()
+            running.result(2)
+            cdp._handler_pool.shutdown(wait=True)
+        handler.assert_not_called()
+
     def test_configure_is_store_only_when_disconnected(self) -> None:
         """configure() never connects/injects — safe to call during plugin register()."""
         session = GazeSession(cdp_http_url="http://127.0.0.1:1")

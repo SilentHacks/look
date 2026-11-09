@@ -90,7 +90,7 @@ def plain_error(status: str, error: str) -> str:
     if "downloaded speech file changed" in lower:
         return "A downloaded speech file changed. Preparation stopped; do not use this cache."
     if "speech recognition is not ready" in lower or "preparing local speech recognition" in lower:
-        return "Local speech recognition is not ready. Run /gaze setup; use Right Option to type."
+        return "Local speech recognition is not ready. Run /look setup; use Right Option to type."
     if "speech model" in lower:
         return "Speech model unavailable. Check internet and disk space; restart Hermes."
     if any(word in lower for word in ("transcri", "recognition", "whisper", "parakeet", "asr")):

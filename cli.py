@@ -1,13 +1,12 @@
-"""Slash-command (`/gaze`) and `hermes gaze` CLI subcommand wiring for hermes-gaze."""
-
+"""Look slash commands and shell diagnostics; internal Gaze identifiers stay stable."""
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import json
 import os
-import time
 import platform
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,81 +18,102 @@ from .server import get_shared_server
 from .tools import handle_gaze_resolve
 
 
+HELP = """/look · /look start     Start in Chrome
+/look stop              Stop Look; keep browser tabs
+/look status            Show current state
+/look calibrate         Set up eye tracking
+/look cursor            Turn off the camera; use the pointer
+/look setup             Prepare local speech recognition
+/look diagnostics       Show technical details
+/look help advanced     More commands"""
+
+ADVANCED_HELP = """/look demo                         Open the practice dashboard
+/look mode hover|simulated|webcam    Choose pointing source
+/look tracker [stop]                Eye tracking state, or return to cursor
+/look resolve <question>            Inspect captured evidence
+/look listen                       Record and resolve a short question
+/look benchmark                    Run the simulated benchmark
+/look diagnostics timing           Save recent release traces
+/gaze remains an alias for /look. connect=start; disconnect=stop; voice=listen; timing=diagnostics timing.
+Shell: hermes look status|diagnostics|setup-speech|demo|resolve|listen|benchmark.
+Start and stop inside Hermes; shell commands do not bind or stop a running conversation."""
+
+
 def _config() -> GazeConfig:
     return service._CONFIG or GazeConfig()
 
 
 def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
-    """Explicit setup: disclose ASR downloads; never connect or open a device."""
+    """Explicit downloads only; never connect or open a device."""
     from . import voice
 
-    supported = platform.system() == "Darwin" and platform.machine() == "arm64"
-    chrome = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file()
-    modules = ("websockets", "numpy", "sounddevice", "faster_whisper", "parakeet_mlx", "CoreML",
-               "ptts", "huggingface_hub")
-    missing = [name for name in modules if importlib.util.find_spec(name) is None]
-    model_name = _config().whisper_model
-    disclosure = (
-        "Speech recognition setup uses Hugging Face: FluidInference Parakeet v2 CoreML (~465 MB) first on Mac; "
-        "if unavailable, mlx-community Parakeet v2 (~2.47 GB), then SYSTRAN faster-whisper "
-        f"({model_name}, ~78.1 MB for tiny.en or ~148 MB for base.en). "
-        "Only missing pinned files download; cached files are checksum-verified. "
-        "Preparation can compile local models. No download runs at plugin registration.")
-    voice.prepare_recognition(model_name, report=report)
-    recognition = voice.recognition_status(model_name)
-    return "\n".join((
-        "Hermes Gaze first run",
-        "Mac: Apple Silicon is supported." if supported else
-        "Mac: use an Apple Silicon Mac for this beta.",
-        "Chrome: standard Google Chrome is installed." if chrome else
-        "Chrome: install Google Chrome in Applications, then run /gaze setup again.",
-        "Dependencies: Python packages are present; this does not test audio devices." if not missing else
-        "Dependencies: missing " + ", ".join(missing) + ". Quit Hermes, run hermes gateway stop, then "
-        "hermes pm install and hermes plugins enable hermes-gaze in your terminal and restart Hermes.",
-        disclosure,
-        recognition,
-        "Connection: Chrome is attached." if session.cdp.is_connected else
-        "Connection: Chrome is not attached. Run /gaze connect when you are ready to open the companion.",
-        "Hermes has received a normal message in this conversation." if initialized else
-        "Hermes readiness is not confirmed. Send a normal message here, such as Reply only Ready. "
-        "Wait for its answer, then run /gaze connect. Connecting alone cannot prepare a fresh conversation.",
-        "Before connecting, set plugins.isolation to in_process and "
-        "plugins.entries.hermes-gaze.allow_gateway_injection to true in Hermes config.yaml. "
-        "Before updating or reloading the plugin, quit Hermes and run hermes gateway stop, then restart Hermes. "
-        "Hermes runs a background gateway that keeps old code loaded even after the terminal closes. "
-        "The guide never changes configuration or stops the gateway for you.",
-        "Launch Hermes from Terminal or another terminal app allowed in macOS System Settings, "
-        "Privacy & Security, Microphone and Camera. Camera is only needed for eyes. "
-        "Restart that app after changing permissions. Do not use T3 Code's terminal for camera setup.",
-        "Your question and captured page context go to the model configured in Hermes and can stay in Hermes history. "
-        "Local camera and speech recognition do not make the whole conversation local. "
-        "Optional TypeSafe highlighting also receives your question and scope descriptions when configured; "
-        "extra page text is off by default.",
-        "Failed speech can remain in memory for retry until the plugin exits. "
-        "A recognition fallback uses a temporary audio file, normally deleted afterward; "
-        "a crash or failed deletion can leave it in the system temporary folder.",
-        "Connected conversations use guarded browsing tools. /gaze disconnect restores ordinary Hermes tools.",
-        "First cursor question: run /gaze mode hover after connecting. Open a page, or /gaze demo for practice. "
-        "Point at something. Hold Space. Wait for Listening, then ask. Let go when you are done.",
-        "Text fields and keyboard-focused page controls keep Space. Click ordinary page text first. "
-        "A tap scrolls. Right Option opens typed questions without a microphone. "
-        "Q recalls answers; Esc stops or dismisses; hold Space on an answer to follow up.",
-        "Then try eye tracking, beta: /gaze calibrate switches to webcam mode and opens the separate camera window. "
-        "Click Start calibration (Calibrate again for a saved setup), then follow the dots, check and practice before asking with your eyes. "
-        "Use one display and English; move the pointer once in each page and after resizing or zooming. "
-        "Broad areas only, not precise controls. /gaze tracker stop returns to cursor.",
-        "Read aloud is optional: quit Hermes and run hermes gaze setup-speech in your terminal to download "
-        "the local voice without playing sound, then restart Hermes. Automatic reading starts off.",
-        "No camera, microphone or sound was started by this guide. Check readiness again with /gaze setup.",
-    ))
+    lines = ["Local speech setup may download ~465 MB on Mac (fallbacks up to 2.47 GB). No devices open."]
+    if platform.system() != "Darwin" or platform.machine() != "arm64":
+        lines.append("This beta supports Apple Silicon Mac.")
+    if not Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file():
+        lines.append("Install Google Chrome in Applications.")
+    if _missing_modules():
+        lines.append("Dependencies missing. Quit Hermes; run hermes pm install and "
+                     "hermes plugins enable hermes-gaze, then restart Hermes.")
+    voice.prepare_recognition(_config().whisper_model, report=report)
+    lines.append(voice.recognition_status(_config().whisper_model))
+    if not initialized:
+        lines.append("Send a normal message in Hermes and wait for its answer, then /look start.")
+    elif not session.cdp.is_connected:
+        lines.append("Next: /look start.")
+    lines.append("Questions and page context go to your Hermes model and may stay in history.")
+    lines.append("/look help for commands; /look diagnostics for troubleshooting.")
+    return "\n".join(lines)
+
+
+def _missing_modules() -> list[str]:
+    modules = ["websockets", "numpy", "sounddevice", "faster_whisper", "ptts", "huggingface_hub"]
+    if platform.system() == "Darwin":
+        modules.extend(("parakeet_mlx", "CoreML"))
+    return [name for name in modules if importlib.util.find_spec(name) is None]
+
+
+def _tracker_summary(session) -> str:
+    status = session.webcam_status()
+    state = status["state"]
+    if state in ("failed", "stopped", "stopping"):
+        if status.get("error") or state == "failed":
+            return "Camera unavailable. Try /look calibrate again; /look diagnostics has details."
+        return "Camera stopped. Try /look calibrate for eye tracking."
+    if state == "starting":
+        return "Camera is starting. Continue in the camera window."
+    if not status.get("calibrated") or status.get("calibration_message"):
+        return "Eye tracking needs calibration. Continue in the camera window."
+    return "Eye tracking is on."
 
 
 def _handle_slash_command(raw_args: str) -> str:
     argv = (raw_args or "").strip().split()
-    sub = argv[0].lower() if argv else "status"
+    sub = argv[0].lower() if argv else "start"
+    tail = [arg.lower() for arg in argv[1:]]
+    if sub in ("help", "--help", "-h"):
+        return ADVANCED_HELP if tail == ["advanced"] else HELP
     session = get_shared_session()
 
-    if sub == "timing":
+    if sub == "diagnostics":
+        if tail == ["timing"]:
+            return _handle_slash_command("timing")
+        if tail:
+            return "Usage: /look diagnostics [timing]"
+        from . import voice
+        return json.dumps({
+            "chrome_connected": session.cdp.is_connected,
+            "chrome_reachable": session.is_chrome_reachable(),
+            "mode": session.tracker.mode,
+            "sigma_px": session.tracker.sigma_px,
+            "drift_offset": session.recalibrator.offset,
+            "webcam": session.webcam_status(),
+            "recognition": voice.recognition_status(_config().whisper_model),
+            "missing_dependencies": _missing_modules(),
+            "supported_mac": platform.system() == "Darwin" and platform.machine() == "arm64",
+        }, indent=2)
+
+    if sub == "timing" and not tail:
         from .release_timing import TIMINGS
         snapshot = TIMINGS.snapshot()
         path = Path.home() / ".cache" / "hermes-gaze" / "release-timing.json"
@@ -107,14 +127,15 @@ def _handle_slash_command(raw_args: str) -> str:
             lines.append(f"turn {turn['turn']}: max gap {turn['heartbeat_max_gap_ms']}ms{slow}")
         return "\n".join(lines)
 
-    if sub == "start":
+    if sub in ("start", "connect") and not tail:
+        get_shared_server().start()
         if not session.is_chrome_reachable():
             port = urlparse(session.cdp_http_url).port or 9333
             try:
                 launch_chrome_with_cdp("about:blank", port=port)
             except OSError:
                 return ("Chrome could not start. Install Google Chrome in Applications, "
-                        "then run /gaze connect again. Use /gaze setup to check readiness.")
+                        "then /look start. /look setup checks readiness.")
             for _ in range(40):
                 if session.is_chrome_reachable():
                     break
@@ -126,107 +147,95 @@ def _handle_slash_command(raw_args: str) -> str:
                 ready = session.ensure_overlay()
             except OSError:
                 pass
-        return ("Chrome companion ready. Hold Space; wait for Listening, then speak."
-                if ready else "Chrome could not attach. Open an ordinary page in the companion, then run /gaze connect again.")
+        return ("Look is ready in Chrome. Hold Space; wait for Listening, then speak."
+                if ready else "Chrome could not attach. Open an ordinary page in the companion, then /look start.")
 
-    if sub == "demo":
+    if sub in ("stop", "disconnect") and not tail:
+        # Detach every overlay and its input handlers, not just the voice binding.
+        session.close()
+        session.configure(mode="hover")
+        get_shared_server().stop()
+        return "Look stopped. Browser tabs are still open."
+
+    if sub == "status" and not tail:
+        if not session.cdp.is_connected:
+            return "Look is stopped. /look start to begin."
+        if session.tracker.mode == "webcam":
+            return _tracker_summary(session)
+        return "Look is on. " + ("Using the pointer." if session.tracker.mode == "hover" else "Using simulated gaze.")
+
+    if sub == "demo" and not tail:
         cfg = _config()
         server = get_shared_server()
         server.start()
         url = f"http://{server.host}:{server.port}/"
-        if not session.is_chrome_reachable():
-            port = urlparse(session.cdp_http_url).port or 9333
-            launch_chrome_with_cdp(url, port=port)
-            for _ in range(20):
-                if session.is_chrome_reachable():
-                    break
-                time.sleep(0.25)
-        session.configure(
-            mode=session.tracker.mode,
-            sigma_px=session.tracker.sigma_px,
-            dwell_ms=cfg.dwell_ms,
-            wiggle_trigger=cfg.wiggle_trigger,
-            hotkey=cfg.hotkey,
-            candidate_radius_px=380,
-        )
-        # configure() is store-only when disconnected — explicitly connect + inject here.
-        # Chrome's first run on a fresh profile can take >5s to expose /json —
-        # retry briefly instead of reporting success on a silent miss.
+        try:
+            if not session.is_chrome_reachable():
+                port = urlparse(session.cdp_http_url).port or 9333
+                launch_chrome_with_cdp(url, port=port)
+                for _ in range(20):
+                    if session.is_chrome_reachable():
+                        break
+                    time.sleep(0.25)
+            else:
+                session.cdp.open_url(url)
+        except OSError:
+            return "Practice page could not open. /look diagnostics has connection details."
+        session.configure(mode=session.tracker.mode, sigma_px=session.tracker.sigma_px,
+                          dwell_ms=cfg.dwell_ms, wiggle_trigger=cfg.wiggle_trigger,
+                          hotkey=cfg.hotkey, candidate_radius_px=380)
         for _ in range(12):
             if session.ensure_overlay():
-                return f"Launched the companion Chrome and injected Hermes Gaze on {url}"
+                return f"Practice page ready: {url}"
             time.sleep(0.5)
-        return (
-            f"Chrome launched on {url} but the overlay failed to inject — "
-            "Companion CDP unreachable or no page tab. Check `hermes gaze status` and Chrome."
-        )
+        return "Practice page could not attach. /look diagnostics has connection details."
 
-    if sub == "calibrate" or (sub == "mode" and len(argv) >= 2):
-        mode = "webcam" if sub == "calibrate" else argv[1].lower()
+    if (sub == "calibrate" and not tail) or sub == "mode" and len(tail) == 1:
+        mode = "webcam" if sub == "calibrate" else tail[0]
         if mode not in ("hover", "simulated", "webcam"):
-            return "Usage: /gaze mode {hover|simulated|webcam}"
+            return "Usage: /look mode hover|simulated|webcam"
         session.configure(mode=mode)
         if mode != "webcam":
-            return f"Hermes Gaze mode set to '{mode}' (sigma={session.tracker.sigma_px}px)."
+            return "Using the pointer. Camera off." if mode == "hover" else "Using simulated gaze. Camera off."
         status = session.start_webcam()
         if status["state"] in ("running", "failed"):
             status = session.webcam.calibrate()
         if status["state"] == "running":
-            guidance = ("In the webcam window, click Start calibration (Calibrate again for a saved setup). "
-                        "Look at each dot, tap Space and keep looking, then follow the check and practice.")
-        elif status["state"] == "starting":
-            guidance = "Camera is still starting. Check /gaze tracker; if it stops, try again with /gaze calibrate."
-        else:
-            guidance = "Camera stopped or could not start. Try again in the camera window, or run /gaze calibrate."
-        return json.dumps(status) + "\n" + guidance
+            return "Continue in the camera window."
+        if status["state"] == "starting":
+            return "Camera is starting. Continue in the camera window."
+        return "Camera stopped or could not start. Try /look calibrate again; /look diagnostics has details."
 
-    if sub == "tracker":
-        if len(argv) > 1 and argv[1] == "stop":
-            session.configure(mode="hover")
-        return json.dumps(session.webcam_status())
-
-    if sub == "benchmark":
+    if sub == "cursor" and not tail or sub == "tracker" and tail == ["stop"]:
+        session.configure(mode="hover")
+        return "Using the pointer. Camera off."
+    if sub == "tracker" and not tail:
+        return _tracker_summary(session)
+    if sub == "benchmark" and not tail:
         return format_benchmark_markdown(run_benchmark_suite(trials_per_sigma=60))
-
     if sub == "resolve":
-        utt = " ".join(argv[1:]) or "What happens if I press this?"
-        return handle_gaze_resolve({"utterance": utt})
-
-    if sub in ("listen", "voice"):
+        return handle_gaze_resolve({"utterance": " ".join(argv[1:]) or "What happens if I press this?"})
+    if sub in ("listen", "voice") and not tail:
         return handle_gaze_resolve({"record_voice": True, "duration_s": 2.8})
-
-    return (
-        "Hermes Gaze ('Telepathy') Status:\n"
-        f"  Chrome companion Connected   : {session.is_chrome_reachable()}\n"
-        f"  Active Pointing Mode         : {session.tracker.mode} (sigma={session.tracker.sigma_px}px)\n"
-        f"  Online Drift Bias Offset     : {session.recalibrator.offset}\n\n"
-        f"  Webcam Tracker               : {json.dumps(session.webcam_status())}\n"
-        "Subcommands:\n"
-        "  /gaze demo                   Launch Chrome on the interactive Analytics Dashboard demo page\n"
-        "  /gaze listen                 Listen from microphone, transcribe speech, and resolve in Chrome\n"
-        "  /gaze mode <hover|simulated|webcam> Choose cursor, simulated noise or real webcam\n"
-        "  /gaze calibrate              Open the owned nine-point webcam calibration window\n"
-        "  /gaze tracker [stop]         Show tracker status, or stop camera and return to cursor\n"
-        "  /gaze timing                 Show last eight release traces (monotonic milliseconds only)\n"
-        "  /gaze resolve <utterance>    Resolve a deictic phrase against the live Chrome tab\n"
-        "  /gaze benchmark              Run quantitative accuracy benchmark across noise levels"
-    )
+    return "Unknown command or option. /look help shows commands; /look help advanced shows more."
 
 
 def _setup_cli(subparser: argparse.ArgumentParser) -> None:
     subs = subparser.add_subparsers(dest="gaze_subcommand")
-    subs.add_parser("status", help="Show Chrome CDP connection and tracker status")
-    p_speech = subs.add_parser("setup-speech", help="Download pinned offline Phonon model and voice (no audio devices)")
+    subs.add_parser("status", help="Check whether companion Chrome is available")
+    p_diag = subs.add_parser("diagnostics", help="Show technical details")
+    p_diag.add_argument("detail", nargs="?", choices=("timing",))
+    p_speech = subs.add_parser("setup-speech", help="Download the offline voice without playing audio")
     p_speech.add_argument("--voice", default="Russell", help="English catalogue voice name")
-    p_demo = subs.add_parser("demo", help="Launch the companion Chrome with the interactive Analytics & Comparison demo page")
+    p_demo = subs.add_parser("demo", help="Open the practice dashboard")
     p_demo.add_argument("--mode", choices=("hover", "simulated"), default="hover")
-    p_listen = subs.add_parser("listen", help="Record speech from microphone, transcribe with faster-whisper, and resolve in Chrome")
+    p_listen = subs.add_parser("listen", help="Record, transcribe and resolve a short question")
     p_listen.add_argument("--duration", type=float, default=2.8, help="Recording duration in seconds")
     subs.add_parser("voice", parents=[p_listen], add_help=False, help="Alias for listen")
-    p_bench = subs.add_parser("benchmark", help="Run quantitative accuracy benchmark across noise levels")
+    p_bench = subs.add_parser("benchmark", help="Run the simulated benchmark")
     p_bench.add_argument("--trials", type=int, default=60)
-    p_res = subs.add_parser("resolve", help="Resolve a deictic utterance against the active Chrome tab")
-    p_res.add_argument("utterance", nargs="+", help="Utterance such as 'What happens if I press this?'")
+    p_res = subs.add_parser("resolve", help="Inspect captured evidence")
+    p_res.add_argument("utterance", nargs="+", help="Question about the active Chrome tab")
     subparser.set_defaults(func=_run_cli)
 
 
@@ -237,22 +246,24 @@ def _run_cli(args: argparse.Namespace) -> int:
         setup(args.voice)
         return 0
     if sub == "demo":
-        session = get_shared_session()
-        session.tracker.mode = args.mode
+        get_shared_session().configure(mode=args.mode)
         print(_handle_slash_command("demo"))
         return 0
     if sub in ("listen", "voice"):
         dur = float(getattr(args, "duration", 2.8))
-        print(f"🎙️ Listening from default microphone for {dur}s...")
-        res = handle_gaze_resolve({"record_voice": True, "duration_s": dur})
-        print(res)
+        print(f"Listening for {dur:g} seconds…")
+        print(handle_gaze_resolve({"record_voice": True, "duration_s": dur}))
         return 0
     if sub == "benchmark":
         print(format_benchmark_markdown(run_benchmark_suite(trials_per_sigma=args.trials)))
         return 0
     if sub == "resolve":
-        utt = " ".join(args.utterance)
-        print(handle_gaze_resolve({"utterance": utt}))
+        print(handle_gaze_resolve({"utterance": " ".join(args.utterance)}))
         return 0
-    print(_handle_slash_command("status"))
+    if sub == "diagnostics":
+        print(_handle_slash_command("diagnostics " + (args.detail or "")))
+        return 0
+    available = get_shared_session().is_chrome_reachable()
+    print("Companion Chrome is available. Use /look status in Hermes for the active session."
+          if available else "Companion Chrome is unavailable. Use /look start in Hermes.")
     return 0

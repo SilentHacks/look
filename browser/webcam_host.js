@@ -90,7 +90,7 @@
     @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) { :root { --fill:rgb(44,44,47); }
       body.focus { --fill:rgb(250,250,252); } }`;
   document.head.append(style);
-  document.title = "Hermes Gaze";
+  document.title = "Look";
   const rail = make("div", "", "rail"), stageName = make("strong"), count = make("span"); count.id = "progress"; count.setAttribute("role", "status"); rail.append(stageName, count);
   const cancel = make("button", "Cancel"); cancel.id = "cancel"; cancel.dataset.action = "cancel"; cancel.addEventListener("click", e => act("cancel", e));
   const main = make("main");

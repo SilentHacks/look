@@ -1,9 +1,9 @@
-"""Hermes Gaze ("Telepathy") — Multimodal Deictic Reference Resolution for Chrome & Hermes Agent.
+"""Look — private browser evidence and guarded actions for Chrome and Hermes.
 
 Registers:
 - 14 tools, including bounded browser structure and guarded general actions.
 - Session-bound voice context, streaming answer hooks, and turn lifecycle hooks.
-- In-session slash command ``/gaze`` and CLI subcommand ``hermes gaze``
+- In-session ``/look`` and CLI ``hermes look`` (``gaze`` compatibility aliases)
 - Bundled skill ``gaze-telepathy``
 
 Transport: ONE persistent CDP websocket per pinned Chrome tab; the overlay ->
@@ -83,7 +83,7 @@ def register(ctx: Any) -> None:
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
 
-    # Warm only verified cached CoreML assets; fetching requires explicit /gaze setup.
+    # Warm only verified cached CoreML assets; fetching requires explicit /look setup.
     from .voice import prewarm
 
     prewarm()
@@ -105,7 +105,6 @@ def register(ctx: Any) -> None:
     service.set_voice_turns(turns)
     answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
     initialized_sessions: set[str] = set()
-    guide_shown = False
 
     def pre_llm_call(**kwargs: Any) -> Any:
         if kwargs.get("session_id"):
@@ -138,47 +137,55 @@ def register(ctx: Any) -> None:
                                            body if body is not None else kwargs.get("assistant_response", ""))
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
-        nonlocal guide_shown
-        command = raw_args.strip().lower()
-        state = getattr(ctx, "state", None)
-        if command == "" and not guide_shown and state is not None:
-            try:
-                guide_shown = state.get("first_run_shown", False) is True
-            except (OSError, RuntimeError):
-                logger.debug("Could not read first-run guide state", exc_info=True)
-        if command == "setup" or command == "" and not guide_shown:
-            # Completion posts use the command's captured public session context.
-            # Hosts without plugin messages can read readiness with /gaze setup.
+        command = " ".join(raw_args.strip().lower().split())
+        initialized = kwargs.get("session_id") in initialized_sessions
+        if command == "setup":
             post = getattr(ctx, "post_message", None)
             context = copy_context()
             report = (lambda text: context.run(post, text)) if callable(post) else None
-            result = _first_run_guide(session, initialized=kwargs.get("session_id") in initialized_sessions,
-                                      report=report)
-            guide_shown = True
-            if state is not None:
-                try:
-                    state.set("first_run_shown", True)
-                except (OSError, RuntimeError):
-                    logger.debug("Could not save first-run guide state", exc_info=True)
+            return _first_run_guide(session, initialized=initialized, report=report)
+        if command in ("stop", "disconnect"):
+            # Resources are machine-scoped, so Stop also releases another session's binding.
+            # Keep host admission ownership until its real terminal hook arrives.
+            with turns.lock:
+                turns._disconnect()
+                speech_worker = turns._speech_thread
+            result = _handle_slash_command("stop")
+            if speech_worker is not None:
+                speech_worker.join(1)
+                if speech_worker.is_alive():
+                    result += "\nRead aloud is still stopping."
             return result
-        if raw_args.strip() in ("", "connect", "start"):
+        if command in ("", "connect", "start"):
+            if not kwargs.get("session_id") or not kwargs.get("session_key"):
+                return "Run /look start in a live Hermes conversation."
             result = _handle_slash_command("start")
             if not session.cdp.is_connected:
                 return result
-            return (result + "\n" + turns.bind("connect", **kwargs)
-                    + "\nFresh Hermes sessions still need one normal Hermes message before Chrome turns.")
-        if raw_args.strip() == "timing":
-            return _handle_slash_command(raw_args)
-        if raw_args.strip() == "disconnect":
-            session.microphone.cancel()
-            session.stop_webcam()
-            return turns.bind("disconnect", **kwargs)
-        with turns.lock:
-            same_connection = (turns.connected and turns.binding["session_id"] == kwargs.get("session_id")
-                               and turns.binding["session_key"] == kwargs.get("session_key"))
-            bound = turns.bind("status" if same_connection else "", **kwargs)
+            turns.bind("connect", **kwargs)
+            if not initialized:
+                result += "\nSend a normal message in Hermes and wait for its answer before asking in Chrome."
+            from .voice import recognition_ready, recognition_status
+            if not recognition_ready(cfg.whisper_model):
+                result += "\n" + recognition_status(cfg.whisper_model)
+            return result
+        # Read-only commands never bind, replace or steal a calibration's connection.
+        if command in ("calibrate", "mode webcam", "demo"):
+            if not kwargs.get("session_id") or not kwargs.get("session_key"):
+                return "Run /look start in a live Hermes conversation first."
+            with turns.lock:
+                same_connection = (turns.connected and turns.binding["session_id"] == kwargs["session_id"]
+                                   and turns.binding["session_key"] == kwargs["session_key"])
+                if not same_connection:
+                    turns.bind("connect", **kwargs)
         result = _handle_slash_command(raw_args)
-        return result + "\n" + bound
+        if command == "status" and session.cdp.is_connected:
+            with turns.lock:
+                if not turns.connected:
+                    result += "\n/look start to connect this conversation."
+                elif turns.binding["session_id"] != kwargs.get("session_id"):
+                    result += "\nConnected to another conversation. /look start to use this one."
+        return result
 
     # Restrict the connected companion session, not unrelated Hermes sessions.
     # Raw code/debugger tools can mint trusted CDP clicks; hooks cannot sandbox them.
@@ -204,7 +211,7 @@ def register(ctx: Any) -> None:
         if not bound(session_id):
             return None
         if not safe_call(tool_name, args):
-            return {"action": "block", "message": "Companion session uses guarded gaze tools only. Disconnect /gaze before using code or browser tools."}
+            return {"action": "block", "message": "Look uses guarded browser tools. Run /look stop before using code or generic browser tools."}
         return None
 
     def tool_execution(next_call, tool_name="", args=None, session_id="", turn_id="", **kwargs):
@@ -258,19 +265,20 @@ def register(ctx: Any) -> None:
     ctx.register_hook("on_stream_delta", turns.delta)
     ctx.register_hook("post_llm_call", post_llm_call)
     ctx.register_hook("on_session_end", turns.end)
-    ctx.register_command(
-        "gaze",
-        handler=gaze_command,
-        description="Connect Chrome, reopen the first-run guide, or control pointing.",
-        args_hint="[setup|connect|start|disconnect|status|demo|mode|calibrate|tracker|resolve|listen|benchmark]",
-    )
-    ctx.register_cli_command(
-        name="gaze",
-        help="Hermes Gaze ('Telepathy') browser overlay, demo launcher, and accuracy benchmark",
-        setup_fn=_setup_cli,
-        handler_fn=_run_cli,
-        description="Point with your eyes or cursor, command with your voice in Google Chrome.",
-    )
+    for name in ("look", "gaze"):
+        ctx.register_command(
+            name,
+            handler=gaze_command,
+            description="Start or stop Look in Chrome." if name == "look" else "Compatibility alias for /look.",
+            args_hint="[start|stop|status|calibrate|cursor|setup|diagnostics|help]",
+        )
+        ctx.register_cli_command(
+            name=name,
+            help="Look: private questions and guarded actions in Chrome" if name == "look" else "Alias for hermes look",
+            setup_fn=_setup_cli,
+            handler_fn=_run_cli,
+            description="Use /look inside Hermes to start or stop the companion.",
+        )
     if _SKILL_PATH.is_file():
         ctx.register_skill(
             name="gaze-telepathy",

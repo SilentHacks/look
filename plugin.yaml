@@ -1,6 +1,6 @@
 name: hermes-gaze
 version: "0.1.0"
-description: "Point with your eyes or cursor, command with your voice: multimodal deictic reference resolution ('what does this do?', 'export these') for Google Chrome and Hermes Agent."
+description: "Look — ask about what you point at in Chrome, with private answers and guarded browser actions. Start with /look; /gaze remains an alias."
 author: "Abid"
 kind: standalone
 license: MIT
@@ -43,7 +43,7 @@ config_schema:
   mode:
     type: str
     default: "hover"
-    description: "Pointing source: 'hover' (exact cursor), 'simulated' (cursor + noise), or 'webcam' (personal calibrated gaze). Camera starts only through /gaze mode webcam."
+    description: "Pointing source: 'hover' (exact cursor), 'simulated' (cursor + noise), or 'webcam' (personal calibrated gaze). Camera starts only through /look calibrate or /look mode webcam."
   cdp_url:
     type: str
     default: "http://127.0.0.1:9333"
