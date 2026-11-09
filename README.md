@@ -656,6 +656,8 @@ A new question can yield a settled card to its answer's first words, silently.
 New and recalled cards open at the conversation's beginning. Streaming never
 follows the bottom: manual scroll, selection and focus stay put, including when
 follow-ups or retries append to an open card.
+Code blocks and wide tables scroll horizontally within the card; vertical wheel
+input over either scrolls the answer body, without scrolling the website.
 
 First-use layout waits for the protected frame's first measurement instead of
 showing a 64px placeholder. The frame observes settled layout too: measuring only
@@ -664,7 +666,8 @@ clipping a taller answer until another delta arrived. The former bottom-follow
 flag also moved the opening out of view on every streaming update.
 `HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python tests/ui_review/probe_first_answer.py`
 reproduces delayed frame readiness and delayed font metrics in private Chrome,
-then checks long streaming, manual reading, follow-up, Retry and Q recall.
+then checks long streaming, manual reading, follow-up, Retry and Q recall, plus
+trusted code/table wheels on both axes during streaming, completion and recall.
 
 Read aloud uses local **Gradium Phonon-31M English**, catalogue voice **Russell**,
 through native streaming output. Stop, Esc, another read request and disconnect

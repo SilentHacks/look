@@ -3,6 +3,7 @@ import copy
 import json
 import threading
 import unittest
+from types import SimpleNamespace
 
 from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
 from hermes_gaze.resolver.cursor_context import build_context
@@ -12,6 +13,7 @@ class BrowserActions:
     """Model live identities/epochs and record only actions actually accepted by Chrome."""
     is_connected = False
     def __init__(self):
+        self.chrome = SimpleNamespace(available=lambda: False)
         self.nodes = {
             "@export": {"handle": "@export", "label": "Export CSV", "kind": "control", "tag": "button",
                         "role": "button", "type": "button", "class_name": "safe", "form_submit": False,

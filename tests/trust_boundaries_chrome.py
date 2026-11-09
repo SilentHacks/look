@@ -239,6 +239,7 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
                 }}walk(document.documentElement);seen.push(String(getSelection()));
                 return JSON.stringify(seen);''')
         with patch.object(service, 'get_shared_session', return_value=session), \
+             patch.object(voice, 'recognition_ready', return_value=True), \
              patch.object(service, '_VOICE_TURNS', turns), patch.object(service, '_CONFIG', GazeConfig()):
             assert page(a, 'return document.querySelector("#hermes-gaze-root").shadowRoot') is None
             assert page(a, 'return typeof window.__HERMES_GAZE_OVERLAY__+":"+typeof window.__hermesGazeIntent') == 'undefined:undefined'

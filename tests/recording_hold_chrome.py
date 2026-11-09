@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
-from hermes_gaze import service
+from hermes_gaze import service, voice
 from hermes_gaze.microphone import Microphone
 from hermes_gaze.resolver.cursor_context import cursor_result
 from tests.owned_chrome import private_session
@@ -85,6 +85,7 @@ def run():
                     service.handle_intent(intent, lambda result: (events.append(result), reply(result)))
             session.cdp.set_intent_handler(handle)
             with patch.dict(sys.modules, sounddevice=SimpleNamespace(RawInputStream=Input)), \
+                    patch.object(voice, 'recognition_ready', return_value=True), \
                     patch.object(service, 'get_shared_session', return_value=session), \
                     patch.object(service, '_VOICE_TURNS', None):
                 def start():

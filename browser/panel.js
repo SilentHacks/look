@@ -62,7 +62,7 @@
     .a li { margin-top:3px; } .a li:first-child { margin-top:0; }
     .a li::marker { color:var(--tertiary); }
     .a code { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--well); padding:.5px 4px; border-radius:4px; overflow-wrap:anywhere; }
-    .a pre { background:var(--well); padding:8px 10px; border-radius:8px; overflow-x:auto; overscroll-behavior:contain; scrollbar-width:none; }
+    .a pre { background:var(--well); padding:8px 10px; border-radius:8px; overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
     .a pre::-webkit-scrollbar { display:none; }
     .a pre code { display:block; background:none; padding:0; white-space:pre; overflow-wrap:normal; }
     .a blockquote { margin-left:0; padding-left:10px; border-left:2px solid var(--line); color:var(--secondary); }
@@ -73,7 +73,7 @@
     .a .link:hover { text-decoration:underline; text-underline-offset:2px; }
     .a .link .host { color:var(--tertiary); font-size:11.5px; }
     .a .link .host:only-child { color:inherit; font-size:inherit; }
-    .a .tablewrap { overflow-x:auto; overscroll-behavior:contain; scrollbar-width:none; }
+    .a .tablewrap { overflow-x:auto; overscroll-behavior-x:contain; scrollbar-width:none; }
     .a .tablewrap::-webkit-scrollbar { display:none; }
     .a table { border-collapse:collapse; font-size:12.5px; line-height:1.35; min-width:100%; }
     .a th { font-weight:600; text-align:left; white-space:nowrap; }
