@@ -77,13 +77,15 @@ class VoiceTurns:
         # One-time hints live with the inbox, so they follow navigation and tabs.
         self.coach = dict(greeted=False, heard=0, answered=0, retreated=False, rehearsed=False)
         self.host_refused = False
+        self.native_input = None
+        self.connecting_native = None
 
     @property
     def connected(self) -> bool:
         with self.lock:
             return self.binding is not None and not self.closed
 
-    def bind(self, raw_args="", *, session_key="", session_id="", platform="", **_) -> str:
+    def bind(self, raw_args="", *, session_key="", session_id="", platform="", native_input=None, **_) -> str:
         with self.lock:
             if self.closed:
                 return "Look is unloaded. Restart Hermes before connecting."
@@ -98,6 +100,12 @@ class VoiceTurns:
                 if self.binding and self.binding["session_id"] == session_id:
                     self._disconnect()
                 return "Look disconnected from this conversation."
+            if self.active and self.active.get("native_input") is not None and (self.active["session_id"] != session_id or
+                                self.active.get("session_key", session_key) != session_key):
+                return "A Look question still has an unresolved outcome. Reconnect its original conversation."
+            if (native_input is not None and self.connected and self.binding["session_id"] == session_id and
+                    self.binding["session_key"] == session_key and self.native_input is native_input):
+                return "Look is connected."
             if self.owner_session and self.owner_session != session_id:
                 self._disconnect()
                 self.items.clear()
@@ -107,7 +115,9 @@ class VoiceTurns:
                 self.paused = False
             self.owner_session = session_id
             self.binding_generation += 1
-            self.binding = dict(session_key=session_key, session_id=session_id, platform=platform)
+            self.binding = dict(session_key=session_key, session_id=session_id, platform=platform,
+                                native_input=native_input)
+            self.native_input = native_input
             self.publish()
             return "Look is connected."
 
@@ -196,7 +206,9 @@ class VoiceTurns:
         self.sequence += 1
         request = secrets.token_hex(12)
         run = dict(request_id=request, sequence=self.sequence, item_id=item_id,
-                   session_id=self.binding["session_id"], utterance=text, snapshot=snapshot,
+                   session_id=self.binding["session_id"], session_key=self.binding["session_key"],
+                   binding_generation=self.binding_generation, native_input=self.native_input,
+                   utterance=text, snapshot=snapshot,
                    wire=f"[Browsing inbox {item_id}; request {request}]\n{text}",
                    resolution_id=0, turn_id="", text="", status="queued", error="",
                    finished=False, ended=False, truncated=False,
@@ -375,6 +387,12 @@ class VoiceTurns:
                 run = self.pending[0]
                 if run["status"] != "queued":
                     return
+                if run.get("native_input") is not None and run["binding_generation"] != self.binding_generation:
+                    self.pending.pop(0)
+                    self.paused = True
+                    run.update(finished=True, ended=True)
+                    self._event(run, "failed", error="Look connection changed before submission. Ask again in this conversation.")
+                    return
                 if run.get("followup"):
                     item = self._item(run["item_id"])
                     if not item["evidence_ready"]:
@@ -389,6 +407,10 @@ class VoiceTurns:
                 self.active = run
                 key = self.binding["session_key"]
                 self._event(run, "thinking")
+                native = run.get("native_input")
+            if native is not None:
+                native.submit(run, self.native_receipt)
+                return
             try:
                 timing = TIMINGS.get(run.get("release_timing"))
                 if timing is not None:
@@ -396,7 +418,7 @@ class VoiceTurns:
                 accepted = bool(self.ctx.inject_message(run["wire"], session_key=key))
                 if timing is not None:
                     timing.mark("injection_returned")
-                error = "Host refused injection; send one normal Hermes message, then Retry."
+                error = "Host refused Look input. Check plugin injection permission and reconnect."
             except Exception as exc:
                 accepted, error = False, f"Injection outcome unknown: {exc}"
             with self.lock:
@@ -406,6 +428,68 @@ class VoiceTurns:
                     self.paused = True
                     self.host_refused = True
                     self._event(run, "failed", error=error)
+
+
+    def native_receipt(self, run, receipt):
+        """Receipts own admission release, hooks own evidence and live answer ownership."""
+        with self.lock:
+            if self.closed or self.active is not run:
+                return
+            status = receipt.get("status")
+            if status == "unknown":
+                self.paused = True
+                run["outcome_unknown"] = True
+                self._event(run, "interrupted", error=receipt.get("error") or
+                            "Hermes reports an unknown outcome. Do not resend this question.")
+                return  # Keep admission ownership, including across Stop/rebind.
+            if status not in ("terminal", "refused"):
+                return
+            run["outcome_unknown"] = False
+            result = receipt.get("result") or {}
+            success = (status == "terminal" and receipt.get("outcome") == "completed"
+                       and not result.get("failed") and not result.get("interrupted")
+                       and bool(run["turn_id"]))
+            if success and isinstance(result.get("final_response"), str):
+                text = run["title_stream"].final(result["final_response"][:self.MAX_TEXT + 97])
+                self._retain_text(run, text, replace=True,
+                                  omitted=len(result["final_response"]) > self.MAX_TEXT + 97)
+                self._title_decided(run)
+            self._flush_title(run)
+            run.update(finished=True, ended=True)
+            if not success:
+                self.paused = True
+            self._event(run, "complete" if success else "failed",
+                        error="" if success else receipt.get("error") or
+                        (result.get("error_surface") or {}).get("code") or result.get("turn_exit_reason") or
+                        "Hermes could not complete this question.")
+            if self.host_turn == run["turn_id"] and self.host_session == run["session_id"]:
+                self.host_turn = self.host_session = ""
+            self.active = None
+            native = run.get("native_input")
+            if not self.connected and native is not None and native is not self.connecting_native:
+                native.close()
+        self._pump()
+
+    def guard_wire(self, *, session_id="", user_message="", **_):
+        """An exact old wire is never a fresh typed question, even after Stop/reset."""
+        with self.lock:
+            run = next((r for r in self.runs if r["wire"] == user_message), None)
+            if run is not None and run.get("native_input") is not None and (self.active is not run or not self.connected or
+                    run["session_id"] != session_id or
+                    run["binding_generation"] != self.binding_generation):
+                if self.connected and run.get("native_input") is not None:
+                    self._disconnect()
+                return {"action": "block", "message": "Look withheld a question from an old connection. Run /look in the intended conversation."}
+        return None
+
+    def session_changed(self, *, session_id="", old_session_id="", **_):
+        with self.lock:
+            if self.binding and self.binding["session_id"] in (session_id, old_session_id):
+                self._disconnect()
+
+    def native_disconnected(self):
+        with self.lock:
+            self._disconnect()
 
     def _stop_speaking(self):
         """Signal only: generation, output abort and reaping stay outside the inbox lock."""
@@ -553,6 +637,8 @@ class VoiceTurns:
                             and (not request_id or r["request_id"] == request_id)), None)
                 if run is None:
                     return {"ok": False, "error": "No failed request to retry or skip"}
+                if run.get("outcome_unknown") or self.active is run and run.get("native_input") is not None:
+                    return {"ok": False, "error": "This question's outcome is unresolved. Reconnect; do not resend it."}
                 if action == "retry" and not run["utterance"]:
                     if not run.get("transcribe") or not self.connected:
                         return {"ok": False, "error": "Capture is no longer available"}
@@ -646,6 +732,9 @@ class VoiceTurns:
 
     def pre(self, *, session_id="", user_message="", turn_id="", **_):
         with self.lock:
+            blocked = self.guard_wire(session_id=session_id, user_message=user_message)
+            if blocked:
+                return blocked
             run = self.active
             wire_owned = (run and run["session_id"] == session_id and run["wire"] == user_message)
             if (not turn_id or not (wire_owned or
@@ -813,7 +902,7 @@ class VoiceTurns:
                                     error=turn_exit_reason or "Hermes turn failed")
                     else:
                         self._event(run, "complete")
-            if self.active is run:
+            if run is not None and self.active is run and not run.get("native_input"):
                 self.active = None
         self._pump()
 
@@ -833,6 +922,11 @@ class VoiceTurns:
             if item:
                 item["unread"] = True
         self.binding = None
+        if self.connecting_native is not None:
+            self.connecting_native.close()
+            self.connecting_native = None
+        if self.native_input is not None and not self.active:
+            self.native_input.close()
         revoke = getattr(self.session, "revoke_webcam", None)
         if revoke:
             revoke()
@@ -844,3 +938,5 @@ class VoiceTurns:
             if not self.closed:
                 self._disconnect()
                 self.closed = True
+                if self.native_input is not None:
+                    self.native_input.close()

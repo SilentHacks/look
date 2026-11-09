@@ -36,6 +36,8 @@ provides_hooks:
   - on_stream_delta
   - post_llm_call
   - on_session_end
+  - on_session_reset
+  - post_compaction
   - pre_tool_call
 provides_middleware:
   - llm_request

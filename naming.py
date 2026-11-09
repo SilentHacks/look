@@ -65,16 +65,16 @@ def plain_error(status: str, error: str) -> str:
     """One plain sentence for the card. Raw provider and host text stays out of the UI."""
     text = str(error or "")
     lower = text.lower()
+    if "outcome unknown" in lower or "unknown outcome" in lower or "outcome is unresolved" in lower:
+        return "This question’s outcome is unknown. Reconnect in Hermes; do not resend it."
+    if "gateway_injection_not_granted" in lower:
+        return "Look input is not permitted. Check this profile’s plugin injection permission."
     if status == "interrupted" and ("disconnect" in lower):
         return "Hermes was disconnected before this finished."
     if status == "interrupted":
         return "This answer was interrupted."
     if "no speech" in lower:
         return "I didn’t catch that; hold Space, wait for Listening, then ask again."
-    if "send one normal hermes message" in lower:
-        return "Hermes isn’t ready yet. Send it one normal message, then try again."
-    if "injection outcome unknown" in lower:
-        return "Hermes may not have received this question."
     if "no available cursor target" in lower or "target unavailable" in lower:
         return "I couldn’t tell what you were pointing at."
     if "capture" in lower and ("no transcribed" in lower or "no longer" in lower):

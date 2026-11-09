@@ -104,12 +104,17 @@ def register(ctx: Any) -> None:
     turns = VoiceTurns(ctx, session)
     service.set_voice_turns(turns)
     answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
-    initialized_sessions: set[str] = set()
+    try:
+        from hermes_constants import get_hermes_home
+        native_home = Path(get_hermes_home()).resolve()
+    except ImportError:
+        native_home = None
 
     def pre_llm_call(**kwargs: Any) -> Any:
-        if kwargs.get("session_id"):
-            initialized_sessions.add(kwargs["session_id"])
         with turns.lock:
+            blocked = turns.guard_wire(**kwargs)
+            if blocked:
+                return blocked
             if turns.binding and turns.binding["session_id"] == kwargs.get("session_id"):
                 result = turns.pre(**kwargs)
             else:
@@ -138,12 +143,11 @@ def register(ctx: Any) -> None:
 
     def gaze_command(raw_args: str, **kwargs: Any) -> str:
         command = " ".join(raw_args.strip().lower().split())
-        initialized = kwargs.get("session_id") in initialized_sessions
         if command == "setup":
             post = getattr(ctx, "post_message", None)
             context = copy_context()
             report = (lambda text: context.run(post, text)) if callable(post) else None
-            return _first_run_guide(session, initialized=initialized, report=report)
+            return _first_run_guide(session, report=report)
         if command in ("stop", "disconnect"):
             # Resources are machine-scoped, so Stop also releases another session's binding.
             # Keep host admission ownership until its real terminal hook arrives.
@@ -156,41 +160,108 @@ def register(ctx: Any) -> None:
                 if speech_worker.is_alive():
                     result += "\nRead aloud is still stopping."
             return result
-        if (command in ("", "connect", "start") or
+        bind_only = command in ("calibrate", "mode webcam", "setup eyes", "demo")
+        if (bind_only or command in ("", "connect", "start") or
                 command.split()[:1] in (["start"], ["connect"]) and
                 command.split()[1:] in (["--existing"], ["--existing", "--accept"], ["--separate"])):
             if not kwargs.get("session_id") or not kwargs.get("session_key"):
                 return "Run /look start in a live Hermes conversation."
-            requested_source = ("existing" if "--existing" in command else
-                                "owned" if "--separate" in command else session.cdp.source)
             with turns.lock:
                 generation = turns.binding_generation
+            native = None
+            if kwargs.get("platform") == "local":
+                from .native_input import NativeError, NativeInput, consent
+                source = kwargs.get("source")
+                logical_id = getattr(source, "chat_id", "")
+                if not native_home or not logical_id:
+                    return "Native Look input needs the canonical local command's profile and source. Use Hermes input."
+                with turns.lock:
+                    active = turns.active
+                    if active and (active["session_id"] != kwargs["session_id"] or
+                                   active["session_key"] != kwargs["session_key"]):
+                        return "A Look question still has an unresolved outcome. Reconnect its original conversation."
+                    previous = turns.connecting_native or turns.native_input
+                if (previous is not None and previous.logical_id == logical_id
+                        and turns.owner_session == kwargs["session_id"]
+                        and previous.reader is not None and not previous.reader.done()
+                        and not previous.closed and not previous.receipt_admission
+                        and not (active and active.get("outcome_unknown"))):
+                    native = previous
+                else:
+                    receipt_admission = (active.get("admission_id", "") if active and previous
+                                         and not consent(native_home, ctx.plugin_id) else "")
+                    native = NativeInput(native_home, ctx.plugin_id, logical_id,
+                                         identity=previous.identity if previous and active else None,
+                                         receipt_admission=receipt_admission)
+                    try:
+                        native.open()
+                    except NativeError as exc:
+                        return str(exc)
+                    with turns.lock:
+                        if turns.closed or turns.binding_generation != generation:
+                            native.close()
+                            return "Look start was cancelled."
+                        turns.connecting_native = native
+                    if previous is not None:
+                        previous.close()
+                    with turns.lock:
+                        if turns.closed or turns.binding_generation != generation or native.closed:
+                            native.close()
+                            return "Look start was cancelled."
+                        if native.receipt_admission:
+                            turns.connecting_native = None
+                            turns._disconnect()  # Observation must not restore input/action authority.
+                            turns.native_input = native
+                            native.on_disconnect = turns.native_disconnected
+                        if active is not None and turns.active is active:
+                            active["native_input"] = native
+                            native.submit(active, turns.native_receipt)
+                        elif native.receipt_admission:
+                            native.close()
+                    if native.receipt_admission:
+                        return "Checking the saved question. Restore this profile’s Look input permission before starting again."
+            requested_source = ("existing" if "--existing" in command else
+                                "owned" if "--separate" in command else session.cdp.source)
             def ready():
                 with turns.lock:
                     if (not turns.closed and turns.binding_generation == generation
-                            and session.cdp.source == requested_source):
-                        turns.bind("connect", **kwargs)
-            result = (_handle_slash_command(command, on_ready=ready)
-                      if "--existing" in command else _handle_slash_command(command or "start"))
+                            and session.cdp.source == requested_source and
+                            (native is None or not native.closed and native.reader is not None
+                             and not native.reader.done())):
+                        turns.connecting_native = None
+                        if native is not None:
+                            native.on_disconnect = turns.native_disconnected
+                        turns.bind("connect", native_input=native, **kwargs)
+                        return bool(turns.binding and turns.binding["session_id"] == kwargs["session_id"]
+                                    and turns.binding["session_key"] == kwargs["session_key"]
+                                    and turns.native_input is native)
+                    elif native is not None and native is not turns.native_input:
+                        native.close()
+                    return False
+            # Serialize launch with the companion's existing Stop boundary. The original
+            # generation is never refreshed after auth, even if Stop closed the new client.
+            with session.cdp._lifecycle:
+                if (turns.closed or turns.binding_generation != generation or
+                        native is not None and (native.closed or native.reader is None or native.reader.done())):
+                    if native is not None and native is not turns.native_input:
+                        native.close()
+                    return "Look start was cancelled."
+                if bind_only:
+                    if not ready():
+                        return "Look start was cancelled."
+                    return _handle_slash_command(raw_args)
+                result = (_handle_slash_command(command, on_ready=ready)
+                          if "--existing" in command else _handle_slash_command(command or "start"))
             if (command.endswith("--existing") or session.cdp.source != requested_source
                     or not session.cdp.is_connected):
                 return result  # Disclosure/refused source changes never bind the old browser.
             ready()
-            if not initialized:
-                result += "\nSend a normal message in Hermes and wait for its answer before asking in Chrome."
+            if native is None:
+                result += "\nThis frontend uses untracked Look input. If no answer arrives, check the conversation in Hermes; do not resend automatically."
             from .voice import recognition_ready, recognition_status
             if not recognition_ready(cfg.whisper_model):
                 result += "\n" + recognition_status(cfg.whisper_model)
             return result
-        # Read-only commands never bind, replace or steal a calibration's connection.
-        if command in ("calibrate", "mode webcam", "setup eyes", "demo"):
-            if not kwargs.get("session_id") or not kwargs.get("session_key"):
-                return "Run /look start in a live Hermes conversation first."
-            with turns.lock:
-                same_connection = (turns.connected and turns.binding["session_id"] == kwargs["session_id"]
-                                   and turns.binding["session_key"] == kwargs["session_key"])
-                if not same_connection:
-                    turns.bind("connect", **kwargs)
         result = _handle_slash_command(raw_args)
         if command == "status" and session.cdp.is_connected:
             with turns.lock:
@@ -218,7 +289,10 @@ def register(ctx: Any) -> None:
                 isinstance(calls[0], dict) and isinstance(calls[0].get("name"), str) and calls[0]["name"] in safe_names)
 
     def bound(session_id):
-        return bool(turns.binding and turns.binding["session_id"] == session_id)
+        with turns.lock:
+            return bool(turns.binding and turns.binding["session_id"] == session_id or
+                        turns.active and turns.active.get("native_input") is not None and
+                        turns.active["session_id"] == session_id)
 
     def pre_tool_call(tool_name="", args=None, session_id="", turn_id="", **kwargs):
         if not bound(session_id):
@@ -278,6 +352,8 @@ def register(ctx: Any) -> None:
     ctx.register_hook("on_stream_delta", turns.delta)
     ctx.register_hook("post_llm_call", post_llm_call)
     ctx.register_hook("on_session_end", turns.end)
+    ctx.register_hook("on_session_reset", turns.session_changed)
+    ctx.register_hook("post_compaction", turns.session_changed)
     for name in ("look", "gaze"):
         ctx.register_command(
             name,

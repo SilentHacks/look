@@ -16,6 +16,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
 | `early_highlight.py` | Asynchronous, read-only TypeSafe scope decision; 1.5-second deadline and post-answer fallback, never an inbox admission wait. |
 | `voice_turns.py`, `speech.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen evidence and exact turn matching. One speech worker owns cached local Phonon/Russell streaming, output cancellation and pre-audio macOS say fallback; `scripts/setup_speech.py` fetches pinned assets explicitly. |
+| `native_input.py` | Stock canonical local input: same-user private control socket, one-use profile ticket, stable submission ID and terminal receipts/events. Never starts a host or exposes auth to Chrome. |
 | `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
 | `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process) → `parakeet-mlx` → `faster-whisper` (the only backend on Linux). Registration loads and warms one silent CoreML prediction on a daemon before sharing the runner. `record_microphone`, `MAX_AUDIO_BYTES`. Measured release stages and limits are in README. |
@@ -260,13 +261,15 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Lost replies mean unknown outcome, not \"not executed\"; revoke that task/snapshot.
 - **Voice ownership includes item, request, session, exact wire text and turn.**
   `VoiceTurns` owns an in-memory inbox and at most eight waiting requests. Reserve
-  capture order at recording stop, before ASR; inject only the FIFO head, and only
-  after the previous `on_session_end` (not `post_llm_call`). Busy host injection
-  merges questions, so each attempt has a unique item/request label matched exactly
-  in `pre_llm_call`. Failures/interruption/disconnect retain partial answers and
-  pause admission. Disconnect must not release host admission ownership:
-  reconnect/Retry/Resume still wait for the actual terminal hook; the host can
-  remain busy while unbound. Retry adds a new answer attempt (or retries saved in-memory ASR),
+  capture order at recording stop, before ASR; hand off only the FIFO head.
+  Canonical native input waits for its exact terminal receipt, including failures
+  before hooks; SDK fallback waits for `on_session_end`, not `post_llm_call`.
+  Each attempt has a unique item/request label matched exactly in `pre_llm_call`.
+  Failures/interruption/disconnect retain partial answers and pause admission.
+  Disconnect cannot release admitted native work or its tool restrictions.
+  Unknown keeps the original ID/wire, forbids Retry/Skip and owner transfer,
+  and reconciles only against its pinned runtime/profile/logical session.
+  Retry adds a new attempt only after definite terminal/refusal (or retries saved in-memory ASR),
   Skip discards the failed attempt, Resume continues waiting work. Failed ASR attempts
   leave runnable FIFO but remain visible/retryable with in-memory audio. Try again requeues
   that ASR attempt; new questions and Resume can admit other runnable work. ASR releases the
@@ -390,12 +393,13 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   captures the current cursor, not the historical target.
 - Hermes persists browser evidence in `state.db` through `api_content`, independently
   of `record_trials`. Disabling plugin replay recording does not disable host retention.
-- `/gaze` or `/gaze connect` starts/attaches the Chrome companion and binds the
-  current Hermes session. Host `tui_gateway/plugin_inject.py` rejects lazy sessions;
-  the isolated live host sample instead accepted scheduling then returned
-  `status=error`, `error_surface.code=agent_init_failed`, before plugin turn hooks.
-  No public plugin initialization API exists. A first normal Hermes message is
-  still required. Do not patch the host or inject a hidden warm-up turn here.
+- `/look` in a canonical local in-process POSIX gateway uses stock native input.
+  The first real question initializes the lazy agent; no dummy turn or host patch.
+  Explicit injection permission, captured profile and same-user private direct
+  `gateway.sock` are required. Other frontends retain untracked Boolean SDK input.
+  Reset/route/replay gaps revoke the binding; stale exact wires are withheld.
+  Stock has no atomic caller-supplied reset fence. Constructor failure is settled
+  by receipt, never an invented hook or readiness heuristic. TypeSafe is optional.
 - Native microphone permission belongs to the process running Hermes, not Chrome.
   Website Permissions-Policy/CSP cannot block capture. Measured device startup was
   80ms standalone and 222ms through the private Chrome talk key; speech before

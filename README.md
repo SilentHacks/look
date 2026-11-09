@@ -7,9 +7,10 @@ Hermes answers in a private card or uses guarded browser actions. Eye tracking i
 ## Install: supported Mac beta
 
 The supported beta lane is **native arm64 Python on an Apple Silicon Mac,
-standard Google Chrome in Applications, one display, English**. Hermes Agent
-must already answer a normal message. This is a developer beta, not a standalone
-launcher or a claim of verified physical microphone/camera operation.
+standard Google Chrome in Applications, one display, English**. Use stock Hermes's
+canonical local TUI/CLI/Desktop session with in-process plugins and explicit
+injection permission. No manual warmup message is needed in that lane. Physical
+microphone/camera operation remains a release check.
 
 | Platform | Status before installing dependencies |
 |---|---|
@@ -100,14 +101,37 @@ conversation.
 
 In a new Hermes conversation:
 
-1. Send a normal first message and wait for its answer. The host cannot prepare a
-   fresh conversation from a Chrome question; no hidden warm-up turn is sent.
-2. Run `/look setup` once to prepare local speech recognition. Downloads are explicit;
-   setup never opens devices. Questions and page context still go to your Hermes model.
-3. Choose a browser: `/look start --existing` explains **Use my Chrome** before
-   any discovery-file read; `/look start --separate` uses the separate Look Chrome.
-   Bare `/look` keeps the current process's source (separate Chrome by default).
-   Point at something. Hold Space. Wait for **Listening**, then ask. Release to finish.
+1. Run `/look start --existing` for the **Use my Chrome** disclosure, or
+   `/look start --separate` for separate Look Chrome. Bare `/look` keeps the
+   current process's source (separate Chrome by default).
+2. Use Right Option to type the first real question. That question initializes
+   Hermes's lazy canonical agent; `/look` sends no startup turn or inference.
+3. For voice, run `/look setup` once to prepare local recognition. Downloads are
+   explicit; setup opens no device. Hold Space, wait for **Listening**, then speak.
+
+Stock native input is verified against Hermes source
+`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`. Look connects only to its own
+in-process POSIX gateway through the captured profile's private direct
+`gateway.sock`, obtains a one-use interactive ticket, and resumes the command's
+exact logical session. Auth never enters Chrome. Missing/unsafe sockets,
+fallback socket-pointer layouts, host isolation, remote clients and mismatched
+owners are refused; Look starts no gateway or second agent. Other frontends
+retain the stock Boolean SDK injector, which cannot observe pre-hook failures.
+Use ordinary Hermes input there if Look cannot deliver; never auto-resend.
+
+Each saved question has one stable submission ID. The existing inbox remains
+the only Look FIFO; native terminal receipts release it, including constructor
+failures before hooks. Lost acknowledgements retain an unknown attempt:
+`/look` in the **same** conversation reconciles the same ID, never a new-ID replay.
+Retry is withheld until a definite terminal/refusal. Stop revokes local
+presentation/action authority, not an already admitted Hermes turn. An unresolved
+attempt prevents switching conversations. Reset/compaction revoke the binding;
+stale exact questions are withheld by the pre-inference hook. Stock has no
+atomic caller-supplied reset/authority fence; this is not a claim of one.
+
+TypeSafe is optional. No key is required for startup or the ordinary answer;
+the existing optional post-answer Hermes scope selector can still make an
+auxiliary inference. Questions/evidence may persist in Hermes history.
 
 ### Use my existing Chrome
 
@@ -334,8 +358,8 @@ not been audited. The catalog entry PR must repeat these download/network disclo
 
 ## Daily use, updates and removal
 
-Start Hermes in your permitted terminal app; initialize each new conversation
-with a normal message, then `/look` to reconnect. Eyes stay an explicit step.
+Start Hermes in your permitted terminal app and run `/look` in the intended
+canonical local conversation. Eyes stay an explicit step.
 After a gaze-model change, recalibrate when asked; a saved profile is not proof
 of today's accuracy.
 
@@ -550,11 +574,9 @@ plugins:
 ```
 
 Restart Hermes after changing plugin code or configuration, and start a new
-conversation so frozen system guidance is refreshed. Send one normal message
-first (for example, `Reply only Ready.`); the host cannot accept injected Chrome
-turns until its lazy agent is initialized. Run `/look` or `/look start` in that
-conversation to open/attach the dedicated Chrome companion; `/look demo` opens
-the dashboard if wanted.
+conversation so frozen system guidance is refreshed. Run `/look` or `/look start`;
+the first real Chrome question initializes the lazy canonical agent. No dummy
+turn is sent. `/look demo` opens the dashboard if wanted.
 Hold Space in Chrome, wait for **Listening**, speak and release. Native
 `sounddevice` capture opens only during talk and closes on release; switching
 tabs while recording cancels it. macOS microphone permission belongs to the app

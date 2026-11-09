@@ -91,6 +91,18 @@ class BrowserToolGuardTests(unittest.TestCase):
             turns.bind('disconnect', session_key='key', session_id='connected')
             self.assertIsNone(guard(tool_name='browser_exec', session_id='connected', turn_id='t'))
             self.assertIsNone(middleware['llm_request'](request, session_id='connected'))
+            # Stop cannot restore raw tools to a still-owned native admission.
+            native = SimpleNamespace(submit=Mock(), close=Mock())
+            turns.bind(session_key='key', session_id='connected', native_input=native)
+            turns.submit('Hello', {'ok': False, 'utterance': 'Hello'})
+            active = turns.active
+            turns._disconnect()
+            self.assertEqual(guard(tool_name='terminal', session_id='connected')['action'], 'block')
+            self.assertFalse(json.loads(execute(forbidden, tool_name='browser_exec', session_id='connected'))['ok'])
+            self.assertNotIn('terminal', {t['function']['name'] for t in
+                             middleware['llm_request'](request, session_id='connected')['request']['tools']})
+            turns.native_receipt(active, {'status': 'terminal', 'outcome': 'failed'})
+            self.assertIsNone(guard(tool_name='terminal', session_id='connected'))
 
 
 if __name__ == '__main__':

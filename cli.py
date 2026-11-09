@@ -46,7 +46,7 @@ def _config() -> GazeConfig:
     return service._CONFIG or GazeConfig()
 
 
-def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
+def _first_run_guide(session, *, report=None) -> str:
     """Explicit downloads only; never connect or open a device."""
     from . import voice
 
@@ -64,9 +64,7 @@ def _first_run_guide(session, *, initialized: bool = False, report=None) -> str:
                      "hermes plugins enable hermes-gaze, then restart Hermes.")
     voice.prepare_recognition(_config().whisper_model, report=report)
     lines.append(voice.recognition_status(_config().whisper_model))
-    if not initialized:
-        lines.append("Send a normal message in Hermes and wait for its answer, then /look start.")
-    elif not session.cdp.is_connected:
+    if not session.cdp.is_connected:
         lines.append("Next: /look start.")
     lines.append("Questions and page context go to your Hermes model and may stay in history.")
     lines.append("/look help for commands; /look diagnostics for troubleshooting.")

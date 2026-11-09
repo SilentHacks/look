@@ -250,6 +250,7 @@ class TestSessionDelivery(unittest.TestCase):
         tab = CdpSession("http://127.0.0.1:1")
         self.addCleanup(tab.close)
         tab._context_unique_id = "document"
+        tab._ws = mock.AsyncMock()  # This fixture dispatches only on a live transport.
         tab._ui_frames = {"pill": (2, "private")}
         tab.intent_nonce = self.session._intent_nonce
         tab.set_intent_handler(lambda intent, reply: service.handle_intent(

@@ -78,7 +78,6 @@ class Spoken(unittest.TestCase):
 class Errors(unittest.TestCase):
     def test_one_plain_sentence_never_raw_provider_text(self):
         cases = [("failed", "HTTP 429 from provider xyz", "rate limited"), ("failed", "No speech recognized", "catch"),
-                 ("failed", "Host refused injection; send one normal Hermes message, then Retry.", "normal message"),
                  ("interrupted", "Disconnected", "disconnected"), ("interrupted", "user stop", "interrupted"),
                  ("failed", "Traceback in provider.py line 3", "couldn’t finish")]
         for status, raw, want in cases:

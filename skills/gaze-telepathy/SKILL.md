@@ -40,8 +40,9 @@ In a connected `/look` session use these operation schemas. If Hermes defers the
 
 The supported beta lane is Apple Silicon Mac, standard Google Chrome, one display,
 and English. Explicit `/look setup` prepares local recognition without opening
-hardware or sending a hidden message. Send one normal Hermes message and wait for
-the answer. `/look start --existing` discloses broad debugger access; only explicit
+hardware or sending a hidden message. In stock canonical local sessions, the
+first real Chrome question initializes Hermes; no warmup is needed.
+`/look start --existing` discloses broad debugger access; only explicit
 `/look start --existing --accept` reads discovery and requests Chrome's own Allow.
 Never automate native consent. `/look start --separate` selects the owned companion;
 never switch sources after failure. `/look stop` releases
@@ -59,9 +60,19 @@ Run `/look` (or `/look start`) in the intended Hermes TUI/desktop session to sta
 Open an item to read its conversation or explicitly follow up on it. Choose “New question at pointer” to capture another target. Follow-ups wait in the same queue. Saved evidence is reattached within the shared 6000-character budget; “the last one” is the preceding captured item, not the last answer to finish. The inbox survives tab changes and navigation, but not plugin restart. New answers mark unread without changing the selected item or speaking aloud. Failures preserve partial text and pause the queue; Retry retries the failed request, Skip discards it, Resume continues waiting work.
 Inbox content renders only in the focused tab's script-disabled, opaque-origin private frame, including explicit recall of other items. Background tabs receive no answer updates; item evidence and action ownership never move with focus.
 
-Saved inbox evidence remains immutable, not action authority. A fresh voice/typed user turn, including an explicit follow-up, may use the guarded task tools from its captured foreground source document. Only task navigation, new-tab operations or captured-control clicks transfer that owner; a focus switch never does. Esc or Stop revokes further task steps and pending review. Send one normal Hermes message before the first Chrome question: the plugin cannot initialize a lazy host agent.
+Saved inbox evidence remains immutable, not action authority. A fresh voice/typed user turn, including an explicit follow-up, may use the guarded task tools from its captured foreground source document. Only task navigation, new-tab operations or captured-control clicks transfer that owner; a focus switch never does. Esc or Stop revokes further task steps and pending review.
 
 Without a connected/authorized Hermes session, Chrome can answer read-only one-shot questions, clearly labeled as having no conversation followups or actions. `/look stop` detaches and disables that overlay too. Gateway sessions require `plugins.entries.hermes-gaze.allow_gateway_injection: true` and in-process plugin isolation.
+
+The stock native lane uses one-use authenticated tickets from this in-process
+POSIX gateway's private direct control socket and the command's exact profile/
+logical session. It starts no host or agent of its own. One stable submission ID
+and exact terminal receipts cover pre-hook constructor failures. Unknown outcomes
+retain ownership and forbid Retry; reconnect the same conversation to reconcile,
+never resend with a new ID. Stop keeps admitted work owned until settlement.
+Reset/compaction revoke the binding; old exact questions are withheld before
+inference. No atomic caller reset fence is available in stock Hermes. Other
+frontends keep untracked SDK input; check Hermes if no answer arrives.
 
 ## Noisy modes
 
