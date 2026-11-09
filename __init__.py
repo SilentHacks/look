@@ -162,7 +162,7 @@ def register(ctx: Any) -> None:
         bind_only = command in ("calibrate", "mode webcam", "setup eyes", "demo")
         if (bind_only or command in ("", "connect", "start") or
                 command.split()[:1] in (["start"], ["connect"]) and
-                command.split()[1:] in (["--existing"], ["--existing", "--accept"], ["--separate"])):
+                command.split()[1:] in (["--existing"], ["--existing", "--accept"], ["--extension"], ["--separate"])):
             if not kwargs.get("session_id") or not kwargs.get("session_key"):
                 return "Run /look start in a live Hermes conversation."
             secret_context = copy_context()
@@ -221,6 +221,7 @@ def register(ctx: Any) -> None:
                     if native.receipt_admission:
                         return "Checking the saved question. Restore this profile’s Look input permission before starting again."
             requested_source = ("existing" if "--existing" in command else
+                                "extension" if "--extension" in command else
                                 "owned" if "--separate" in command else session.cdp.source)
             def ready():
                 with turns.lock:
@@ -263,8 +264,8 @@ def register(ctx: Any) -> None:
                         return "Look start was cancelled."
                     return _handle_slash_command(raw_args)
                 result = (_handle_slash_command(command, on_ready=ready, on_error=failed)
-                          if "--existing" in command else _handle_slash_command(command or "start"))
-            if (command.endswith("--existing") or session.cdp.source != requested_source
+                          if "--existing" in command or "--extension" in command else _handle_slash_command(command or "start"))
+            if (command.endswith(("--existing", "--extension")) or session.cdp.source != requested_source
                     or not session.cdp.is_connected):
                 return result  # Disclosure/refused source changes never bind the old browser.
             ready()

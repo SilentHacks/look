@@ -51,7 +51,7 @@ class Companion:
         self._handler = handler
 
     def start(self, url: str = "about:blank") -> bool:
-        if self.source == "existing":
+        if self.source in ("existing", "extension"):
             self.chrome.attach()  # Never launch or obtain new consent implicitly.
             return self.is_connected
         with self._lifecycle:
@@ -64,7 +64,7 @@ class Companion:
 
     @property
     def connection_status(self) -> dict:
-        if self.source == "existing":
+        if self.source in ("existing", "extension"):
             return dict(source=self.source, state=self.chrome.state, error=self.chrome.error)
         return dict(source=self.source, state="connected" if self.is_connected else "stopped", error="")
 
@@ -85,32 +85,48 @@ class Companion:
             stopped = self._stop = threading.Event()
             chrome.on_loss = lambda: self._consent_lost(chrome)
 
-            def run():
-                try:
-                    chrome.start(timeout=timeout)
-                    with self._lifecycle:
-                        if chrome is not self.chrome or not chrome.live:
-                            return
-                        self.connect()
-                    while chrome is self.chrome and chrome.live and not self._stop.is_set():
-                        if self.is_connected:
-                            # Stop and binding cannot pass each other after a late Allow.
-                            with self._lifecycle:
-                                if chrome is self.chrome and chrome.live and not self._stop.is_set() and on_ready:
-                                    on_ready()
-                            break
-                        self._stop.wait(.1)
-                except (OSError, ValueError):
-                    with self._lifecycle:
-                        if chrome is self.chrome and not stopped.is_set() and chrome.error and on_error:
-                            on_error(chrome.error)
-            self._consent_worker = threading.Thread(target=run, name="look-chrome-approval", daemon=True)
-            self._consent_worker.start()
-            return self.connection_status
+            return self._start_borrowed(chrome, stopped, on_ready, on_error, timeout=timeout)
+
+    def start_extension(self, *, on_ready=None, on_error=None) -> str:
+        from .extension import ExtensionChrome
+        with self._lifecycle:
+            if self.is_connected or self._consent_worker and self._consent_worker.is_alive():
+                raise OwnershipError("Stop Look before starting an extension connection.")
+            self.close()
+            chrome = ExtensionChrome(lease_dir=self._owned_chrome.profile)
+            ticket = chrome.prepare()
+            self.source, self.chrome = "extension", chrome
+            stopped = self._stop = threading.Event()
+            chrome.on_loss = lambda: self._consent_lost(chrome)
+            self._start_borrowed(chrome, stopped, on_ready, on_error)
+            return ticket
+
+    def _start_borrowed(self, chrome, stopped, on_ready, on_error, *, timeout=120):
+        def run():
+            try:
+                chrome.start(timeout=timeout)
+                with self._lifecycle:
+                    if chrome is not self.chrome or not chrome.live:
+                        return
+                    self.connect()
+                while chrome is self.chrome and chrome.live and not stopped.is_set():
+                    if self.is_connected:
+                        with self._lifecycle:
+                            if chrome is self.chrome and chrome.live and not stopped.is_set() and on_ready:
+                                on_ready()
+                        break
+                    stopped.wait(.1)
+            except (OSError, ValueError):
+                with self._lifecycle:
+                    if chrome is self.chrome and not stopped.is_set() and chrome.error and on_error:
+                        on_error(chrome.error)
+        self._consent_worker = threading.Thread(target=run, name="look-browser-connect", daemon=True)
+        self._consent_worker.start()
+        return self.connection_status
 
     def use_owned(self) -> None:
         with self._lifecycle:
-            if self.source == "existing":
+            if self.source in ("existing", "extension"):
                 if self.chrome.live or self._consent_worker and self._consent_worker.is_alive():
                     raise OwnershipError("Stop Look before changing browser source.")
                 self.close()
@@ -153,7 +169,7 @@ class Companion:
     def open_url(self, url: str, *, target: str | None = None, document: str | None = None) -> None:
         """Open beside an exact source, never Chrome's mutable last-used profile."""
         source = None
-        if self.source == "existing":
+        if self.source in ("existing", "extension"):
             if target:
                 with self._lock:
                     source = self._tabs.get(target)
@@ -165,6 +181,13 @@ class Companion:
 
     def _create_target(self, url: str, source: CdpSession | None = None) -> str:
         params = {"url": url}
+        if self.source == "extension":
+            if source is None or not source.is_connected:
+                raise OwnershipError("The source tab cannot be proved.")
+            prefix = source._ws.document_prefix
+            return self.chrome.command("Look.createTarget", {
+                "url": url, "source": source._target_id,
+                "document": source._context_unique_id.removeprefix(prefix), "route": source._route_id})["targetId"]
         if self.source == "existing":
             self.chrome.attach()
             if source is None or not source.is_connected:
@@ -223,7 +246,7 @@ class Companion:
     def open_start_page(self, valid) -> dict:
         """Explicit fallback only. Never navigate an existing, unrelated tab."""
         from pathlib import Path
-        if self.source == "existing":
+        if self.source in ("existing", "extension"):
             raise OwnershipError("Open an ordinary web page in your Chrome, then return to it. Look will not open a local setup file there.")
         if not valid():
             raise ConnectionError("Setup connection changed. Start setup again in Hermes.")
@@ -417,12 +440,12 @@ class Companion:
                     self._last_foreground = self._start_owner = None
                 for tab in tabs:
                     tab.close()
-                if self.source == "existing":
+                if self.source in ("existing", "extension"):
                     self.chrome.abort()
                     self.chrome.close()
                     break  # No new authorization from discovery/reconnect loops.
             self._stop.wait(.25)
-        if self.source == "existing":
+        if self.source in ("existing", "extension"):
             with self._lock:
                 tabs, self._tabs = list(self._tabs.values()), {}
             for tab in tabs:
@@ -519,6 +542,14 @@ class Companion:
         if tab._context_unique_id != document:
             return "Recording cancelled: the source document changed."
         # No reconnect/retry into another document when checking recording ownership.
+        if self.source == "extension":
+            state = tab._submit(tab._send_cmd("Look.focus", {"uniqueContextId": document}, timeout=.5), 1.5)
+            if isinstance(state, dict):
+                if state.get("document_current") is False:
+                    return "Recording cancelled: the source document changed."
+                if state.get("foreground") is False:
+                    return "Recording cancelled: the source tab lost focus."
+            return None
         state = tab.eval_js_once(
             "({hidden:document.visibilityState !== 'visible', focused:document.hasFocus()})",
             timeout=.5, context_id=document)
@@ -592,7 +623,7 @@ class Companion:
 
     def close(self) -> None:
         self._stop.set()
-        if (self.source == "existing" and self._consent_worker and self._consent_worker.is_alive()
+        if (self.source in ("existing", "extension") and self._consent_worker and self._consent_worker.is_alive()
                 and self.chrome.state in ("idle", "discovering", "waiting")):
             self.chrome.close()  # Cancel the handshake before waiting for startup.
         with self._lifecycle:

@@ -172,8 +172,8 @@ Look instruments supported background web tabs to follow focus, but only the
 foreground protected frame receives inbox content. Bounded question evidence
 goes to your configured model and may remain in Hermes history (see Privacy).
 Other authorized debuggers/local software are outside the website isolation
-boundary. No extension, relay, MCP, copied profile, new dependency or raw
-debugger tools are added. Only Chrome's narrowly validated discovery file is
+boundary. This native-consent option adds no extension, relay, MCP, copied profile,
+dependency or raw debugger tools. Only Chrome's narrowly validated discovery file is
 read, after explicit acceptance; no personal profile stores are read by discovery.
 
 Support lane: stable Chrome at its standard macOS location, one provable regular
@@ -191,6 +191,18 @@ user-operated existing signed-in session trial remain release gates. No real
 devices or personal browser/account were accessed by these probes.
 Fake-server deadline and immediate Stop/Start regressions:
 `HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python -m unittest tests.test_chrome_consent tests.test_profile_highlight`.
+
+### Use the Look development extension
+
+For existing tabs without Chrome's remote-debugging setting, Look also provides
+an unpacked, Look-specific extension and explicit user-level native-host installer.
+Follow [the local installation, pairing and uninstall instructions](docs/CHROME_EXTENSION.md).
+Run `/look start --extension` in the intended Hermes conversation, then pair in
+Look's Chrome popup and choose the tabs explicitly. Stock Hermes is unmodified;
+the same protected renderer and Python action/approval policy remain in use.
+Chrome's broad debugger installation permission and debugging banner remain.
+This is a reviewer development path, not a Store release or signed-in/device
+acceptance claim. The native-consent and separate-browser options remain available.
 
 ### Commands
 

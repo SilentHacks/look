@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Look</title>
+<style>body{font:14px system-ui;width:300px;padding:16px;color:#222}button,input{font:inherit;box-sizing:border-box;width:100%;padding:9px;margin-top:10px}p{line-height:1.45}#status{overflow-wrap:anywhere}</style>
+<h1>Look</h1>
+<p>Chrome gives Look broad debugging access. Page details you ask about go to your configured model and may stay in Hermes history.</p>
+<form id="pair"><label for="ticket">Pairing ticket from /look start --extension</label><input id="ticket" autocomplete="off" spellcheck="false" required><button>Connect this tab</button></form>
+<button id="add" hidden>Use on this tab</button><button id="stop" hidden>Disconnect</button>
+<p id="status" role="status"></p><script src="popup.js"></script></html>

@@ -75,7 +75,9 @@ class TargetChannel:
     def lost(self) -> None:
         self.deliver(None)
 
-    def forget(self, local_id):
+    def forget(self, local_id, *, abort_unknown=True):
+        if hasattr(self.root, "forget"):
+            self.root.forget(self, local_id, abort_unknown=abort_unknown)
         with self.root._lock:
             for key, value in list(self.root._pending.items()):
                 if value[1] is self and value[2] == local_id:

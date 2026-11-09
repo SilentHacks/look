@@ -2738,11 +2738,9 @@
   window.addEventListener("pointerdown", onWindowPointerDown, true);
   let transportUntil = 0;
   const transportTimer = setInterval(() => {
-    if (performance.now() >= transportUntil && spaceHeld) {
-      clearTimeout(S.armTimer);
-      S.keyArmed = false;
-      spaceHeld = false;
-      if (S.hold) holdEnd(true);
+    if (transportUntil && performance.now() >= transportUntil) {
+      destroy();
+      return;
     }
     rawSend({type: "_ui_ping"});
   }, 1000);

@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Look",
+  "version": "0.1.0",
+  "minimum_chrome_version": "145",
+  "description": "Connect selected Chrome tabs to your running Look session.",
+  "permissions": ["debugger", "nativeMessaging", "tabs"],
+  "background": {"service_worker": "worker.js"},
+  "action": {"default_title": "Look", "default_popup": "popup.html"},
+  "incognito": "not_allowed"
+}

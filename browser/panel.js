@@ -489,11 +489,11 @@
       foot.append(h('div', 'hint', 'Enter to ask, Esc to close'));
       card.append(head, ask, foot);
       root.append(card);
-      input.focus();
+      input.focus({preventScroll: true});
     }
     const title = root.querySelector('.title');
     if (title.textContent !== (m.title || '')) title.textContent = m.title || '';
-    if (m.focus) root.querySelector('#hg-input').focus();
+    if (m.focus) root.querySelector('#hg-input').focus({preventScroll: true});
   }
 
   function renderConfirm(m) {

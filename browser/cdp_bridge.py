@@ -170,7 +170,11 @@ class CdpSession:
     def connect(self) -> bool:
         """Attach the assigned tab and initialize its isolated overlay."""
         try:
-            return self._ready if self._ws is not None else bool(self._submit(self._connect_async(), timeout=20.0))
+            if self._ws is not None:
+                if not self._ready and getattr(self._owner, "source", "") == "extension":
+                    return bool(self._submit(self._on_new_context(), timeout=20.))
+                return self._ready
+            return bool(self._submit(self._connect_async(), timeout=20.0))
         except Exception as exc:
             logger.debug("CDP connect failed: %s", exc)
             return False
@@ -391,7 +395,10 @@ class CdpSession:
             elif message.get("type") == "_ui_render":
                 await self._render_ui(message)
             elif message.get("type") == "_ui_ping":
-                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.transportAlive();true", timeout=2.)
+                if getattr(self._owner, "source", "") == "extension":
+                    await self._send_cmd("Look.lease", {"uniqueContextId": self._context_unique_id}, timeout=2.)
+                else:
+                    await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.transportAlive();true", timeout=2.)
         except Exception:
             logger.debug("Private UI unavailable", exc_info=True)
 
@@ -615,12 +622,16 @@ class CdpSession:
         fut = asyncio.get_running_loop().create_future()
         self._pending[req_id] = fut
         try:
+            if getattr(self._owner, "source", "") == "extension":
+                params = dict(params, _look_owner={
+                    "document": (self._context_unique_id or "").removeprefix(prefix),
+                    "route": self._route_id})
             await self._ws.send(json.dumps({"id": req_id, "method": method, "params": params or {}}))
             msg = await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self._pending.pop(req_id, None)
             if prefix:
-                self._ws and self._ws.forget(req_id)
+                self._ws and self._ws.forget(req_id, abort_unknown=method != "Look.focus")
         if "error" in msg:
             err = msg["error"]
             raise RuntimeError(f"CDP {method} failed: {err.get('code')} {err.get('message')}")
@@ -705,6 +716,10 @@ class GazeSession:
 
     def _browser_disconnected(self) -> None:
         from .. import service
+        try:
+            self.microphone.cancel()  # Transport loss is definite input loss, not a slow focus probe.
+        except Exception:
+            logger.debug("Microphone close failed after browser loss", exc_info=True)
         turns = service._VOICE_TURNS
         if turns is not None and turns.session is self:
             with turns.lock:

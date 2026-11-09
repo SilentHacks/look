@@ -20,6 +20,7 @@ from .tools import handle_gaze_resolve
 
 HELP = """/look · /look start     Start in Chrome
 /look start --existing   Use my Chrome (shows disclosure first)
+/look start --extension  Pair the Look development extension
 /look start --separate   Use separate Look Chrome
 /look stop              Stop Look; keep browser tabs
 /look status            Show current state
@@ -145,6 +146,16 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
             lines.append(f"turn {turn['turn']}: max gap {turn['heartbeat_max_gap_ms']}ms{slow}")
         return "\n".join(lines)
 
+    if sub in ("start", "connect") and tail == ["--extension"]:
+        if not apple_silicon_mac():
+            return "The Look development extension supports Apple Silicon Mac only."
+        try:
+            ticket = session.cdp.start_extension(on_ready=on_ready, on_error=on_error)
+        except (OSError, ValueError):
+            return "Extension connection unavailable. Stop Look first; check native-host setup in docs/CHROME_EXTENSION.md."
+        return ("In Chrome, open Look and connect this tab with this one-use ticket (expires in 120 seconds):\n"
+                + ticket + "\n/look stop cancels. Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
+
     if sub in ("start", "connect") and (tail or session.cdp.source == "existing"):
         from .browser.consent import DISCLOSURE, PREPARE
         if tail == ["--separate"]:
@@ -192,6 +203,13 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
                 if session.cdp.source == "existing" else "Look stopped. Browser tabs are still open.")
 
     if sub == "status" and not tail:
+        if session.cdp.source == "extension":
+            status = session.cdp.connection_status
+            if session.cdp.is_connected:
+                return "Look is ready in the selected Chrome tabs."
+            return status["error"] or ("Waiting for the Look extension. /look stop cancels."
+                                       if status["state"] == "waiting" else
+                                       "Look extension disconnected. /look start --extension to pair again explicitly.")
         if session.cdp.source == "existing":
             return _existing_status(session)
         if not session.cdp.is_connected:
