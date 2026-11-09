@@ -83,10 +83,10 @@ def register(ctx: Any) -> None:
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
 
-    # Warm only verified cached CoreML assets; fetching requires explicit /look setup.
+    # Warm supported verified caches only; fetching requires explicit /look setup.
     from .voice import prewarm
 
-    prewarm()
+    prewarm(cfg.whisper_model)
 
     for name, schema, handler, emoji in ALL_TOOLS:
         ctx.register_tool(

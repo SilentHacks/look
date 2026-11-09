@@ -48,7 +48,7 @@
     .body.clipped.scrolled { mask-image:linear-gradient(transparent,#000 18px,#000 calc(100% - 26px),transparent); }
     .turn + .turn { margin-top:12px; padding-top:12px; border-top:.5px solid var(--line); }
     .q { margin-top:3px; color:var(--secondary); font-size:12.5px; line-height:1.35; }
-    .notice { margin-top:5px; color:var(--secondary); font-size:12px; line-height:1.35; }
+    .notice, .answer-notice { margin-top:5px; color:var(--secondary); font-size:12px; line-height:1.35; }
     .q:empty { display:none; }
 
     .a { margin-top:7px; font-size:13.5px; line-height:1.43; overflow-wrap:anywhere; }
@@ -333,8 +333,12 @@
     if (t.a) {
       if (!node.ans) { node.ans = h('div', 'a'); node.el.append(node.ans); }
       const settled = t.status === 'complete';
-      patch(node.ans, MD.view(t.a, {streaming: !settled}), node.live);
+      patch(node.ans, MD.view(t.a, {streaming: !settled && !t.answerNotice}), node.live);
     }
+    if (t.answerNotice) {
+      if (!node.shortened) { node.shortened = h('div', 'answer-notice'); node.el.append(node.shortened); }
+      node.shortened.textContent = t.answerNotice;
+    } else if (node.shortened) { node.shortened.remove(); node.shortened = null; }
     if (t.error) {
       if (!node.err) {
         node.err = h('div', 'err');

@@ -157,8 +157,12 @@ class ReleaseTimingTests(unittest.TestCase):
         script = """import tests, threading
 from unittest.mock import patch
 from hermes_gaze import voice
-with patch.object(voice.sys, 'platform', 'linux'):
+with patch.object(voice.sys, 'platform', 'linux'), patch.object(
+        voice, 'prepare', side_effect=voice.AssetsMissing('empty test cache')):
     voice.prewarm()
+    for thread in threading.enumerate():
+        if thread.name == 'gaze-asr-prewarm':
+            thread.join(2)
 assert not any(t.name == 'gaze-timing' for t in threading.enumerate())
 """
         subprocess.run([sys.executable, "-c", script], check=True, timeout=5)

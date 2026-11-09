@@ -1422,6 +1422,7 @@
   function itemView(raw) {
     const turns = (raw.conversation || []).filter(r => !["retried", "skipped"].includes(r.status)).map(r => ({
       id: r.request_id, q: r.utterance || "", a: r.text || "", status: r.status,
+      answerNotice: r.answer_notice || "",
       error: ["failed", "interrupted"].includes(r.status) ? r.plain_error || "Hermes couldn’t finish this answer." : "",
     }));
     const local = anchors.get(raw.item_id);
@@ -1490,7 +1491,7 @@
       paused: !!inbox?.paused && !item.turns.some(t => t.error) && (inbox?.waiting || 0) > 0,
       prev: peek(list[i - 1]), next: peek(list[i + 1]),
       item: {id: item.id, subject: item.subject, notice: item.notice, lost: !item.local, host: item.host, gone: isGone(item),
-        turns: item.turns.map(({id, q, a, status, error}) => ({id, q, a, status, error}))}});
+        turns: item.turns.map(({id, q, a, status, error, answerNotice}) => ({id, q, a, status, error, answerNotice}))}});
     S.dir = null;
   }
   function renderNote() {

@@ -112,9 +112,14 @@ copy must be updated first; editing another checkout does not update it.
 No host patch or new manifest command field is needed: slash/CLI names register
 through Hermes's public APIs. Under host isolation, shell plugin commands are unavailable.
 
-Plugin registration **never downloads models**. An already-cached CoreML model is
-checksum-verified and silently warmed in the background. Explicit `/look setup`
-starts missing downloads and shows **Preparing local speech recognition**.
+Plugin registration **never downloads models**. Supported cached models are
+checksum-verified and loaded asynchronously in preference order: CoreML → MLX →
+configured faster-whisper on Mac, configured faster-whisper elsewhere. CoreML also
+runs a silent warmup prediction. Explicit recognition setup tries every usable
+verified cache before downloading missing assets, so an offline cached fallback
+does not require a preferred-backend download. Integrity failures stop setup
+without fallback. Only explicit `/look setup` permits missing downloads
+when no cached backend works and shows **Preparing local speech recognition**.
 Preparation can compile models; there is no fixed wait guarantee. Check `/look setup`
 for **Local speech recognition is ready**; hosts supporting plugin messages
 also receive a completion notice. Space is refused with a plain explanation until
@@ -486,8 +491,8 @@ Sealing retains every already-admitted callback buffer and its device status;
 callbacks after sealing cannot append or invalidate sealed speech. An unavailable
 release renderer fails capture after the five-second CDP window and still closes input.
 Hint persistence follows stop/reservation on the ordered intent worker. Capsule
-placement and visual design are unchanged. Cached CoreML prewarm still runs one
-silent prediction before sharing the runner; uncached preparation is explicit.
+placement and visual design are unchanged. Cached recognition warmup runs on a daemon;
+CoreML runs one silent prediction before sharing the runner. Uncached preparation is explicit.
 
 `/look diagnostics timing` works without recording opt-in or a connected browser. It retains
 the last eight releases in memory: browser keyup (zero), evidence start/freeze/send;
@@ -599,6 +604,11 @@ to ask a follow-up; pointing elsewhere asks a new question.
 Cards keep question/answer history, bounded scrolling, Retry/Skip/Resume and
 mouse-only approval. Answers take reading turns (12 seconds by default, longer
 for long text); hovering, selecting, scrolling or reading aloud holds the card.
+Each answer in a card retains its first 12,000 characters, not a rolling tail. Longer
+answers show a separate plain-text shortening notice, even inside unfinished
+Markdown, and read-aloud speaks that notice too. Streaming, completed and recalled
+cards use the same bound; short answers are unchanged. Full responses remain in
+Hermes history, outside the card's bounded copy.
 A new question can yield a settled card to its answer's first words, silently.
 New and recalled cards open at the conversation's beginning. Streaming never
 follows the bottom: manual scroll, selection and focus stay put, including when

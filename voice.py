@@ -55,6 +55,8 @@ _COREML_LOCK = threading.Lock()
 _PREPARE_LOCK = threading.Lock()
 _PREPARING = False
 _PREPARATION_ERROR = ""
+_PREPARE_DOWNLOAD = False
+_PREPARE_REPORT = None
 
 # Which backend served the most recent transcribe_audio_buffer call — the
 # overlay labels itself "local Whisper" otherwise, which lies whenever ANE
@@ -147,59 +149,108 @@ def recognition_status(model_name=_DEFAULT_MODEL):
     return "Local speech recognition is not ready. Run /look setup; use Right Option to type."
 
 
-def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
-    """Only explicit first-run setup may fetch; all heavy work stays off intent threads."""
-    global _PREPARING
+def _prepare_recognition(model_name, *, download, report=None):
+    """One worker checks every cache before an explicitly requested download."""
+    global _PREPARING, _PREPARE_DOWNLOAD, _PREPARE_REPORT, _PREPARATION_ERROR
     with _PREPARE_LOCK:
-        if _PREPARING or recognition_ready(model_name):
+        if recognition_ready(model_name):
+            return
+        if _PREPARING:
+            _PREPARE_DOWNLOAD |= download
+            if report is not None:
+                _PREPARE_REPORT = report
             return
         _PREPARING = True
+        _PREPARE_DOWNLOAD = download
+        _PREPARE_REPORT = report
+        _PREPARATION_ERROR = ""
 
     def work():
-        global _PREPARING, _PREPARATION_ERROR, _COREML_RUNNER, _PARAKEET_MODEL
+        global _PREPARING, _PREPARATION_ERROR, _COREML_RUNNER, _PARAKEET_MODEL, _PREPARE_REPORT
+        missing, error, unavailable = [], "", False
+
+        def try_load(repo, load, *, fetch=False):
+            nonlocal unavailable
+            try:
+                prepare(repo, download=fetch)
+                if load() is not None:
+                    return True
+                unavailable = True
+            except AssetIntegrityError:
+                raise
+            except AssetsMissing:
+                if not fetch:
+                    missing.append((repo, load))
+            except Exception as exc:
+                logger.debug("Speech backend %s unavailable: %s", repo, exc)
+                unavailable = True
+            return False
+
+        def failed(exc):
+            logger.warning("Speech recognition preparation stopped: %s", exc)
+            return (str(exc) if isinstance(exc, (AssetIntegrityError, ValueError)) else
+                    "Local speech recognition could not prepare. Check internet, disk space and "
+                    "dependencies, then run /look setup. Use Right Option to type.")
+
         try:
             if model_name not in WHISPER:
                 raise ValueError("Supported speech models are base.en and tiny.en; custom models are unsupported.")
+            # Explicit retries may repair unavailable runtimes, never bypass integrity.
+            if download:
+                with _COREML_LOCK:
+                    if _COREML_RUNNER is False:
+                        _COREML_RUNNER = None
+                with _PARAKEET_LOCK:
+                    if _PARAKEET_MODEL is False:
+                        _PARAKEET_MODEL = None
             loaders = ([(COREML, _get_coreml_runner), (MLX, _get_parakeet_model)]
                        if sys.platform == "darwin" else [])
             loaders.append((WHISPER[model_name], lambda: get_whisper_model(model_name)))
             for repo, load in loaders:
-                prepare(repo, download=True)
-                # An explicit retry may repair unavailable dependencies, not bypass checksums.
-                if repo == COREML and _COREML_RUNNER is False:
-                    _COREML_RUNNER = None
-                if repo == MLX and _PARAKEET_MODEL is False:
-                    _PARAKEET_MODEL = None
-                if load() is not None:
+                if try_load(repo, load):
                     break
-            _PREPARATION_ERROR = ""
         except Exception as exc:
-            _PREPARATION_ERROR = (str(exc) if isinstance(exc, AssetIntegrityError) or model_name not in WHISPER else
-                                  "Local speech recognition could not prepare. Check internet, disk space and "
-                                  "dependencies, then run /look setup. Use Right Option to type.")
-            logger.warning("Speech recognition preparation stopped: %s", exc)
-        finally:
-            _PREPARING = False
-            if report is not None:
-                report(recognition_status(model_name))
+            error = failed(exc)
 
-    threading.Thread(target=work, name="gaze-asr-prepare", daemon=True).start()
+        # Finish cache-only work atomically with accepting an overlapping Setup.
+        # Only the latest completion reporter is retained during repeated Setup.
+        with _PREPARE_LOCK:
+            fetch = not error and not recognition_ready(model_name) and _PREPARE_DOWNLOAD
+            if not fetch:
+                if not error and unavailable and not recognition_ready(model_name):
+                    error = ("Local speech recognition could not load cached models. Check dependencies, "
+                             "then run /look setup. Use Right Option to type.")
+                _PREPARATION_ERROR = error
+                _PREPARING = False
+                callback, _PREPARE_REPORT = _PREPARE_REPORT, None
+        if fetch:
+            try:
+                for repo, load in missing:
+                    if try_load(repo, load, fetch=True):
+                        break
+                if not recognition_ready(model_name):
+                    raise RuntimeError("No usable local speech backend")
+            except Exception as exc:
+                error = failed(exc)
+            with _PREPARE_LOCK:
+                _PREPARATION_ERROR = error
+                _PREPARING = False
+                callback, _PREPARE_REPORT = _PREPARE_REPORT, None
+        if callback is not None:
+            callback(recognition_status(model_name))
+
+    threading.Thread(target=work, name="gaze-asr-prepare" if download else "gaze-asr-prewarm",
+                     daemon=True).start()
 
 
-def prewarm() -> None:
-    """Warm verified cached models only; plugin registration never downloads."""
-    if sys.platform != "darwin":
-        return
+def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
+    """Explicit setup may fetch missing assets only after trying usable caches."""
+    _prepare_recognition(model_name, download=True, report=report)
 
-    def warm():
-        global _PREPARATION_ERROR
-        try:
-            _get_coreml_runner()
-        except AssetIntegrityError as exc:
-            _PREPARATION_ERROR = str(exc)
-            logger.warning("Speech recognition preparation stopped: %s", exc)
 
-    threading.Thread(target=warm, name="gaze-asr-prewarm", daemon=True).start()
+def prewarm(model_name=_DEFAULT_MODEL) -> None:
+    """Registration warms supported verified caches asynchronously, without devices."""
+    _prepare_recognition(model_name, download=False)
 
 
 def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[Dict[str, object]]:

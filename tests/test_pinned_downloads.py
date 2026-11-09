@@ -17,11 +17,14 @@ from tests.test_cursor_context import capture
 
 class PinnedDownloadsTests(unittest.TestCase):
     def setUp(self):
+        # Keep native NumPy imported outside patch.dict(sys.modules) snapshots.
+        __import__("numpy")
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.files = {
             cache.COREML: {"Decoder.mlmodelc/weights/weight.bin": b"coreml"},
             cache.MLX: {"config.json": b"{}", "model.safetensors": b"mlx"},
             cache.WHISPER["base.en"]: {"config.json": b"{}", "model.bin": b"whisper", "tokenizer.json": b"{}"},
+            cache.WHISPER["tiny.en"]: {"config.json": b"{}", "model.bin": b"tiny", "tokenizer.json": b"{}"},
             speech.MODEL_REPO: {name: name.encode() for name in speech.MODEL_FILES},
             speech.VOICE_REPO: {"voices.jsonl": json.dumps(dict(name="Russell", voice_id="r", language="en",
                                    filename="voices/r.safetensors")).encode(), "voices/r.safetensors": b"voice"},
@@ -36,6 +39,8 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.enterContext(patch.object(voice, "_WHISPER_MODELS", {}))
         self.enterContext(patch.object(voice, "_PREPARING", False))
         self.enterContext(patch.object(voice, "_PREPARATION_ERROR", ""))
+        self.enterContext(patch.object(voice, "_PREPARE_DOWNLOAD", False))
+        self.enterContext(patch.object(voice, "_PREPARE_REPORT", None))
         self.enterContext(patch.object(voice.sys, "platform", "darwin"))
         self.enterContext(patch("huggingface_hub.try_to_load_from_cache", side_effect=self.cached))
         self.download = self.enterContext(patch("huggingface_hub.hf_hub_download", side_effect=self.fetch))
@@ -61,6 +66,146 @@ class PinnedDownloadsTests(unittest.TestCase):
             path = self.path(repo, name)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
+
+    def fake_loaders(self):
+        coreml, mlx, whisper = Mock(), Mock(), Mock()
+        self.enterContext(patch.dict(sys.modules, {
+            "hermes_gaze.asr.parakeet_coreml": SimpleNamespace(ParakeetCoreML=coreml),
+            "parakeet_mlx": SimpleNamespace(from_pretrained=mlx),
+            "faster_whisper": SimpleNamespace(WhisperModel=whisper),
+        }))
+        return coreml, mlx, whisper
+
+    def finish_warmup(self):
+        for thread in threading.enumerate():
+            if thread.name in ("gaze-asr-prewarm", "gaze-asr-prepare"):
+                thread.join(2)
+                self.assertFalse(thread.is_alive())
+
+    def test_restart_uses_cached_fallbacks_before_any_download_and_keeps_preference(self):
+        coreml, mlx, whisper = self.fake_loaders()
+        self.populate(cache.WHISPER["base.en"])
+        voice.prewarm()
+        self.finish_warmup()
+        self.assertTrue(voice.recognition_ready())
+        coreml.assert_not_called()
+        mlx.assert_not_called()
+        whisper.assert_called_once()
+        self.download.assert_not_called()
+        # A fresh process with both preferred and fallback caches keeps CoreML.
+        voice._WHISPER_MODELS.clear()
+        self.populate(cache.COREML)
+        voice.prewarm()
+        self.finish_warmup()
+        self.assertIs(voice._COREML_RUNNER, coreml.return_value)
+        coreml.return_value.transcribe_array.assert_called_once()
+        self.assertEqual(whisper.call_count, 1)
+        # An installed but unusable preferred runtime must not strand MLX.
+        voice._COREML_RUNNER = None
+        coreml.side_effect = ImportError("CoreML unavailable")
+        self.populate(cache.MLX)
+        voice.prepare_recognition()
+        self.finish_warmup()
+        self.assertIs(voice._PARAKEET_MODEL, mlx.return_value)
+        self.download.assert_not_called()
+
+    def test_explicit_setup_uses_offline_fallback_before_missing_preferred(self):
+        coreml, mlx, whisper = self.fake_loaders()
+        self.populate(cache.WHISPER["base.en"])
+        self.download.side_effect = OSError("offline")
+        voice.prepare_recognition()
+        self.finish_warmup()
+        self.assertTrue(voice.recognition_ready())
+        whisper.assert_called_once()
+        coreml.assert_not_called()
+        mlx.assert_not_called()
+        self.download.assert_not_called()
+
+    def test_empty_cache_warmup_is_offline_and_setup_can_retry_failed_downloads(self):
+        coreml, mlx, whisper = self.fake_loaders()
+        voice.prewarm()
+        self.finish_warmup()
+        self.assertFalse(voice.recognition_ready())
+        self.assertIn("not ready", voice.recognition_status())
+        self.download.assert_not_called()
+        coreml.assert_not_called()
+        mlx.assert_not_called()
+        whisper.assert_not_called()
+        self.download.side_effect = OSError("offline")
+        voice.prepare_recognition()
+        self.finish_warmup()
+        self.assertFalse(voice.recognition_ready())
+        self.assertIn("could not prepare", voice.recognition_status())
+        self.download.side_effect = self.fetch
+        voice.prepare_recognition()
+        self.finish_warmup()
+        self.assertTrue(voice.recognition_ready())
+
+    def test_cache_integrity_failure_blocks_restart_and_setup_fallback(self):
+        coreml, mlx, whisper = self.fake_loaders()
+        self.populate(cache.COREML)
+        self.populate(cache.WHISPER["base.en"])
+        self.path(cache.COREML, "Decoder.mlmodelc/weights/weight.bin").write_bytes(b"broken")
+        for start in (voice.prewarm, voice.prepare_recognition):
+            start()
+            self.finish_warmup()
+            self.assertFalse(voice.recognition_ready())
+            self.assertIn("changed", voice.recognition_status())
+        coreml.assert_not_called()
+        mlx.assert_not_called()
+        whisper.assert_not_called()
+        self.download.assert_not_called()
+
+    def test_setup_overlapping_restart_is_single_flight_and_explicitly_allows_fetch(self):
+        coreml, _, _ = self.fake_loaders()
+        entered, release, done = threading.Event(), threading.Event(), threading.Event()
+        original = voice.prepare
+        def blocked(repo, **kwargs):
+            if repo == cache.COREML and not kwargs.get("download"):
+                entered.set()
+                self.assertTrue(release.wait(2))
+            return original(repo, **kwargs)
+        with patch.object(voice, "prepare", side_effect=blocked):
+            try:
+                voice.prewarm()
+                self.assertTrue(entered.wait(1))
+                self.assertIn("Preparing", voice.recognition_status())
+                for _ in range(3):
+                    voice.prepare_recognition(report=lambda _: done.set())
+                    voice.prewarm()
+                release.set()
+                self.assertTrue(done.wait(2))
+                self.finish_warmup()
+                self.assertTrue(voice.recognition_ready())
+                coreml.assert_called_once()
+                count = self.download.call_count
+                voice.prepare_recognition()
+                voice.prewarm()
+                self.assertEqual(self.download.call_count, count)
+            finally:
+                release.set()
+                self.finish_warmup()
+
+    def test_linux_restart_loads_configured_whisper_and_first_hold_sees_ready(self):
+        _, _, whisper = self.fake_loaders()
+        self.populate(cache.WHISPER["tiny.en"])
+        with patch.object(voice.sys, "platform", "linux"):
+            voice.prewarm("tiny.en")
+            self.finish_warmup()
+            self.assertTrue(voice.recognition_ready("tiny.en"))
+            session = GazeSession("http://127.0.0.1:1")
+            self.addCleanup(session.close)
+            replies = []
+            with patch.object(service, "get_shared_session", return_value=session), \
+                    patch.object(service, "_VOICE_TURNS", None), \
+                    patch.object(service, "_CONFIG", SimpleNamespace(whisper_model="tiny.en")), \
+                    patch.object(session.microphone, "start", return_value={"ok": True}) as start:
+                service.handle_intent(dict(type="record_start", nonce=session._intent_nonce,
+                    _browser_target="tab", _browser_document="doc"), replies.append)
+            self.assertTrue(replies[-1]["ok"])
+            start.assert_called_once()
+            whisper.assert_called_once()
+        self.download.assert_not_called()
 
     def test_changed_cached_and_downloaded_artifacts_fail_closed(self):
         repo = cache.MLX

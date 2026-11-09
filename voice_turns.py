@@ -42,6 +42,7 @@ def _notice(snapshot):
 class VoiceTurns:
     MAX_PENDING = 8
     MAX_TEXT = 12000
+    TRUNCATION_NOTICE = "Answer shortened here. Full response in Hermes history."
     MAX_SNAPSHOT_BYTES = 262144
 
     def __init__(self, ctx: Any, session: Any) -> None:
@@ -138,6 +139,7 @@ class VoiceTurns:
             messages = [{k: r.get(k, "") for k in
                          ("request_id", "utterance", "text", "status", "error")}
                         | {"queue_position": waiting.get(r["request_id"], 0),
+                           "answer_notice": self.TRUNCATION_NOTICE if r.get("truncated") else "",
                            "plain_error": plain_error(r["status"], r.get("error", ""))
                            if r["status"] in ("failed", "interrupted") else ""}
                         for r in self.runs if r["item_id"] == item["item_id"]]
@@ -176,7 +178,7 @@ class VoiceTurns:
         if (status == "complete" and previous_status != "complete" and self.auto_speak
                 and self.connected and self.capture_state not in ("starting", "recording")
                 and run["text"].strip()):
-            self._speak(speech_text(run["text"]))
+            self._speak(self._speech_text(run))
             self.speaking = run["item_id"]
         self.publish()
 
@@ -193,7 +195,8 @@ class VoiceTurns:
                    session_id=self.binding["session_id"], utterance=text, snapshot=snapshot,
                    wire=f"[Browsing inbox {item_id}; request {request}]\n{text}",
                    resolution_id=0, turn_id="", text="", status="queued", error="",
-                   finished=False, ended=False, title_stream=TitleStream(), title_timer=None)
+                   finished=False, ended=False, truncated=False,
+                   title_stream=TitleStream(), title_timer=None)
         self.runs.append(run)
         self.pending.append(run)
         return run
@@ -409,6 +412,11 @@ class VoiceTurns:
         self.speaking = ""
         self.speech_status = ""
 
+    def _speech_text(self, run):
+        text = speech_text(run["text"])
+        # Append outside Markdown sanitization: an unfinished code fence cannot hide it.
+        return text + ("\n\n" + self.TRUNCATION_NOTICE if run["truncated"] else "")
+
     def _speak(self, text):
         if self.capture_state in ("starting", "recording"):
             return {"ok": False, "error": "Finish talking before reading aloud."}
@@ -510,7 +518,7 @@ class VoiceTurns:
                             and (r["request_id"] == request_id if request_id else r["text"].strip())), None)
                 if run is None or not run["text"].strip():
                     return {"ok": False, "error": "No answer text is available to speak."}
-                result = self._speak(speech_text(run["text"]))
+                result = self._speak(self._speech_text(run))
                 self.speaking = item_id if result.get("ok") else ""
                 self.publish()
                 return result
@@ -709,8 +717,15 @@ class VoiceTurns:
         if parser.title and item and first is run and not item["model_subject"]:
             item["model_subject"] = parser.title
 
+    def _retain_text(self, run, text, *, replace=False, omitted=False):
+        if replace:
+            run["text"], run["truncated"] = "", False
+        remaining = self.MAX_TEXT - len(run["text"])
+        run["truncated"] |= omitted or len(text) > remaining
+        run["text"] += text[:remaining]
+
     def _flush_title(self, run):
-        run["text"] = (run["text"] + run["title_stream"].finish())[-self.MAX_TEXT:]
+        self._retain_text(run, run["title_stream"].finish())
         self._title_decided(run)
 
     def _title_timeout(self, run):
@@ -733,15 +748,19 @@ class VoiceTurns:
                 timing.finish()
             parser = run["title_stream"]
             was_decided = parser.decided
-            text = parser.feed(delta)
+            was_truncated = run["truncated"]
+            # Bound title parsing/copies even if the host supplies one enormous delta.
+            bound = self.MAX_TEXT + 97
+            text = parser.feed(delta[:bound]) if not run["truncated"] else ""
             self._title_decided(run)
             if not parser.decided and run["title_timer"] is None:
                 timer = threading.Timer(.5, self._title_timeout, args=(run,))
                 timer.daemon = True
                 run["title_timer"] = timer
                 timer.start()
-            run["text"] = (run["text"] + text)[-self.MAX_TEXT:]
-            if text and (not was_decided or time.monotonic() - run.get("last_display", 0) >= .08):
+            self._retain_text(run, text, omitted=len(delta) > bound)
+            if run["truncated"] != was_truncated or text and (
+                    not was_decided or time.monotonic() - run.get("last_display", 0) >= .08):
                 self._event(run, "streaming")
 
     def post(self, *, session_id="", turn_id="", assistant_response="", **_):
@@ -755,7 +774,9 @@ class VoiceTurns:
             if run["finished"] or run["status"] in ("failed", "interrupted", "retried", "skipped"):
                 return run["text"]
             if isinstance(assistant_response, str) and assistant_response:
-                run["text"] = run["title_stream"].final(assistant_response)[-self.MAX_TEXT:]
+                bound = self.MAX_TEXT + 97
+                text = run["title_stream"].final(assistant_response[:bound])
+                self._retain_text(run, text, replace=True, omitted=len(assistant_response) > bound)
                 self._title_decided(run)
             else:
                 self._flush_title(run)

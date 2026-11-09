@@ -89,6 +89,100 @@ class VoiceTurnsTests(unittest.TestCase):
         self.assertIn('First retried', self.host.messages[-1][0])
         self.turns.close()
 
+    def test_long_multichunk_answer_keeps_opening_through_final_recall_and_speech(self):
+        item = self.turns.submit('Explain this', snapshot('target'))
+        self.pre('long')
+        body = 'Opening recommendation.\n\n```python\n' + 'x = 1\n' * 2200 + 'CLOSING'
+        answer = '## Target\n\n' + body
+        spoken = []
+        self.turns._playback.play = lambda text, *_: spoken.append(text)
+        self.turns.control('auto_speak')
+        for chunk in ('## Tar', 'get\n\n', body[:7000], body[7000:12000], body[12000:]):
+            self.turns.delta(session_id='session', turn_id='long', delta=chunk)
+        run = self.turns.active
+        self.assertEqual(run['text'], body[:self.turns.MAX_TEXT])
+        streamed = self.chrome.events[-1]['items'][0]['conversation'][0]
+        self.assertEqual(streamed['text'], body[:self.turns.MAX_TEXT])
+        self.assertEqual(streamed['answer_notice'], self.turns.TRUNCATION_NOTICE)
+        self.post('long', answer)
+        if self.turns._speech_thread:
+            self.turns._speech_thread.join(1)
+        self.end('long')
+        self.turns.control('dismiss')
+        self.turns.control('recall')
+        recalled = self.chrome.events[-1]['items'][0]['conversation'][0]
+        self.assertEqual(recalled['text'], body[:self.turns.MAX_TEXT])
+        self.assertEqual(recalled['answer_notice'], self.turns.TRUNCATION_NOTICE)
+        self.assertTrue(self.turns.control('speak', item['item_id'], item['request_id'])['ok'])
+        if self.turns._speech_thread:
+            self.turns._speech_thread.join(1)
+        self.assertEqual(len(spoken), 2)
+        for text in spoken:
+            self.assertTrue(text.startswith('Opening recommendation.'))
+            self.assertEqual(text.count(self.turns.TRUNCATION_NOTICE), 1)
+            self.assertNotIn('```', text)
+            self.assertNotIn('CLOSING', text)
+            self.assertLessEqual(len(text), self.turns.MAX_TEXT + len(self.turns.TRUNCATION_NOTICE) + 2)
+        self.assertEqual(run['text'], body[:self.turns.MAX_TEXT])
+        self.assertEqual(run['title_stream'].pending, '')
+        self.turns.close()
+
+    def test_retention_boundary_final_replacement_and_large_single_chunk(self):
+        self.turns.submit('Explain', snapshot('target'))
+        self.pre('limit')
+        opening = 'First words. ' + 'a' * (self.turns.MAX_TEXT - len('First words. '))
+        self.turns.delta(session_id='session', turn_id='limit', delta=opening)
+        run = self.turns.active
+        self.assertEqual(run['text'], opening)
+        self.assertFalse(run['truncated'])
+        # Crossing the cap publishes the notice even inside the stream throttle window.
+        self.turns.delta(session_id='session', turn_id='limit', delta='overflow')
+        self.assertEqual(self.chrome.events[-1]['items'][0]['conversation'][0]['answer_notice'],
+                         self.turns.TRUNCATION_NOTICE)
+        self.turns.delta(session_id='session', turn_id='limit', delta='tail' * 100000)
+        self.assertEqual(run['text'], opening)
+        self.post('limit', 'Short final answer.')
+        self.assertEqual(run['text'], 'Short final answer.')
+        self.assertFalse(run['truncated'])
+        self.assertEqual(self.chrome.events[-1]['items'][0]['conversation'][0]['answer_notice'], '')
+        self.end('limit')
+        self.turns.submit('Next', snapshot('next'))
+        self.pre('huge')
+        huge = '## Next\n\nOpening.\n\n[unfinished](https://example.invalid/' + 'z' * 100000
+        self.turns.delta(session_id='session', turn_id='huge', delta=huge)
+        run = self.turns.active
+        expected = huge.partition('\n\n')[2][:self.turns.MAX_TEXT]
+        self.assertEqual(run['text'], expected)
+        self.assertTrue(run['truncated'])
+        self.assertEqual(run['title_stream'].pending, '')
+        self.post('huge', huge)
+        self.end('huge')
+        self.assertEqual(run['text'], expected)
+        self.assertEqual(self.chrome.events[-1]['items'][1]['conversation'][0]['answer_notice'],
+                         self.turns.TRUNCATION_NOTICE)
+        self.turns.close()
+
+    def test_final_only_and_interrupted_stream_use_the_same_prefix_bound(self):
+        self.turns.submit('Explain', snapshot('target'))
+        self.pre('final-only')
+        body = 'Opening.\n\n' + '<script>not executable</script> ' * 1000
+        self.post('final-only', '## Target\n\n' + body)
+        self.assertEqual(self.turns.active['text'], body[:self.turns.MAX_TEXT])
+        self.assertTrue(self.turns.active['truncated'])
+        self.end('final-only')
+        self.turns.submit('Next', snapshot('next'))
+        self.pre('interrupted')
+        for chunk in ('Opening.\n\n', 'body ' * 2400, 'tail'):
+            self.turns.delta(session_id='session', turn_id='interrupted', delta=chunk)
+        self.end('interrupted', interrupted=True)
+        run = self.turns.runs[-1]
+        self.assertTrue(run['text'].startswith('Opening.'))
+        self.assertEqual(len(run['text']), self.turns.MAX_TEXT)
+        self.assertTrue(run['truncated'])
+        self.assertEqual(self.chrome.events[-1]['items'][1]['conversation'][0]['answer_notice'],
+                         self.turns.TRUNCATION_NOTICE)
+        self.turns.close()
+
     def test_local_speech_owns_answer_text_and_only_autoplays_completed_answers(self):
         processes = []
 
