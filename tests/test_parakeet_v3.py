@@ -24,6 +24,32 @@ class ParakeetV3Tests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def test_configuration_defaults_preserve_explicit_model_choices(self):
+        from types import SimpleNamespace
+        from hermes_gaze import config
+        for apple in (False, True):
+            with patch.object(config, "apple_silicon_mac", return_value=apple):
+                expected = "parakeet-v3" if apple else "base.en"
+                self.assertEqual(config.GazeConfig().whisper_model, expected)
+                for selected in (None, "auto", "base.en", "tiny.en", "parakeet-v3"):
+                    ctx = SimpleNamespace(get_config=lambda key, default:
+                        selected if key == "whisper_model" and selected is not None else default)
+                    self.assertEqual(config.GazeConfig.from_ctx(ctx).whisper_model,
+                                     expected if selected in (None, "auto") else selected)
+
+    def test_explicit_v3_setup_precedes_cached_legacy_models(self):
+        ready, done = threading.Event(), threading.Event()
+        def load(*, download=False):
+            self.assertTrue(download)
+            ready.set()
+            return object()
+        with patch.object(v3, "ready", side_effect=ready.is_set), \
+                patch.object(v3, "get_runner", side_effect=load), \
+                patch.object(voice, "prepare", side_effect=AssertionError("legacy model accessed")):
+            voice.prepare_recognition("parakeet-v3", report=lambda _: done.set())
+            self.assertTrue(done.wait(2))
+            self.assertTrue(voice.recognition_ready("parakeet-v3"))
+
     def test_missing_and_tampered_runtime_never_download_implicitly(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(v3, "apple_silicon_mac", return_value=True), \

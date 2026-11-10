@@ -1,23 +1,23 @@
-# Optional NVIDIA Parakeet v3 recognition
+# NVIDIA Parakeet v3 recognition
 
-Experiment: 2026-11-10. **Keep CoreML v2 as the default; preserve v3 selection.**
-V3 has cleaner vendor distribution provenance and substantially faster observed
+Default selection updated 2026-11-10: new native Apple Silicon installations use
+NVIDIA v3. Existing explicit model choices are preserved.
+V3 has vendor-origin distribution and substantially faster observed
 process-cold/cache-warm preparation: 0.719 s versus 41.711 s in the comparison,
-with verified v3 product loading separately measured at 1.165–1.226 s. That
-preparation advantage matters on each fresh process, not just installation.
+with verified v3 product loading separately measured at 1.165–1.226 s.
 CoreML v2 remains faster once warm: v3 recognition was 121 ms slower (1.75×).
-One fewer word error out of 200 from one speaker does not establish better
-accuracy. Keep the established warm route by default rather than switching
-existing installations on this sample; choose v3 when preparation time or
-vendor-origin artifacts matter more. Neither selection resolves catalog policy.
+One fewer word error out of 200 from one speaker does not establish better accuracy.
+The startup advantage and vendor distribution justify the new-install default;
+this small warm-recognition difference does not override that choice.
 
 ## Select and prepare
 
-Set Look's existing `whisper_model` plugin setting to `parakeet-v3`, restart Hermes,
-and run `/look setup`. The setting retains its historical name so every existing
-capture, retry, readiness and CLI path uses the same selection. `base.en` remains
-the default selection: CoreML v2 → MLX v2 → faster-whisper base.en on Apple Silicon.
-Set it back to `base.en` and restart to restore that selection.
+Look's `whisper_model` setting defaults to `auto`: NVIDIA `parakeet-v3` on native
+Apple Silicon macOS, otherwise the existing `base.en` selection. Restart Hermes
+after changing it, then run `/look setup`. No configuration file is rewritten.
+An existing explicit `base.en` or `tiny.en` retains the prior CoreML v2 → MLX v2 →
+selected faster-whisper chain on Apple Silicon, or selected Whisper elsewhere.
+Set `parakeet-v3` explicitly to migrate an existing Mac, or `auto` for platform defaults.
 
 V3 currently supports native Apple Silicon macOS only. No new Python product
 dependency, Hermes patch, tool, listener, browser permission or microphone owner is
@@ -38,11 +38,12 @@ second of silence before publishing readiness. Failed native loading is cached;
 a dead worker does not silently restart/replay its failed request. Explicit setup
 may restart it. Ordinary availability/inference failures can use the existing
 cache-only v2/Whisper chain; integrity failures propagate and do not fall through.
-On a fresh process, preparation tries cached CoreML, MLX and Whisper after ordinary
-v3 startup failure, making capture available when a fallback loads. Explicit v3
-setup retries v3 but never downloads fallback models. A warmed fallback remains
-capture-ready after v3 failure. Logs identify native failure and `_LAST_BACKEND`
-identifies the backend that actually returned the transcript.
+On a fresh process, cache-only warmup tries CoreML, MLX and Whisper after ordinary
+v3 startup failure. Explicit v3 setup prepares the selected vendor backend before
+loading any legacy fallback, even when an old cache is present; it never downloads
+fallback models. This avoids a slow v2 initialization before installing v3.
+A warmed fallback remains capture-ready after v3 failure. Logs identify native
+failure and `_LAST_BACKEND` identifies the backend that returned the transcript.
 
 Word milliseconds from the vendor ABI become seconds, validated against audio
 duration, then receive the exact `audio_epoch`. Zero/quiet-buffer handling and
@@ -83,7 +84,7 @@ conversion is included. Fixture decode and asset checksum verification are outsi
 the benchmark timing; startup includes model load and silent inference. The v3
 benchmark constructs the verified downloaded runtime directly; actual cache-only
 product loading, including verification, was separately 1.165 s in the native
-probe. Default v2 startup's 41.7 seconds is a preparation wait, not a per-question
+probe. Prior v2 startup's 41.7 seconds is a preparation wait, not a per-question
 cost. Readiness prevents opening capture before preparation completes.
 
 An initial exploratory v3 startup took 25.562 seconds, then JFK transcription
@@ -219,7 +220,7 @@ HOME/HF_HOME under the same network-denying sandbox:
 env HOME="$V3_HOME" HF_HOME="$V3_HF" $P -m tests.parakeet_v3_offline --audio /path/to/jfk.wav
 ```
 
-Integration verification (2026-11-10):
+Backend-branch verification (2026-11-10, before the new default integration):
 - **66 focused tests passed:** the four modules above plus `tests.test_voice_turns`,
   with external and loopback networking denied.
 - **382 tests passed** in the final `unittest discover -s tests -t .` run. The
@@ -237,13 +238,13 @@ Integration verification (2026-11-10):
   failure.
 - Called the actual setup guide with each selection and mocked preparation:
   v3 discloses ~721 MB, NVIDIA weights, the official native runtime, Hugging Face,
-  GitHub and cache-only fallbacks; default setup retains its v2-chain disclosure.
+  GitHub and cache-only fallbacks; explicit legacy setup retains its v2-chain disclosure.
   No download or device initialization was needed for this copy check.
 
 No full fresh Hermes installation, Linux/Intel execution, multilingual accuracy,
 semantic word-alignment quality, real capture, TUI/UI journey or catalog
-admission was tested. No default change was made. The comparison was retained,
-not rerun; the integration probe is not a new multi-backend benchmark.
+admission was tested. The comparison was retained, not rerun; the integration probe
+is not a new multi-backend benchmark.
 
 Measured dependency versions: NumPy 2.5.4, huggingface_hub 1.33.0,
 faster-whisper 1.2.1, CTranslate2 4.8.5, PyObjC/CoreML 13.0, PyArrow 26.0.1,
@@ -252,3 +253,38 @@ changed. Model/binary/fixture downloads and local inference incurred **$0 servic
 charges**; local compute, bandwidth and disk usage are not monetary estimates.
 Downloaded payloads can remain in the explicit experiment caches. Benchmark
 scripts do not open the microphone or upload audio.
+
+## Default integration verification — 2026-11-10
+
+Merged backend head `4483bc53f203b37a5843dfd5d1bf7348cb022a16` into local master.
+No stored configuration is migrated or rewritten. An unset/`auto` selection uses
+v3 on native Apple Silicon; explicit prior selections retain their behavior.
+V3 setup now prepares the vendor backend before loading legacy cached models.
+
+- 85 targeted tests passed: `tests.test_parakeet_v3`, `tests.test_pinned_downloads`,
+  `tests.test_voice_decode`, `tests.test_first_run`, `tests.test_session_delivery`,
+  `tests.test_voice_turns`, with all network denied.
+- Added regressions for unset/auto platform mapping, preservation of explicit
+  base.en/tiny.en/parakeet-v3, and selected-v3 setup before legacy cache access.
+- The registered `/look setup` handler ran against cached NVIDIA assets with
+  all network denied, real asynchronous preparation and a fixture session.
+  It disclosed NVIDIA/Hugging Face/GitHub/~721 MB and became capture-ready
+  without accessing legacy models. No real Chrome or Hermes host was modified.
+- The actual `tests.parakeet_v3_offline` probe passed against the existing public
+  JFK fixture and pinned runtime/model caches, with all network denied:
+  load/warmup 1.254 s; epoch first word `And`, 1700000000.24–1700000000.56;
+  silence, 8-kHz resampling, 30-second bounds, forced exit/no implicit restart
+  and explicit cached restart passed.
+- Final suite was justified by changing shared configuration defaults:
+  `python -m unittest discover -s tests -t .`, **384 tests passed**.
+  It used an isolated temporary HOME/HF_HOME, short TMPDIR and external-network
+  denial with local sockets allowed.
+
+Existing runtime/model manifests retain their exact revisions and checksum pins.
+No new downloads, personal devices/accounts/audio, paid inference, installed-host
+changes, push or publication occurred. `docs/research/` remains untracked.
+Linux/Intel/Rosetta mapping is regression-tested, not executed on those systems;
+fresh online installation, live voice and immediate decode cancellation remain
+unverified. Converter-owned v2 sources still need catalog-policy clarification;
+the NVIDIA default does not remove explicit legacy choices or cached fallbacks.
+

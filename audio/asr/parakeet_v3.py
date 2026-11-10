@@ -1,4 +1,4 @@
-"""Opt-in NVIDIA v3: verified local assets and one disposable, warm C-ABI worker.
+"""NVIDIA v3: verified local assets and one disposable, warm C-ABI worker.
 
 No listener, microphone, runtime downloader, or host configuration changes.
 """

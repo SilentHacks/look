@@ -120,19 +120,20 @@ Screen-reader compatibility is unverified.
 - Separate-browser and eye modes launch Chrome processes. Speech may launch
   `ffmpeg` to decode audio or macOS `/usr/bin/say` before playback starts.
   Python/native dependencies are installed separately through Hermes.
-- Explicit setup downloads public, pinned, checksum-verified assets anonymously
-  from Hugging Face and its storage redirects: FluidInference's NVIDIA Parakeet
-  CoreML conversion (465 MB), mlx-community's MLX fallback (2.47 GB), SYSTRAN's
-  OpenAI Whisper fallback (148 MB, or 78.1 MB for tiny.en), and Gradium's Phonon
-  read-aloud model (65 MB plus about 0.26 MB per voice). Eye setup fetches Google's
-  MediaPipe runtime from npm (6.6 MB compressed) and Face Landmarker from Google
-  storage (3.76 MB). These are downloads, not hosted speech or eye inference.
-  Converter-owned CoreML/MLX catalog source-policy acceptance is unresolved.
-- Optional `parakeet-v3` recognition downloads NVIDIA's Parakeet v3 Q8 GGUF
-  (714 MB) and official NeMo-Speech.cpp v0.3.0 Metal runtime (7.24 MB compressed)
-  from Hugging Face and GitHub. It starts a local Python/native worker with no
-  network listener; audio crosses a private pipe, not a temporary recording.
-  It is not the default. [Setup, benchmarks and provenance](docs/PARAKEET_V3.md).
+- Explicit setup downloads public, pinned, checksum-verified assets anonymously.
+  New native Apple Silicon installs use NVIDIA's Parakeet v3 Q8 GGUF (714 MB)
+  from Hugging Face and official NeMo-Speech.cpp v0.3.0 Metal runtime (7.24 MB
+  compressed) from GitHub. A local Python/native worker uses private pipes, not
+  a network listener or temporary recording.
+  [Selection, setup, benchmarks and provenance](docs/PARAKEET_V3.md).
+  Existing explicit `base.en` / `tiny.en` choices retain the prior macOS chain:
+  FluidInference CoreML v2 (465 MB), mlx-community MLX v2 (2.47 GB), then SYSTRAN
+  Whisper (148 MB / 78.1 MB). V3 uses these fallbacks only if already cached;
+  Linux/Intel/Rosetta defaults use Whisper. Converter-owned CoreML/MLX catalog
+  source-policy acceptance remains unresolved.
+  Read-aloud setup fetches Gradium Phonon (65 MB plus about 0.26 MB per voice).
+  Eye setup fetches Google's MediaPipe runtime from npm (6.6 MB compressed) and
+  Face Landmarker from Google storage (3.76 MB). These are downloads, not hosted inference.
 - Local storage includes shared model caches, sensitive biometric calibration,
   extension/native-host files and the separate Chrome profile with any sign-ins.
   The MLX fallback uses a temporary WAV, deleted after transcription where

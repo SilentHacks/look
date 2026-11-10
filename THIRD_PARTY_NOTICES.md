@@ -17,7 +17,7 @@ See [release scope and remaining legal/distribution gates](docs/RELEASE_READINES
 
 ## Parakeet speech recognition
 
-- Preferred macOS model: **Parakeet TDT 0.6B v2**, NVIDIA's
+- Explicit legacy macOS selection / cached fallback: **Parakeet TDT 0.6B v2**, NVIDIA's
   [original v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/blob/ae9ad07059c7c739ffaf932226a8fe64ae2620b0/README.md),
   converted to CoreML by **FluidInference**, **CC-BY-4.0** per the
   [pinned conversion card](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/blob/ee09c569f73759e6d44c9bd16766f477b2b36d39/README.md).
@@ -32,11 +32,11 @@ See [release scope and remaining legal/distribution gates](docs/RELEASE_READINES
   [card at `7dd20fe6b1797d35f5e3307e8b1732d9a178edfe`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml/blob/7dd20fe6b1797d35f5e3307e8b1732d9a178edfe/README.md)
   contradicts itself: CC-BY-4.0 frontmatter, Apache 2.0 body. These notices do not
   resolve that contradiction or infer weight terms from the FluidAudio code licence.
-- Optional native **Parakeet TDT 0.6B v3 Q8 GGUF**, published by **NVIDIA**,
+- Default native Apple Silicon model: **Parakeet TDT 0.6B v3 Q8 GGUF**, published by **NVIDIA**,
   [revision `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/tree/541d1f99c6b0c3cd0b11a95167540bb8edefd82b),
   **CC-BY-4.0**. Look downloads unmodified weights and the pinned model card.
   Credit NVIDIA; no endorsement is implied. Weight terms do not license training data.
-- Optional [NVIDIA NeMo-Speech.cpp v0.3.0](https://github.com/NVIDIA/NeMo-Speech.cpp/tree/20999cc921d2b14aa58708f61756a8b2e787ba20),
+- Default native Apple Silicon runtime: [NVIDIA NeMo-Speech.cpp v0.3.0](https://github.com/NVIDIA/NeMo-Speech.cpp/tree/20999cc921d2b14aa58708f61756a8b2e787ba20),
   **Apache-2.0**, Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
   Its official setup-time archive is retained unmodified, including `LICENSE`,
   `NOTICE`, `THIRD_PARTY_NOTICES.md` and the complete shipped third-party license

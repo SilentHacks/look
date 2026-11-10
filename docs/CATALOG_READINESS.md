@@ -29,6 +29,7 @@ was contacted and no approval is claimed.
 
 | Asset source | Evidence and decision |
 |---|---|
+| NVIDIA Parakeet v3 Q8 / NeMo-Speech.cpp | New native Apple Silicon default uses NVIDIA's pinned model and official runtime release. [Payload, licences and remaining policy questions](PARAKEET_V3.md). Explicit legacy choices and cached v2 fallbacks remain; the default change does not approve those sources. |
 | FluidInference CoreML v2 | The [pinned model card](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/blob/ee09c569f73759e6d44c9bd16766f477b2b36d39/README.md) credits FluidInference's conversion. [FluidAudio](https://github.com/FluidInference/FluidAudio) identifies its own Hugging Face organization as the source of its optimized models. The [vendored runner's upstream README](https://github.com/WT-MM/silicon-asr/blob/e8f2e021007eab99031183bed484a82bdfc22a28/README.md) explicitly uses these conversions. This is a first-party converter distribution, not an observed rehosting mirror. It is not NVIDIA's original distribution or endorsement. Official-source acceptance remains a reviewer decision. |
 | mlx-community MLX v2 | The [pinned card](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/blob/8ae155301e23d820d82aa60d24817c900e69e487/README.md) identifies NVIDIA and links the converter's script. [parakeet-mlx upstream](https://github.com/senstella/parakeet-mlx/blob/master/README.md) documents the mlx-community collection and models. That supports runtime-designated distribution, not NVIDIA publication or Hermes approval. |
 | SYSTRAN faster-whisper | The runtime and its converted models come from SYSTRAN, the upstream tool publisher. These are OpenAI-derived conversions, not OpenAI-hosted weights. Both selected English models have pinned revisions/hashes. |
@@ -42,10 +43,11 @@ Full revisions, file sizes, hashes and terms remain in
 
 ### Practical paths without removing voice or eyes
 
-**Preferred:** submit the converter/runtime provenance above for human review once
-outbound communication is authorized. Ask whether the converter's own original
-release and runtime-designated model collection satisfy the official-source
-exception. Keep the current fast local backends while that question is unresolved.
+**Current default:** NVIDIA's v3 weights/runtime on native Apple Silicon.
+Existing explicit v2 choices remain available. The converter/runtime provenance
+above still needs human review when outbound communication is authorized: ask
+whether the converter's original release and runtime-designated model collection
+satisfy the official-source exception. No acceptance is inferred from the v3 default.
 
 **If rejected:** build locally from NVIDIA's pinned original v2 checkpoint using
 reviewed, pinned conversion source, then compile CoreML on the user's Mac. There

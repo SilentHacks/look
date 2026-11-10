@@ -177,10 +177,10 @@ recorded immutable Git blob IDs. Weight checksums come from publisher LFS metada
 
 | Download / publisher | Trigger | Immutable revision / integrity | Approximate size | Cache / licences |
 |---|---|---|---|---|
-| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit recognition setup. Preferred native Apple Silicon backend | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39). SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub. Weights CC-BY-4.0, vendored runner MIT |
-| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Same explicit setup, only if CoreML unavailable on native Apple Silicon | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487). SHA-256 manifest | 2.47 GB | Shared HF hub. Weights CC-BY-4.0, runtime Apache-2.0 |
+| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit legacy base.en/tiny.en setup on native Apple Silicon; cache-only fallback for v3 | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39). SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub. Weights CC-BY-4.0, vendored runner MIT |
+| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Legacy setup if CoreML unavailable; cache-only fallback for v3 | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487). SHA-256 manifest | 2.47 GB | Shared HF hub. Weights CC-BY-4.0, runtime Apache-2.0 |
 | faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux/Intel/Rosetta, or after both Apple Silicon backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba). SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub. Converted weights/runtime MIT |
-| Optional Parakeet v3 Q8 + NeMo-Speech.cpp, NVIDIA | Explicit recognition setup with `whisper_model: parakeet-v3`, Apple Silicon only | GGUF revision `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`; runtime v0.3.0; archive and extracted-file SHA-256 pins | 714 MB weights + 7.24 MB runtime archive | Shared HF + `~/Library/Caches/Look/nemo-speech/0.3.0`. Weights CC-BY-4.0, runtime Apache-2.0 with retained third-party notices. [Evidence and setup](PARAKEET_V3.md) |
+| Default Apple Silicon Parakeet v3 Q8 + NeMo-Speech.cpp, NVIDIA | Explicit recognition setup with auto/parakeet-v3 on native Apple Silicon | GGUF revision `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`; runtime v0.3.0; archive and extracted-file SHA-256 pins | 714 MB weights + 7.24 MB runtime archive | Shared HF + `~/Library/Caches/Look/nemo-speech/0.3.0`. Weights CC-BY-4.0, runtime Apache-2.0 with retained third-party notices. [Evidence and setup](PARAKEET_V3.md) |
 | Phonon-31M English q8, Gradium | Explicit `hermes look setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d). SHA-256 manifest | 65 MB | Plugin phonon cache. Assets Apache-2.0, ptts MIT OR Apache-2.0 |
 | Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7). SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache. Apache-2.0 |
 | MediaPipe Tasks Vision JS/WASM, Google npm | Only explicit `/look setup eyes`. Ordinary start and offline evaluation are cache-only | [0.10.32](https://registry.npmjs.org/@mediapipe/tasks-vision/0.10.32). SHA-256 `b362a2b56aafcce7857047c25dc8fd69612fd8e75018e264717d24290e7815c1` | 6.6 MB compressed. 23.6 MB unpacked | Plugin webcam cache. Apache-2.0 |
@@ -193,17 +193,19 @@ Hugging Face login credentials, and may follow publisher storage redirects.
 Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
 `webcam-0.10.32`. Warm model caches stay offline. Do not delete shared caches wholesale.
 
-`whisper_model` supports **base.en (default), tiny.en and optional parakeet-v3**.
+`whisper_model` supports **auto (default), base.en, tiny.en and parakeet-v3**.
+`auto` resolves to NVIDIA v3 on native Apple Silicon macOS, otherwise base.en.
+Existing explicit choices are not rewritten. Select `parakeet-v3` or `auto`,
+restart Hermes and run `/look setup` to migrate an existing Apple Silicon install.
+Explicit base.en/tiny.en retains CoreML v2 → MLX v2 → selected Whisper on Apple
+Silicon, or selected Whisper on Linux/Intel/Rosetta. V3 setup downloads only its
+vendor assets, before attempting any cached fallback; runtime fallback is cache-only.
 Other aliases, arbitrary repositories and local custom models are unsupported.
 Whisper models include a verified local tokenizer: there is no OpenAI tokenizer
-fallback download. Default backend order on native Apple Silicon remains CoreML v2 →
-MLX v2 → faster-whisper. `parakeet-v3` selects NVIDIA's official local Metal runtime
-and v3 GGUF, with the existing cache-only chain on ordinary runtime failure.
-See [v3 benchmark and limitations](PARAKEET_V3.md); it is not the default.
-Fallback preparation can add the listed sizes. Recognition never downloads while
-holding or releasing Space.
+fallback download. Recognition never downloads while holding or releasing Space.
+See [v3 benchmarks and limitations](PARAKEET_V3.md).
 
-**CoreML v2 is the default.** FluidInference's **CoreML v3 conversion** is unsupported:
+FluidInference's **CoreML v3 conversion** is unsupported:
 its publisher card labels CC-BY-4.0 in frontmatter but says Apache 2.0 in its body.
 That contradiction is unresolved; no license is asserted for that conversion.
 FluidInference publishes the

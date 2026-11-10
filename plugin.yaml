@@ -69,8 +69,8 @@ config_schema:
     description: "Key used to hold or release the pointer target while using the question card. Use a KeyboardEvent.code such as 'AltRight', 'Backquote' or 'F8'. Hold Space to talk."
   whisper_model:
     type: str
-    default: "base.en"
-    description: "Local recognition: base.en or tiny.en uses the existing macOS Parakeet v2 chain with Whisper fallback; parakeet-v3 opts into NVIDIA v3 on Apple Silicon. Run /look setup after changing this setting."
+    default: "auto"
+    description: "Local recognition: auto selects NVIDIA Parakeet v3 on native Apple Silicon, otherwise Whisper base.en. Explicit base.en or tiny.en preserves the prior macOS v2 chain with Whisper fallback. Run /look setup after changing this setting and restarting Hermes."
   tts_voice:
     type: str
     default: "Russell"

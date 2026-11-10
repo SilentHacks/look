@@ -1,6 +1,6 @@
 """Local speech recognition helpers for hermes-gaze.
 
-Optional NVIDIA v3 plus the existing three transcription backends share one contract (``transcribe_audio_buffer``
+Configured NVIDIA v3 and the legacy three-backend chain share one contract (``transcribe_audio_buffer``
 — ``(text, [{word, start, end}])`` with audio-relative times shifted by
 ``audio_epoch``):
 
@@ -226,7 +226,7 @@ def _prepare_recognition(model_name, *, download, report=None):
             if model_name == "parakeet-v3":
                 loaders.insert(0, ("parakeet-v3", None))
             for repo, load in loaders:
-                if try_load(repo, load):
+                if try_load(repo, load, fetch=download and repo == "parakeet-v3"):
                     break
         except Exception as exc:
             error = failed(exc)
@@ -441,7 +441,7 @@ def transcribe_audio_buffer(
     the temporal aligner can weight them against real fixations.
 
     ``backend`` selects the existing auto/parakeet/whisper chain. Selecting
-    ``parakeet-v3`` here or as ``model_name`` tries the opt-in NVIDIA worker,
+    ``parakeet-v3`` here or as ``model_name`` tries the NVIDIA worker,
     then the existing cache-only chain on ordinary runtime failure."""
     import numpy as np
 

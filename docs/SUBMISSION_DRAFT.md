@@ -46,14 +46,16 @@ It does not start Hermes or modify an installed host.
   a background GET-only demo/status server on 127.0.0.1:9111 and cache-only speech
   warmup. Browser/input/speech workers run while connected. Python/native package
   preparation is separate through Hermes. There is no Look telemetry service.
-- Explicit setup fetches pinned, checksum-verified public assets from Hugging
-  Face and its storage redirects: FluidInference's NVIDIA Parakeet CoreML
-  conversion (465 MB), mlx-community's MLX conversion (2.47 GB), SYSTRAN's OpenAI
-  Whisper fallback (148 MB base.en or 78.1 MB tiny.en), and Gradium's Phonon model
-  (65 MB plus about 0.26 MB per voice). Eye setup fetches Google's MediaPipe
-  runtime from npm (6.6 MB compressed) and Face Landmarker from Google storage
-  (3.76 MB). Speech and eye inference stay local. Converter-owned CoreML/MLX
-  acceptance under rule 17 remains unresolved, not approved by these checks.
+- Explicit setup fetches pinned, checksum-verified public assets. New native
+  Apple Silicon installs use NVIDIA Parakeet v3 Q8 (714 MB) from Hugging Face and
+  NeMo-Speech.cpp v0.3.0 (7.24 MB compressed) from NVIDIA's GitHub release.
+  Existing explicit base.en/tiny.en retains FluidInference CoreML v2 (465 MB),
+  mlx-community MLX v2 (2.47 GB), then SYSTRAN Whisper (148 MB / 78.1 MB).
+  V3 fallbacks are cache-only. Non-Apple defaults use Whisper.
+  Read-aloud setup fetches Gradium Phonon (65 MB plus about 0.26 MB per voice).
+  Eye setup fetches Google's MediaPipe from npm (6.6 MB compressed) and Face
+  Landmarker from Google storage (3.76 MB). Speech and eye inference stay local.
+  CoreML/MLX source-policy acceptance under rule 17 remains unresolved.
 - Shared model caches, sensitive biometric calibration, native-host files and
   Chrome profile/sign-ins persist outside the plugin tree. MLX uses a temporary
   WAV, deleted after transcription where possible. Crashes/deletion failures

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
+from .platform_support import apple_silicon_mac
+
 
 def local_cdp_url(value: str) -> str:
     """Supported companion transport: literal IPv4 loopback, no URL indirection."""
@@ -31,7 +33,7 @@ class GazeConfig:
     dwell_ms: int = 450
     wiggle_trigger: bool = False
     hotkey: str = "AltRight"  # JS KeyboardEvent.code (e.g. "AltRight", "Backquote", "F8")
-    whisper_model: str = "base.en"
+    whisper_model: str = "auto"
     record_trials: bool = False  # Development-only, potentially sensitive browsing evidence.
     early_highlight: bool = True
     highlight_model: str = "jev-1.14.0"
@@ -41,6 +43,8 @@ class GazeConfig:
 
     def __post_init__(self) -> None:
         self.cdp_url = local_cdp_url(self.cdp_url)
+        if self.whisper_model == "auto":
+            self.whisper_model = "parakeet-v3" if apple_silicon_mac() else "base.en"
 
     @classmethod
     def from_ctx(cls, ctx: Any) -> "GazeConfig":
