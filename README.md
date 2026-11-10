@@ -28,14 +28,14 @@ Look can also navigate, fill supported fields and use captured page controls.
 Send, Buy, Delete and ambiguous actions need your mouse click on a review card.
 
 > [!IMPORTANT]
-> **Source beta for technical users.** There is no Chrome Web Store release or
-> approved public install pin yet. Headed browser, real-device and configured-model
-> trials remain user-operated release gates. Start with a non-sensitive page.
+> **Source beta for technical users.** Install from the public source below.
+> There is no Chrome Web Store release. Headed browser, real-device and
+> configured-model trials remain user-operated checks. Start with a non-sensitive page.
 > See the [release evidence and remaining checks](docs/RELEASE_READINESS.md).
 
 ## Your first question
 
-Once [installed](#install-from-a-reviewed-checkout) and [connected](#connect-chrome):
+Once [installed](#install-look) and [connected](#connect-chrome):
 
 1. **Point.** Move the pointer over ordinary text or a table cell.
 2. **Ask.** Press **Right Option**, type “What does this mean?” and submit.
@@ -70,8 +70,9 @@ The supported beta setup is:
 
 - **An Apple Silicon Mac**, native arm64 Python and one display.
 - **Current stable Google Chrome**, installed in Applications.
-- **Stock Hermes**, with a configured model and a canonical local TUI, CLI or
-  Desktop conversation. Use in-process plugins and explicitly allow Look input.
+- **Stock [Hermes Agent](https://github.com/NousResearch/hermes-agent)** installed
+  with Git available. Configure your model in Hermes before asking a question.
+  Use a canonical local TUI, CLI or Desktop conversation.
 - **English** for local speech recognition and read-aloud.
 
 No Hermes fork is needed. Python `>=3.11,<3.15` and Hermes `>=0.22.0` are package
@@ -80,17 +81,20 @@ Python 3.14.9 and stock Hermes `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`.
 Linux and Intel/Rosetta cursor paths are unverified. Windows, alternate Chrome
 builds and multiple displays are unsupported.
 
-### Install from a reviewed checkout
+### Install Look
 
-There is no published release command to paste yet. If you have a reviewed Git
-checkout, run this **from its root** to install its committed revision into your
-intended Hermes profile:
+Run this in a terminal for your intended Hermes profile:
 
 ```sh
-LOOK_SOURCE="$(pwd -P)"
-LOOK_REF="$(git rev-parse --verify HEAD)"
-hermes plugins install "file://$LOOK_SOURCE" --ref "$LOOK_REF" --enable
+hermes plugins install https://github.com/SilentHacks/look.git --ref 10ff13d7480e36a884084091be435a739bc1e722 --enable
 ```
+
+This installs a [public source commit](https://github.com/SilentHacks/look/commit/10ff13d7480e36a884084091be435a739bc1e722),
+not a catalogue or Store release. No GitHub account or local checkout is needed.
+The pin predates the latest local card-sizing, cancellation and navigation fixes.
+Those fixes need a new publicly fetched and verified pin before distribution.
+For a named profile, replace `hermes` with `hermes -p NAME` in all shell commands,
+including installation.
 
 Run interactively. Review the scanner findings and dependency preparation before
 agreeing. Do not bypass a dangerous finding. A noninteractive install or declined
@@ -100,14 +104,13 @@ preparation can leave Look installed but disabled. Check with
 revision, explicit enable did not ask a second dependency question. If installation
 was refused, resolve the reported cause and repeat the pinned install.
 
-Merge this into that Hermes profile's `config.yaml`:
+Allow Look to run in-process and send your browser questions into that Hermes
+conversation:
 
-```yaml
-plugins:
-  isolation: in_process
-  entries:
-    hermes-gaze:
-      allow_gateway_injection: true
+```sh
+hermes config set plugins.isolation in_process
+hermes config set plugins.entries.hermes-gaze.allow_gateway_injection true
+hermes plugins doctor hermes-gaze --ci
 ```
 
 Quit Hermes, run `hermes gateway stop`, then restart Hermes and open a new
@@ -259,8 +262,9 @@ details. Failure cards offer **Try again**, **Skip** and **Continue with the res
 Do not automatically resend a question or action with an unknown outcome.
 
 Before updating, stop Look, quit every Hermes process using it and run
-`hermes gateway stop`. Reinstall the reviewed new commit with `--force --ref`
-and restart Hermes. For the extension, rerun `/look setup extension`, **Reload**
+`hermes gateway stop`. Repeat the public-source install command with `--force`
+and the new commit's full `--ref`, after checking that commit is publicly reachable.
+Restart Hermes. For the extension, rerun `/look setup extension`, **Reload**
 Look in Chrome and pair again. `hermes pm install` repairs dependencies, not Look
 code or speech models.
 

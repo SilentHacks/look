@@ -1,9 +1,9 @@
 # Look: local submission draft
 
 **Prepared for owner review. Not posted or submitted.** Product status: technical
-source beta. No public release pin, Store approval, catalogue acceptance, new
-recording or user/device sign-off is claimed. Organizer form fields, deadline,
-video length and tagging rules need checking against the current official rules.
+source beta. No Store approval, catalogue acceptance, new recording or
+user/device sign-off is claimed. Organizer form fields, deadline, video length
+and tagging rules need checking against the current official rules.
 The old playbook is historical, not the source of those requirements.
 
 ## Copy ready for review
@@ -66,14 +66,15 @@ side effects. Eye tracking has no established population accuracy. Questions and
 bounded page evidence may persist in Hermes/provider history. Models download
 only through explicit setup. Dependencies/native wheels are prepared separately.
 Optional TypeSafe highlighting adds its disclosed question/scope request when
-configured. See [privacy](../README.md#privacy-and-action-limits) and
+configured. See [privacy](../README.md#privacy-and-control) and
 [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 **Source/licence:** MIT repository with attributed vendored/runtime/model terms.
-The configured origin is `https://github.com/SilentHacks/hermes-gaze`. Public
-visibility, the final integrated commit and an approved installation URL are not
-verified here. No invented catalogue command or unpublished release SHA belongs
-in submitted copy. [Full attribution](../THIRD_PARTY_NOTICES.md).
+The public repository is [SilentHacks/look](https://github.com/SilentHacks/look).
+The [README installation](../README.md#install-look) pins an anonymously fetched
+commit. It predates the latest local fixes, so verify a new public pin after
+integration before sharing those changes. No catalogue or Store release is claimed.
+[Full attribution](../THIRD_PARTY_NOTICES.md).
 
 ## Suggested 85-second recording plan
 
@@ -118,7 +119,7 @@ Marketplace/Store availability or all-platform claim is supported by this draft.
 - [ ] Run headed user/provider/device journeys for every behavior shown. Keep failures and limits honest.
 - [ ] Review recording for private content and clear audio/image/voice rights.
 - [ ] Approve exact public source pin, installation command, media and outbound text.
-- [ ] After authorized publication, verify clean-home public-pin install and link accessibility.
+- [ ] Repeat isolated public-pin installation and link checks for the final integrated commit before distribution.
 - [ ] Explicitly authorize each PR, post, publication and submission. Retain the resulting receipt.
 
 No checkbox here was completed by inference from a different lane or old report.

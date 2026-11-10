@@ -107,6 +107,46 @@ Apple `say` fallback audio in a submission without establishing publication righ
 
 ## Installation actually exercised
 
+### Public source installation
+
+On 2026-11-10, GitHub's anonymous repository API reported
+[`SilentHacks/look`](https://github.com/SilentHacks/look) as public.
+The old HTTPS repository address returns HTTP 301 to that URL.
+The configured SSH origin was left unchanged.
+
+Anonymous `git ls-remote` reported public `master` at
+[`10ff13d7480e36a884084091be435a739bc1e722`](https://github.com/SilentHacks/look/commit/10ff13d7480e36a884084091be435a739bc1e722).
+The README uses this full SHA with the official stock Hermes
+[Git source installer](https://github.com/NousResearch/hermes-agent/blob/2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19/hermes_cli/plugins_cmd_install.py),
+not a catalogue name, release tag or unpublished local commit.
+
+The same stock host revision listed below was archived into a temporary directory.
+`HOME`, `HERMES_HOME`, XDG roots, temporary directory and uv cache were isolated.
+An allowlisted environment excluded credentials and personal configuration.
+Existing prepared Python dependencies were used only for bootstrap imports.
+Stock PM prepared the isolated runtime and plugin dependencies.
+
+| Check | Observed result |
+|---|---|
+| Public HTTPS install with the README's exact `--ref` and `--enable`, no TTY | Exit 0, installed disabled because dependency consent was skipped |
+| `hermes plugins enable hermes-gaze` | Exit 0, dependencies prepared and plugin enabled |
+| Fresh-process list and installed Git HEAD | Enabled `git pinned@10ff13d7`, HEAD exactly matched the full public pin |
+| Installed plugin doctor with `--ci` | Exit 0, discovery/import/registration passed, 14 tools and 7 hooks |
+| Both README `hermes config set` commands | Exit 0, saved `in_process` and Boolean input permission in the isolated profile |
+
+No host source was patched. No provider call, browser, device, personal profile
+or model download was used. No dangerous scanner finding was bypassed.
+The archived host printed the same missing native-tool/install-stamp warnings
+described below. This verifies plugin installation, not a fresh Hermes application
+install or a working browser/provider/device session.
+
+**Pin limit:** this public commit predates the local card-sizing, exact cancellation
+and navigation changes. Integrate and publish those changes separately, then
+anonymously fetch and repeat installation/doctor before updating the README pin.
+A local commit, including this documentation change, is not a public install pin.
+
+### Earlier local-source installation
+
 Host source: unmodified stock Hermes
 `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` (`0.0.0` package metadata).
 Python 3.14.9, Darwin 27.0.0 arm64. A Git archive of the host ran from a disposable
@@ -294,8 +334,8 @@ mutation was used. The user trial below is a procedure, not completed acceptance
 User-operated only; use fictional data and a configured provider you authorize.
 Keep profiles, account names and terminal history out of recordings.
 
-1. Install the final local Git SHA using the README's pinned command, check
-   `hermes plugins list --plain --no-bundled`, and merge the injection/in-process
+1. Install the public Git SHA using the [README's pinned command](../README.md#install-look),
+   check `hermes plugins list --plain --no-bundled`, and set the injection/in-process
    configuration. In the old conversation, use **Stop request** for any request
    you want cancelled, wait for its outcome, then `/look stop`. Disconnect alone
    does not cancel admitted processing.

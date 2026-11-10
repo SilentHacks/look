@@ -4,6 +4,10 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Installation now uses the public `SilentHacks/look` repository at an
+  anonymously verified immutable commit. Documents stock Hermes profile setup,
+  installation limits and the need to refresh the pin after local fixes are published.
+
 - Streamed answer cards reserve viewport-bounded reading room for long answers
   while keeping short answers compact and preserving top/manual scroll.
 - Extension navigation recovery preserves the connection for explicitly classified
