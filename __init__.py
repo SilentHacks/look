@@ -285,6 +285,11 @@ def register(ctx: Any) -> None:
                         native.close()
                     return "Look start was cancelled."
                 if bind_only:
+                    if command != "demo" and not session.cdp.is_connected:
+                        result = _handle_slash_command("start")
+                        if not session.cdp.is_connected:
+                            failed(result)
+                            return result
                     if not ready():
                         return "Look start was cancelled."
                     return _handle_slash_command(raw_args)
@@ -293,7 +298,8 @@ def register(ctx: Any) -> None:
             if (command.endswith("--extension") or session.cdp.source != requested_source
                     or not session.cdp.is_connected):
                 return result  # Disclosure/refused source changes never bind the old browser.
-            ready()
+            if not ready():
+                return "Look start was cancelled."
             if native is None:
                 result += "\nThis frontend can’t confirm whether Look delivered your question. If no answer arrives, check the conversation in Hermes. Don’t send it again automatically."
             from .audio.voice import recognition_ready, recognition_status
@@ -304,7 +310,7 @@ def register(ctx: Any) -> None:
         if command == "status" and session.cdp.is_connected:
             with turns.lock:
                 if not turns.connected:
-                    result += "\n/look start to connect this conversation."
+                    result = "Chrome is attached. Run /look start in this conversation before asking."
                 elif turns.binding["session_id"] != kwargs.get("session_id"):
                     result += "\nConnected to another conversation. /look start to use this one."
                 elif session.tasks.approval_session == turns.binding["session_id"]:

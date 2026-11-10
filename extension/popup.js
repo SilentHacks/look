@@ -20,7 +20,9 @@ async function send(op) {
     document.querySelector('#start').hidden = result.connected || !!request;
     document.querySelector('#add').hidden = !result.connected;
     document.querySelector('#stop').hidden = !result.connected;
-    status.textContent = result.connected ? 'Connected. Return to the page to ask a question.' : '';
+    status.textContent = result.connected ? (result.armed
+      ? 'Ready. Return to the page to ask a question.'
+      : 'Connected. Preparing the page; check /look status in Hermes before asking.') : '';
     if (op === 'pair' || op === 'add') {
       window.close();
     }

@@ -2,12 +2,16 @@
 
 Run with a stock host checkout and its prepared dependencies, never a live home:
 python tests/stock_startup.py --host PATH --deps SITE_PACKAGES --python PYTHON
+
+Add --journey-chrome CFT_EXECUTABLE --journey-video FACE.y4m --journey-assets CACHE
+for real headed command ordering, popup pairing, camera handoff and Space capture.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import hashlib
+from contextlib import nullcontext
 import importlib.machinery
 import importlib.util
 import ipaddress
@@ -30,7 +34,12 @@ def child(args):
     host, deps = Path(args.host).resolve(), Path(args.deps).resolve()
     def audit(event, values):
         if event in ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn"):
-            raise PermissionError("No child execution in fixture")
+            if not args.journey_chrome or event != "subprocess.Popen":
+                raise PermissionError("No child execution in fixture")
+            executable, argv = values[:2]
+            if str(executable) != args.journey_chrome or not any(
+                    str(arg).startswith("--user-data-dir=" + str(base)) for arg in argv):
+                raise PermissionError("Only disposable fixture Chrome may execute")
         if event in ("socket.connect", "socket.getaddrinfo", "socket.gethostbyname"):
             address = values[1] if event == "socket.connect" else values[0]
             if isinstance(address, tuple):
@@ -47,6 +56,8 @@ def child(args):
             raise PermissionError("External network forbidden")
         if event == "open" and isinstance(values[0], (str, bytes)):
             path = Path(os.fsdecode(values[0])).resolve()
+            if args.journey_chrome and path == Path("/dev/null"):
+                return
             mode, flags = str(values[1] or ""), values[2] or 0
             writing = any(c in mode for c in "wax+") or flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC)
             if writing and not path.is_relative_to(base):
@@ -110,7 +121,8 @@ def child(args):
         plugin = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader, is_package=False))
         loader.exec_module(plugin)
         browser = GazeSession(profile_dir=base / "chrome")
-        browser.eval_js = lambda *a, **k: True
+        if not args.journey_chrome:
+            browser.eval_js = lambda *a, **k: True
         calls, hooks = [], []
         barrier = threading.Event()
         def inference(agent, kwargs):
@@ -134,6 +146,8 @@ def child(args):
         # Only the browser attachment is synthetic here; consent transport has its own real-socket suite.
         browser_calls = []
         def start_browser(raw, **kw):
+            if args.journey_chrome:
+                return cli._handle_slash_command(raw, **kw)
             browser_calls.append(raw)
             if raw.startswith("start --extension"):
                 return cli._handle_slash_command(raw, **kw)
@@ -152,7 +166,8 @@ def child(args):
                     patch.object(service, "get_shared_session", return_value=browser), \
                     patch.object(plugin, "get_shared_server", return_value=Mock()), \
                     patch.object(plugin, "_handle_slash_command", side_effect=start_browser), \
-                    patch.object(type(browser.cdp), "is_connected", property(lambda _: True)), \
+                    (patch.object(type(browser.cdp), "is_connected", property(lambda _: True))
+                     if not args.journey_chrome else nullcontext()), \
                     patch.object(voice, "_WHISPER_MODELS", {}), \
                     patch.object(voice, "apple_silicon_mac", return_value=False), \
                     patch.object(voice, "prepare"), patch.object(voice, "get_whisper_model", side_effect=load_asr), \
@@ -180,6 +195,11 @@ def child(args):
                         return turns.runs[-1]
                     sid = await create("first-real")
                     assert (await rpc("session.info", session_id=sid))["lazy"]
+                    if args.journey_chrome:
+                        from tests.stock_look_journey import journey
+                        asr_release.set()
+                        output["journey"] = await journey(args, base, browser, turns, look, create, sid)
+                        return output
                     # Match a normal stock profile: injection granted, isolation omitted.
                     config_path = home / "config.yaml"
                     config = json.loads(config_path.read_text())
@@ -499,6 +519,10 @@ def main():
     parser.add_argument("--deps", required=True)
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--child", action="store_true")
+    parser.add_argument("--journey-chrome")
+    parser.add_argument("--journey-video")
+    parser.add_argument("--journey-assets")
+    parser.add_argument("--journey-out", type=Path)
     args = parser.parse_args()
     if args.child:
         child(args)
@@ -522,11 +546,29 @@ def main():
             XDG_CONFIG_HOME=str(root / "config"), XDG_CACHE_HOME=str(root / "cache"),
             XDG_DATA_HOME=str(root / "data"), HERMES_DISABLE_LAZY_INSTALLS="1", PYTHONDONTWRITEBYTECODE="1",
             OPENAI_API_KEY="offline-fixture", OPENAI_BASE_URL="http://127.0.0.1:9/v1")
+        extra = []
+        if args.journey_chrome:
+            import shutil
+            for name, source in (("video", args.journey_video), ("assets", args.journey_assets)):
+                target = root / ("video.y4m" if name == "video" else name)
+                if name == "assets":
+                    shutil.copytree(source, target)
+                else:
+                    shutil.copyfile(source, target)
+                extra += ["--journey-" + name, str(target)]
+            extra += ["--journey-chrome", args.journey_chrome]
         result = subprocess.run([args.python, "-I", "-B", str(Path(__file__).resolve()), "--child",
-            "--host", str(host), "--deps", str(Path(args.deps).resolve())], env=env, cwd=root,
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=150)
+            "--host", str(host), "--deps", str(Path(args.deps).resolve()), *extra], env=env, cwd=root,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300 if extra else 150)
         print(result.stdout)
         print(result.stderr, file=sys.stderr)
+        if args.journey_out:
+            import shutil
+            args.journey_out.mkdir(parents=True, exist_ok=True)
+            (args.journey_out / "stdout.txt").write_text(result.stdout)
+            (args.journey_out / "stderr.txt").write_text(result.stderr)
+            if (root / "screens").exists():
+                shutil.copytree(root / "screens", args.journey_out / "screens", dirs_exist_ok=True)
     assert hashes == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}, "Stock sources changed"
     raise SystemExit(result.returncode)
 

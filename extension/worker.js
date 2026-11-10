@@ -203,7 +203,8 @@ async function dispatch(message) {
         } else if (method === 'Look.lease') {
           if (params.uniqueContextId !== tab.document) fail('Lease belongs to another document.');
           result = await direct(tab, 'Runtime.evaluate', {
-            expression: 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true', uniqueContextId: tab.document});
+            expression: '(() => {const api=window.__HERMES_GAZE_OVERLAY__;if(!api)return false;api.transportAlive();return api.inputReady()})()', uniqueContextId: tab.document});
+          if (params.uniqueContextId === tab.document) tab.armedAt = result.result?.value === true ? Date.now() : 0;
         } else result = await direct(tab, method, params);
       } catch (error) {
         // Chrome extensions can wrap the protocol error in JSON inside Error.message.
@@ -231,6 +232,11 @@ async function dispatch(message) {
         return;
       }
       if (method === 'Page.getFrameTree') tab.mainFrame = result.frameTree.frame.id;
+      // Reattaching can announce an existing world before getFrameTree identifies its frame.
+      if (method === 'Page.createIsolatedWorld' && params.frameId === tab.mainFrame) {
+        const document = tab.contexts.get(result.executionContextId);
+        if (document && document !== tab.document) { tab.document = document; tab.armedAt = 0; }
+      }
       if (method === 'Page.addScriptToEvaluateOnNewDocument') tab.scripts.add(result.identifier);
       if (method === 'Page.removeScriptToEvaluateOnNewDocument') tab.scripts.delete(params.identifier);
     }
@@ -250,9 +256,9 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
       if (context.auxData?.frameId === tab.mainFrame) tab.document = context.uniqueId;
     }
   } else if (method === 'Runtime.executionContextDestroyed') {
-    if (tab.contexts.get(params.executionContextId) === tab.document) tab.document = '';
+    if (tab.contexts.get(params.executionContextId) === tab.document) { tab.document = ''; tab.armedAt = 0; }
     tab.contexts.delete(params.executionContextId);
-  } else if (method === 'Runtime.executionContextsCleared') { tab.contexts.clear(); tab.document = ''; }
+  } else if (method === 'Runtime.executionContextsCleared') { tab.contexts.clear(); tab.document = ''; tab.armedAt = 0; }
   else if (method === 'Page.navigatedWithinDocument' && params.frameId === tab.mainFrame) tab.route++;
   if (tab.claimed) {
     try { post({sessionId: tab.session, method, params}); } catch (_) { void stop(); }
@@ -301,7 +307,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       return {ok: true, connected: false, request: host.request,
         selection: tab && {id: tab.id, windowId: tab.windowId, revision, epoch}};
     }
-    return {ok: true, connected: !dead && !!generation};
+    const [current] = await chrome.tabs.query({active: true, ...(popupWindow === null ? {currentWindow: true} : {windowId: popupWindow})});
+    const selected = tabs.get(current?.id);
+    return {ok: true, connected: !dead && !!generation,
+      armed: !dead && !!selected?.armedAt && Date.now() - selected.armedAt < 4000};
   })().then(reply, error => reply({ok: false, error: error.look ? error.message : 'Chrome did not complete the connection. Check debugger access, then /look stop and /look start --extension in Hermes.'}));
   return true;
 });

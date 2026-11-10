@@ -225,16 +225,20 @@ class FirstRunTests(unittest.TestCase):
                     self.assertNotIn('Look is stopped', result)
 
 
-    def test_status_during_setup_preserves_connection_but_explicit_connect_replaces_it(self):
+    def test_status_and_repeated_connect_preserve_setup_but_new_key_revokes_it(self):
         from unittest.mock import PropertyMock
         plugin, session, ctx, command, _ = self.register(SimpleNamespace(get=lambda *a: True))
         ctx.turns.bind(session_key="key", session_id="session")
         binding = ctx.turns.binding
+        generation = ctx.turns.binding_generation
         with patch.object(plugin, "_handle_slash_command", return_value="Tracker status"), \
              patch.object(type(session.cdp), "is_connected", new_callable=PropertyMock, return_value=True):
             command("tracker", session_key="key", session_id="session")
             self.assertIs(ctx.turns.binding, binding)
             command("connect", session_key="key", session_id="session")
+            self.assertIs(ctx.turns.binding, binding)
+            self.assertEqual(ctx.turns.binding_generation, generation)
+            command("connect", session_key="replacement-key", session_id="session")
             self.assertIsNot(ctx.turns.binding, binding)
 
 

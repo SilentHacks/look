@@ -58,6 +58,12 @@ unload and owned-document replacement close only the camera process we started.
 
 Run `/look calibrate` to open the camera window. `/look mode webcam` opens the same setup.
 
+In separate-browser mode, these commands first start Chrome if it is disconnected.
+For your usual Chrome, pair `/look start --extension` before `/look setup eyes`.
+Repeating Start or reopening calibration in the same conversation keeps the camera
+and saved setup alive. Stop, a new conversation/input binding, or a replaced browser
+connection revokes it; changing browser source still requires Stop first.
+
 1. Maximize the window and keep Chrome zoom at 100%.
 2. Choose **Start calibration**, or **Calibrate again** for a saved setup.
 3. Look at each dot, tap Space and keep looking until it moves, about one second.

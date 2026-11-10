@@ -55,7 +55,10 @@ change it on updates. There is no Store listing or automatic extension update.
    and choose **Connect this tab**. An already-open popup discovers the request
    automatically. Once offered, its conversation and tab remain pinned: an expired
    or replaced request needs a fresh popup.
-3. While speech recognition prepares, use **Right Option** to type. The page
+3. Return to the selected page. The popup distinguishes **Connected. Preparing the
+   page** from **Ready**, based on that document's private input acknowledgement.
+   Pairing alone does not mean Space is armed. While speech recognition prepares,
+   use **Right Option** to type. The page
    announces when recognition is ready; then hold Space and wait for **Listening**
    before speaking. Run `/look setup` if speech files are missing.
    `/look status` checks the browser connection, not microphone permission.

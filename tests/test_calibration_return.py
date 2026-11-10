@@ -240,7 +240,9 @@ class SetupConnection(unittest.TestCase):
                 self.assertTrue(host.on_return(True, lambda: True)["ok"])
             self.assertTrue(host.on_return(False, lambda: True)["ok"])
             self.assertEqual(returned[-2:], [fallback, fallback])
-            turns.bind(session_key="key", session_id="session")  # New connection, even to the same session.
+            turns.bind(session_key="key", session_id="session")
+            self.assertTrue(host._setup_valid())
+            turns.bind(session_key="replacement-key", session_id="session")
             self.assertFalse(host.on_return(False, lambda: True)["ok"])
             self.assertEqual(len(returned), 3)
             turns.coach["rehearsed"] = False

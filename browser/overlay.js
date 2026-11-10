@@ -3297,6 +3297,8 @@
     uiFrame,
     uiFrames,
     transportAlive() { transportUntil = performance.now() + 4000; },
+    inputReady() { return S.ready && !!_intentNonce && !!inbox?.session_connected &&
+      surfaceIntact() && uiFrame.isConnected && pillFrame.isConnected; },
     uiReady() {
       transportUntil = performance.now() + 4000;
       S.ready = true;

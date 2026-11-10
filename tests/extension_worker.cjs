@@ -25,7 +25,7 @@ function fixture() {
     tabs.set(1,{id:1,window:7,session:'selected',closed:false,scripts:new Set(),contexts:new Map([[1,'doc']]),document:'doc',route:2});
   `, context);
   const command = (method = 'Runtime.evaluate', operation = 'mutation') => {
-    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',expression:'mutation',worldName:'hermes-gaze',_look_operation:operation,_look_owner:{document:'doc',route:2}}};
+    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',frameId:'main',expression:'mutation',worldName:'hermes-gaze',_look_operation:operation,_look_owner:{document:'doc',route:2}}};
     return vm.runInContext('dispatch(request)', context);
   };
   return {context, messages, commands, listeners, command,
@@ -34,6 +34,25 @@ function fixture() {
     move() { windowId = 8; }};
 }
 (async () => {
+  const readiness = fixture();
+  const popupStatus = () => new Promise(resolve => readiness.listeners.popup(
+    {op:'status'}, {id:'look',url:'chrome-extension://look/popup.html'}, resolve));
+  assert.equal((await popupStatus()).armed, false, 'pairing is not page readiness');
+  readiness.context.chrome.debugger.sendCommand = async () => ({result:{value:true}});
+  await readiness.command('Look.lease');
+  assert.equal((await popupStatus()).armed, true, 'exact-document input acknowledgement enables readiness');
+  readiness.listeners.debugger({tabId:1}, 'Runtime.executionContextsCleared', {});
+  assert.equal((await popupStatus()).armed, false, 'document loss clears readiness');
+  const reused = fixture();
+  vm.runInContext("tabs.get(1).document='';tabs.get(1).mainFrame=''", reused.context);
+  reused.listeners.debugger({tabId:1}, 'Runtime.executionContextCreated',
+    {context:{id:1,name:'hermes-gaze',uniqueId:'doc',auxData:{frameId:'main'}}});
+  reused.context.chrome.debugger.sendCommand = async (_, method) => method === 'Page.getFrameTree'
+    ? {frameTree:{frame:{id:'main'}}} : {executionContextId:1};
+  await reused.command('Page.getFrameTree');
+  await reused.command('Page.createIsolatedWorld');
+  assert.equal(vm.runInContext('tabs.get(1).document', reused.context), 'doc',
+    'reattachment must bind the existing main-frame world without requiring another context event');
   // Only trusted classified evaluations/fixed lifecycle operations can reject safely.
   for (const [method, operation] of [
     ['Page.getFrameTree', 'mutation'], ['Look.lease', 'mutation'],

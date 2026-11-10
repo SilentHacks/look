@@ -4,6 +4,16 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Eye setup now establishes its browsing connection before pinning the camera's
+  lifetime. Repeated Start/setup in the same conversation retains the exact input
+  binding, including SDK frontends; changed keys, Stop and browser replacement
+  still revoke it. Added headed stock-Hermes command-ordering coverage.
+- Extension pairing no longer implies page readiness in the popup. Ready requires
+  a recent exact-document acknowledgement of private frames and conversation input;
+  navigation clears that acknowledgement.
+- Reconnecting to the same extension tab now binds Chrome's existing named isolated
+  world even when its context event precedes frame discovery. The returned exact
+  context ID establishes ownership; no operation is replayed or focus check relaxed.
 - Eye tracking now stays in its owned camera window when browsing destinations
   disappear or reattach, while the approved browser connection remains live.
   An explicit separate-browser start-page fallback becomes the next return target.

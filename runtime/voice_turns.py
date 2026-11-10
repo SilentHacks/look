@@ -110,7 +110,7 @@ class VoiceTurns:
             tasks = getattr(self.session, "tasks", None)
             if tasks:
                 tasks.set_approval_mode()
-            if (native_input is not None and self.connected and self.binding["session_id"] == session_id and
+            if (self.connected and self.binding["session_id"] == session_id and
                     self.binding["session_key"] == session_key and self.native_input is native_input):
                 self._secret_context = _secret_context if _secret_context is not None else copy_context()
                 return "Look is connected."

@@ -226,6 +226,8 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
             status = session.cdp.connection_status
             if session.cdp.is_connected:
                 return "Look is ready in the selected Chrome tabs."
+            if status["state"] in ("connecting", "connected"):
+                return "Look extension connected. Preparing the page; return to an ordinary web tab and check /look status again."
             return status["error"] or ("Waiting for the Look extension. /look stop cancels."
                                        if status["state"] == "waiting" else
                                        "Look extension disconnected. Run /look start --extension to connect again.")

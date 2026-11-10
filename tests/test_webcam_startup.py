@@ -161,7 +161,7 @@ class SessionStartup(unittest.TestCase):
                         if action == "disconnect":
                             self.turns.bind("disconnect", session_key="key", session_id="session")
                         elif action == "rebind":
-                            self.turns.bind(session_key="key", session_id="session")
+                            self.turns.bind(session_key="replacement-key", session_id="session")
                             self.session.start_webcam()  # Must not transfer the old worker's authority.
                         elif action == "cursor":
                             self.session.configure(mode="hover")
