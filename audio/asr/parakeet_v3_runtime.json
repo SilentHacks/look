@@ -1,0 +1,385 @@
+{
+  "directory": "nemo-speech-0.3.0-macos-aarch64-metal",
+  "url": "https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v0.3.0/nemo-speech-0.3.0-macos-aarch64-metal.tar.gz",
+  "size": 7239335,
+  "sha256": "2b972ed8b5dba07492212acf8cb75cbf34ecb141198ffa1997febe84b7c4d9ed",
+  "source_revision": "20999cc921d2b14aa58708f61756a8b2e787ba20",
+  "files": {
+    "bin/nemo-speech": {
+      "size": 1980480,
+      "sha256": "04043537b8f74c0b9956d49326c919857a4af9427b28e180dbdbfb09c8292799"
+    },
+    "include/nemo_speech/asr.h": {
+      "size": 14667,
+      "sha256": "ce1addffe445e7061dad090ef2f3d6845303f536661137a875b95d2109cf8f95"
+    },
+    "include/nemo_speech/diar.h": {
+      "size": 7606,
+      "sha256": "4839f70ccab30af3ed9949751792a547f3a8a4129848f64c8cd69889bd433afd"
+    },
+    "include/nemo_speech/nmt.h": {
+      "size": 4425,
+      "sha256": "ef46ea5643ce99c7c8dfdd322bf93cbc3b0d6ca296fc802e6ed71b31dd98a2b6"
+    },
+    "include/nemo_speech/tts.h": {
+      "size": 8212,
+      "sha256": "dbc414e65f095e90b7ab085a10e3e7559acfcbcc61e4637bec1549279eaecfbb"
+    },
+    "lib/cmake/NeMoSpeech/NeMoSpeechConfig.cmake": {
+      "size": 2456,
+      "sha256": "198dac27044b0c59931af19a56738e438ad75dd607457f12974b5295e5339065"
+    },
+    "lib/cmake/NeMoSpeech/NeMoSpeechConfigVersion.cmake": {
+      "size": 3675,
+      "sha256": "15a58af4e0902d1dd2a2d9e33fa84405e77881008125480fa408c8188e9010c0"
+    },
+    "lib/libggml-base.0.25.1.dylib": {
+      "size": 725152,
+      "sha256": "38c4380d3ddc9faca32b15b91c878b5da89af63270ed2ce2e33fd73ef601cf67"
+    },
+    "lib/libggml-base.0.dylib": {
+      "size": 725152,
+      "sha256": "38c4380d3ddc9faca32b15b91c878b5da89af63270ed2ce2e33fd73ef601cf67"
+    },
+    "lib/libggml-base.dylib": {
+      "size": 725152,
+      "sha256": "38c4380d3ddc9faca32b15b91c878b5da89af63270ed2ce2e33fd73ef601cf67"
+    },
+    "lib/libggml-blas.0.25.1.dylib": {
+      "size": 72896,
+      "sha256": "8b66e983da6952342e7e4e70062897dafe3e06696545a0910cf775417d6d3384"
+    },
+    "lib/libggml-blas.0.dylib": {
+      "size": 72896,
+      "sha256": "8b66e983da6952342e7e4e70062897dafe3e06696545a0910cf775417d6d3384"
+    },
+    "lib/libggml-blas.dylib": {
+      "size": 72896,
+      "sha256": "8b66e983da6952342e7e4e70062897dafe3e06696545a0910cf775417d6d3384"
+    },
+    "lib/libggml-cpu.0.25.1.dylib": {
+      "size": 967808,
+      "sha256": "84dce88e2cee84c8cec546fb508f536438fc01f73ee83bc423227b2555e8cf63"
+    },
+    "lib/libggml-cpu.0.dylib": {
+      "size": 967808,
+      "sha256": "84dce88e2cee84c8cec546fb508f536438fc01f73ee83bc423227b2555e8cf63"
+    },
+    "lib/libggml-cpu.dylib": {
+      "size": 967808,
+      "sha256": "84dce88e2cee84c8cec546fb508f536438fc01f73ee83bc423227b2555e8cf63"
+    },
+    "lib/libggml-metal.0.25.1.dylib": {
+      "size": 2178560,
+      "sha256": "abf8143d5d986d0263225d5883a0ad00b724bd73cc5ca988b5d49db1f4d0a786"
+    },
+    "lib/libggml-metal.0.dylib": {
+      "size": 2178560,
+      "sha256": "abf8143d5d986d0263225d5883a0ad00b724bd73cc5ca988b5d49db1f4d0a786"
+    },
+    "lib/libggml-metal.dylib": {
+      "size": 2178560,
+      "sha256": "abf8143d5d986d0263225d5883a0ad00b724bd73cc5ca988b5d49db1f4d0a786"
+    },
+    "lib/libggml.0.25.1.dylib": {
+      "size": 75024,
+      "sha256": "7204eb88974620d3c5ca4b89b4c7d63dc22319ddb7c28a5fcc90a65a0d7d55f6"
+    },
+    "lib/libggml.0.dylib": {
+      "size": 75024,
+      "sha256": "7204eb88974620d3c5ca4b89b4c7d63dc22319ddb7c28a5fcc90a65a0d7d55f6"
+    },
+    "lib/libggml.dylib": {
+      "size": 75024,
+      "sha256": "7204eb88974620d3c5ca4b89b4c7d63dc22319ddb7c28a5fcc90a65a0d7d55f6"
+    },
+    "lib/libllama-common.0.5.0.dylib": {
+      "size": 3520960,
+      "sha256": "42d38ba7c9bfdccf265778bbb56c3afe2e55fa51b37bdbd1c3d19cae9491a90a"
+    },
+    "lib/libllama-common.0.dylib": {
+      "size": 3520960,
+      "sha256": "42d38ba7c9bfdccf265778bbb56c3afe2e55fa51b37bdbd1c3d19cae9491a90a"
+    },
+    "lib/libllama-common.dylib": {
+      "size": 3520960,
+      "sha256": "42d38ba7c9bfdccf265778bbb56c3afe2e55fa51b37bdbd1c3d19cae9491a90a"
+    },
+    "lib/libllama.0.5.0.dylib": {
+      "size": 2686592,
+      "sha256": "4ad06196c0a655ad742a9b697fdeff4118c863ddabafe3d9369166aa57f7e4b2"
+    },
+    "lib/libllama.0.dylib": {
+      "size": 2686592,
+      "sha256": "4ad06196c0a655ad742a9b697fdeff4118c863ddabafe3d9369166aa57f7e4b2"
+    },
+    "lib/libllama.dylib": {
+      "size": 2686592,
+      "sha256": "4ad06196c0a655ad742a9b697fdeff4118c863ddabafe3d9369166aa57f7e4b2"
+    },
+    "lib/libnemo_speech_asr.dylib": {
+      "size": 1550144,
+      "sha256": "57c21d6c7396cfd8c55975098387e73880c1d3fda0cf9b2280d48eaa42599b83"
+    },
+    "lib/libnemo_speech_asr_c.1.dylib": {
+      "size": 112000,
+      "sha256": "5b4dba475fec8be8a9092861604907b6e3dd4d47c2963c1037cf38fcf5148bf6"
+    },
+    "lib/libnemo_speech_asr_c.dylib": {
+      "size": 112000,
+      "sha256": "5b4dba475fec8be8a9092861604907b6e3dd4d47c2963c1037cf38fcf5148bf6"
+    },
+    "lib/libnemo_speech_nmt.dylib": {
+      "size": 111488,
+      "sha256": "496f572eb51fac7d99416b19fe2674071aad108eac1268b7f7969c171624ab89"
+    },
+    "lib/libnemo_speech_nmt_c.1.dylib": {
+      "size": 71072,
+      "sha256": "3eb6ca50d1b9f3a5202484519c789be4f44101f769fe1447fd0be830ce65cb00"
+    },
+    "lib/libnemo_speech_nmt_c.dylib": {
+      "size": 71072,
+      "sha256": "3eb6ca50d1b9f3a5202484519c789be4f44101f769fe1447fd0be830ce65cb00"
+    },
+    "lib/libnemo_speech_speechlm.dylib": {
+      "size": 1380272,
+      "sha256": "96f7ad49c7951098eb59f4eefd496efd784a4e131638a4dfec5a29f284b446b0"
+    },
+    "lib/libnemo_speech_text_normalization.dylib": {
+      "size": 3107872,
+      "sha256": "fc1c6a4b2e6cf5fbceff17789e1fa338533f98965734b6cdb66df7123ef0f5b3"
+    },
+    "lib/libnemo_speech_tts.1.dylib": {
+      "size": 836960,
+      "sha256": "ece4fc91aceab185a56c9f713c2a59985d0b89bff2fbd306c008e72cc2c2b9ea"
+    },
+    "lib/libnemo_speech_tts.dylib": {
+      "size": 836960,
+      "sha256": "ece4fc91aceab185a56c9f713c2a59985d0b89bff2fbd306c008e72cc2c2b9ea"
+    },
+    "share/doc/nemo-speech/CONTRIBUTING.md": {
+      "size": 5328,
+      "sha256": "dab40307a65b606e687f7731273817794293c16e8d67ba7d836e83a96478c367"
+    },
+    "share/doc/nemo-speech/README.md": {
+      "size": 9718,
+      "sha256": "7dbecbd755f40d12dfa60eec72a7dbdd2e8fbf685bf0a5a91e3dfbc083b9debf"
+    },
+    "share/doc/nemo-speech/docs/README.md": {
+      "size": 2800,
+      "sha256": "185522b03a4e8014f1f3d132a2e3ab8c5cf9e507e9c5e0b295d07080c91b1f6f"
+    },
+    "share/doc/nemo-speech/docs/api.md": {
+      "size": 21145,
+      "sha256": "8f1a8177caf71bb56b850418035f52dd42cc5b1d0d1895992fd3220ea7d15671"
+    },
+    "share/doc/nemo-speech/docs/asr/configuration.md": {
+      "size": 15681,
+      "sha256": "c1781462930865356785d7e56bec7c3bd78f64428ba8f8c3f61eed7f09d0b467"
+    },
+    "share/doc/nemo-speech/docs/asr/customization.md": {
+      "size": 4494,
+      "sha256": "3849d88f25926a1196737b11420027ee1f451abbc9b7307f799190036b4c622d"
+    },
+    "share/doc/nemo-speech/docs/asr/models.md": {
+      "size": 7032,
+      "sha256": "dd89dde01f1b77a095750f4fadcf4762b971103e7026f52ef88096e19f9fe769"
+    },
+    "share/doc/nemo-speech/docs/build.md": {
+      "size": 11522,
+      "sha256": "ba67dc6a79fe6b0af901c9999ad453120abf8b5d7dfaf926affc04214cc7daf1"
+    },
+    "share/doc/nemo-speech/docs/cli.md": {
+      "size": 11366,
+      "sha256": "cf0b7faae6b529dd93c412494f4d1d66632585635d9b5a63c67acec5d0b1ceeb"
+    },
+    "share/doc/nemo-speech/docs/clients.md": {
+      "size": 3215,
+      "sha256": "8c3cd5f72917cf0a9bf8feff33ed8c100ec0f517f8c3ce8a4dfb771b57514d5c"
+    },
+    "share/doc/nemo-speech/docs/development/README.md": {
+      "size": 997,
+      "sha256": "91b7eeb45247c5ccb86c728e100926f690bce39a13d7c2fe185ddf03eecc8847"
+    },
+    "share/doc/nemo-speech/docs/development/asr-batching.md": {
+      "size": 6192,
+      "sha256": "351e7cc131aa055a032aa2cb74b261320fab47793ace608b757abdce84b500a7"
+    },
+    "share/doc/nemo-speech/docs/development/cublas-shim.md": {
+      "size": 2298,
+      "sha256": "9c667e4a17dd819994888a1a5752abc6b55120feafc5dc5d1e565ec696c43baa"
+    },
+    "share/doc/nemo-speech/docs/development/diagnostics.md": {
+      "size": 3885,
+      "sha256": "02864996585ea7f146adc6230a58b3432b16b30ba3b5317ba376c1e5abd60353"
+    },
+    "share/doc/nemo-speech/docs/development/releasing.md": {
+      "size": 5443,
+      "sha256": "0df2669caf3a76b82fbe7a0fbaa20901f4c31696d12ce11b951e957b2683dced"
+    },
+    "share/doc/nemo-speech/docs/development/windows-build.md": {
+      "size": 9887,
+      "sha256": "0ac13086812367ae9f537c16ad6cfdfe1bf5f062914b5cb85831983aae5c8031"
+    },
+    "share/doc/nemo-speech/docs/install.md": {
+      "size": 8249,
+      "sha256": "bec102a2ac4f4566db8f9be6d1c5143cd5345c6a199e018b3083ab48594afc64"
+    },
+    "share/doc/nemo-speech/docs/model-conversion.md": {
+      "size": 5794,
+      "sha256": "d24a8a16e1d5586526ab27a12073cd98fa71f116b695fae68e0523d1a7c3d403"
+    },
+    "share/doc/nemo-speech/docs/nmt/configuration.md": {
+      "size": 3282,
+      "sha256": "fc32f28f71114b049382d850d8c91bdb4d2a7a8cd17e96e05cb8b17f61ecf875"
+    },
+    "share/doc/nemo-speech/docs/nmt/models.md": {
+      "size": 1575,
+      "sha256": "a0f5874b51448351ad36e2a572db16b8647e0b58a19043411e9303ac224a2451"
+    },
+    "share/doc/nemo-speech/docs/s2s/README.md": {
+      "size": 2805,
+      "sha256": "b07a3b137188bc1a29ee21b071c78f01adc452bf22b7cb7307f6cc8290cd503e"
+    },
+    "share/doc/nemo-speech/docs/s2s/clients.md": {
+      "size": 4968,
+      "sha256": "a8c19f0b745b6ad6bdbfb3c9fee588f260d88b1f3036376a35cba507b5069ed9"
+    },
+    "share/doc/nemo-speech/docs/s2s/configuration.md": {
+      "size": 3470,
+      "sha256": "2178cb877efd78a344d646a479e117babb332e86ea68d116840a5ab6ee48e7ca"
+    },
+    "share/doc/nemo-speech/docs/s2s/docker.md": {
+      "size": 2475,
+      "sha256": "f430241ae0296304bac4fc20d6df04f7c8194021c282f06f486c8e7b36e2c750"
+    },
+    "share/doc/nemo-speech/docs/s2s/models.md": {
+      "size": 4537,
+      "sha256": "4e4a8089fd8f0b4c9d7fe7d07af5466dbe98b9e2531065374c20662a1f7d65a7"
+    },
+    "share/doc/nemo-speech/docs/salm/README.md": {
+      "size": 13424,
+      "sha256": "577f3636ab94278248b3bcab836f5d980fc4964b2b95ceb9d29fcb0123666167"
+    },
+    "share/doc/nemo-speech/docs/salm/configuration.md": {
+      "size": 4683,
+      "sha256": "3d8aede60be67251ad194bb75bfe98144347b8d121ff0cbe206fa43e58dd468b"
+    },
+    "share/doc/nemo-speech/docs/salm/models.md": {
+      "size": 3578,
+      "sha256": "48407f82e019b653a019b23ea7fdf43d66e298b710ed5921938c5a387d0f56b3"
+    },
+    "share/doc/nemo-speech/docs/sdk.md": {
+      "size": 8096,
+      "sha256": "b95a4513c65420de711ff24bda87028bb2102e42bf35bf9b1cbe15dfdb15a12f"
+    },
+    "share/doc/nemo-speech/docs/server.md": {
+      "size": 11454,
+      "sha256": "362e137e2d5b8ae19552bc9923f439a9c183c0e2a549bc3f50e9ad1e42c6ae33"
+    },
+    "share/doc/nemo-speech/docs/troubleshooting.md": {
+      "size": 2753,
+      "sha256": "773e9b5d93dc6aa6789635ff0ff6aee5d750d062371756f0b478c79a6c9b7500"
+    },
+    "share/doc/nemo-speech/docs/tts/configuration.md": {
+      "size": 9143,
+      "sha256": "5d60b9e3dc3b51b23622653b8a3463758c79e4386b1f5229b0d97ca3adf07532"
+    },
+    "share/doc/nemo-speech/docs/tts/models.md": {
+      "size": 7029,
+      "sha256": "969ded2e62a455b5df28094cf8fb6a4b284f3758856dfcfc380a21f5f3b15ffa"
+    },
+    "share/licenses/nemo-speech/LICENSE": {
+      "size": 12238,
+      "sha256": "eaaca34b26b27c7be5a5099a0b9ddf9913f2db0aa96f6d5854435f2916d6fdc3"
+    },
+    "share/licenses/nemo-speech/NOTICE": {
+      "size": 233,
+      "sha256": "d5ea773d67035e676503579ecf7d5836a124649d7fe99d59ec3c50cd101e1a80"
+    },
+    "share/licenses/nemo-speech/THIRD_PARTY_NOTICES.md": {
+      "size": 15644,
+      "sha256": "209012f6c9cef085efc58ebf3609d502eb8446db4580bd5267fa36b285b23d4f"
+    },
+    "share/licenses/nemo-speech/third_party/cpp-httplib/LICENSE": {
+      "size": 1075,
+      "sha256": "4b45cbe16d7b71b89ae6127e26e0d90a029198ca5e958ad8e3d0b8bbed364d8b"
+    },
+    "share/licenses/nemo-speech/third_party/ggml/LICENSE": {
+      "size": 1078,
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    "share/licenses/nemo-speech/third_party/llama.cpp/LICENSE": {
+      "size": 1078,
+      "sha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+    },
+    "share/licenses/nemo-speech/third_party/miniaudio/LICENSE": {
+      "size": 2598,
+      "sha256": "bde09ed161fef45da2194cba70601aab33ca6fdfe6eed2e3d95efd15b48561f9"
+    },
+    "share/licenses/nemo-speech/third_party/openfst/COPYING": {
+      "size": 559,
+      "sha256": "dd0c6c9378a98b6a0e96b559b285c8506434fe2691eeeef151e8a8c1c492778e"
+    },
+    "share/licenses/nemo-speech/third_party/protobuf/LICENSE": {
+      "size": 1732,
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+    },
+    "share/licenses/nemo-speech/third_party/re2/LICENSE": {
+      "size": 1558,
+      "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449"
+    },
+    "share/licenses/nemo-speech/third_party/sentencepiece/LICENSE": {
+      "size": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "share/licenses/nemo-speech/third_party/sentencepiece/absl-LICENSE": {
+      "size": 11365,
+      "sha256": "d3e2f59e1d71176dfdb555ece6a41f7a5aa0f52ff21211010ace314f57695f6b"
+    },
+    "share/licenses/nemo-speech/third_party/sentencepiece/darts-clone-LICENSE": {
+      "size": 1481,
+      "sha256": "155f59997298ee336602c49f9c1110f268ac394ca2197eb02647a3555935ad52"
+    },
+    "share/licenses/nemo-speech/third_party/sentencepiece/protobuf-lite-LICENSE": {
+      "size": 1732,
+      "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+    },
+    "share/licenses/nemo-speech/third_party/sparrowhawk/LICENSE": {
+      "size": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "share/nemo-speech/config/README.md": {
+      "size": 881,
+      "sha256": "981118a586fa2cdaab5bed0f0775292002821007ee1da5740a8a77877db50c89"
+    },
+    "share/nemo-speech/config/asr.example.yaml": {
+      "size": 2903,
+      "sha256": "c406506f22ef5baa008138c28817dd18445407e404bfb507630469d203798716"
+    },
+    "share/nemo-speech/config/diar.example.yaml": {
+      "size": 505,
+      "sha256": "ac0e5d93af9fb37c9a03ab0039acd5af0790c36a2b12cc8d181212a1fbd01b5b"
+    },
+    "share/nemo-speech/config/nmt.example.yaml": {
+      "size": 998,
+      "sha256": "313214fe93f9f9f57897823d2d3fe20e7a9986fc18b1df37063985389874d46f"
+    },
+    "share/nemo-speech/config/server.example.yaml": {
+      "size": 3391,
+      "sha256": "afe8b2575c036156322a93aaf2f328f925e6685e3cddc9604c0fca37a9406d0c"
+    },
+    "share/nemo-speech/config/tts.example.yaml": {
+      "size": 1728,
+      "sha256": "a1ccdd6886f25d635aaffd4501c3b9626f7c7b264f280ca72273bb3b14bb651a"
+    },
+    "share/nemo-speech/config/voicechat.yaml": {
+      "size": 390,
+      "sha256": "9013c7a390fc3f8c68c6833400a55aadd91543e01a49db32e64a81a1b32ef17b"
+    },
+    "share/nemo-speech/model-index.json": {
+      "size": 7975,
+      "sha256": "4d5d88c93b006b33b2e02e5c214e97e6c28e96f8673b0d744ccfa1e8f4a255b7"
+    }
+  }
+}
