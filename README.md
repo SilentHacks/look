@@ -1,33 +1,81 @@
-# Look
+<div align="center">
+  <img src="assets/look.png" width="112" height="112" alt="Look icon">
+  <h1>Look</h1>
+  <p><strong>Point at something in Chrome. Ask Hermes about it.</strong></p>
+  <p>Type a question or speak. Read the answer beside the page.<br>Try optional eye tracking when you want to point by looking.</p>
+</div>
 
-<img src="assets/look.png" width="128" height="128" alt="Look icon">
+<p align="center">
+  <a href="#your-first-question">How it feels</a> ·
+  <a href="#get-ready">Get ready</a> ·
+  <a href="#connect-chrome">Connect Chrome</a> ·
+  <a href="#try-eye-tracking">Eye tracking</a> ·
+  <a href="#privacy-and-control">Privacy</a>
+</p>
 
-Ask Hermes about what you point at in Chrome. Type a question or hold Space,
-wait for **Listening**, and speak. Answers appear in a private card; browser
-changes use captured controls and guarded approvals.
+Look is an open-source plugin for Hermes Agent. It gives your question context
+from what you point at, so “What does this mean?” can refer to a table cell,
+a paragraph or a page control. Answers appear in a private card in Chrome.
+You can ask follow-ups without copying the page into a chat.
 
-**Source beta for technical users, not a Chrome Web Store release.** The public
-release pin and user-operated acceptance are still pending. Final isolated browser
-acceptance is blocked; see [evidence, trial procedure and gates](docs/RELEASE_READINESS.md).
+| When you're… | Try asking… |
+|---|---|
+| Reading an unfamiliar term | “Explain this in plain language.” |
+| Checking a table | “What does this column measure?” |
+| Working through a form | “Help me fill this in.” |
 
-## Supported lane
+Look can also navigate, fill supported fields and use captured page controls.
+Send, Buy, Delete and ambiguous actions need your mouse click on a review card.
 
-Apple Silicon Mac, native arm64 Python, standard Google Chrome in Applications,
-one display, English. Use stock Hermes's canonical local TUI/CLI/Desktop session,
-with in-process plugins and explicit injection permission. No Hermes fork or
-startup warmup message is required.
+> [!IMPORTANT]
+> **Source beta for technical users.** There is no Chrome Web Store release or
+> approved public install pin yet. Headed browser, real-device and configured-model
+> trials remain user-operated release gates. Start with a non-sensitive page.
+> See the [release evidence and remaining checks](docs/RELEASE_READINESS.md).
 
-Python `>=3.11,<3.15` and Hermes `>=0.22.0` are metadata constraints, not a tested
-version matrix. Local installation evidence used Python 3.14.9 and stock Hermes
-`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`.
-Linux and Intel/Rosetta cursor paths are unverified; Windows, alternate Chrome
-builds and multiple displays are unsupported. Physical audio, camera and ordinary
-signed-in browser acceptance remain user-operated checks.
+## Your first question
 
-## Install a reviewed local revision
+Once [installed](#install-from-a-reviewed-checkout) and [connected](#connect-chrome):
 
-**No approved public release SHA or catalogue install command is published here.**
-From a reviewed Git checkout, install its committed revision with stock Hermes:
+1. **Point.** Move the pointer over ordinary text or a table cell.
+2. **Ask.** Press **Right Option**, type “What does this mean?” and submit.
+   For voice, hold **Space**, wait for **Listening**, speak, then release.
+3. **Keep going.** Read the answer on the page. Hold Space on its card to ask
+   a follow-up, or point elsewhere for a new question.
+
+| Control | What it does |
+|---|---|
+| **Right Option** | Open a private typed question |
+| Hold **Space** | Talk, after local speech setup |
+| **Q** | Recall answers |
+| **Esc** | Stop or dismiss the current interaction |
+| `/look stop` | Disconnect Look and stop local capture, tracking and read-aloud |
+
+Text fields and keyboard-focused page controls keep their normal Space key.
+Click ordinary page text before talking. A quick Space tap scrolls instead.
+The first real question starts Hermes's lazy agent. No warmup question is needed.
+
+## Get ready
+
+The supported beta setup is:
+
+- **An Apple Silicon Mac**, native arm64 Python and one display.
+- **Current stable Google Chrome**, installed in Applications.
+- **Stock Hermes**, with a configured model and a canonical local TUI, CLI or
+  Desktop conversation. Use in-process plugins and explicitly allow Look input.
+- **English** for local speech recognition and read-aloud.
+
+No Hermes fork is needed. Python `>=3.11,<3.15` and Hermes `>=0.22.0` are package
+constraints, not a tested compatibility matrix. Recorded local installation used
+Python 3.14.9 and stock Hermes `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`.
+Linux and Intel/Rosetta cursor paths are unverified. Windows, alternate Chrome
+builds and multiple displays are unsupported.
+
+### Install from a reviewed checkout
+
+There is no published release command to paste yet. If you have a reviewed Git
+checkout, run this **from its root** to install its committed revision into your
+intended Hermes profile:
 
 ```sh
 LOOK_SOURCE="$(pwd -P)"
@@ -35,16 +83,15 @@ LOOK_REF="$(git rev-parse --verify HEAD)"
 hermes plugins install "file://$LOOK_SOURCE" --ref "$LOOK_REF" --enable
 ```
 
-Run interactively in your intended Hermes profile. Review the scanner findings
-and Python/native dependency preparation before agreeing. Do not bypass a dangerous
-finding. Declining preparation leaves a new installation disabled. When ready,
-`hermes plugins enable hermes-gaze` prepares and enables it; at the observed stock
-revision, that explicit enable command did not ask a second dependency question.
-If installation itself was refused, fix the reported cause and repeat the same
-pinned install instead. Noninteractive success can mean **installed but disabled**;
-check `hermes plugins list --plain --no-bundled`.
+Run interactively. Review the scanner findings and dependency preparation before
+agreeing. Do not bypass a dangerous finding. A noninteractive install or declined
+preparation can leave Look installed but disabled. Check with
+`hermes plugins list --plain --no-bundled`. When ready,
+`hermes plugins enable hermes-gaze` prepares and enables it. At the recorded stock
+revision, explicit enable did not ask a second dependency question. If installation
+was refused, resolve the reported cause and repeat the pinned install.
 
-In that profile's `config.yaml`, merge:
+Merge this into that Hermes profile's `config.yaml`:
 
 ```yaml
 plugins:
@@ -54,144 +101,177 @@ plugins:
       allow_gateway_injection: true
 ```
 
-Quit Hermes, stop its gateway with `hermes gateway stop`, then restart it after
-code/configuration changes. Use your normal terminal app. Native microphone
-permission belongs to the app/process launching Hermes, not to a website.
-Grant it in macOS **System Settings → Privacy & Security → Microphone** before
-voice use; restart the launching app after changing permission.
+Quit Hermes, run `hermes gateway stop`, then restart Hermes and open a new
+conversation. Repeat this restart after code or configuration changes.
 
-## Connect, ask, stop
+### Set up voice when you want it
 
-In the intended new Hermes conversation:
+Typed questions need no microphone or speech models. For voice, run `/look setup`
+in Hermes to explicitly prepare local recognition. The initial Apple Silicon
+recognition download is approximately 465 MB, with fallbacks up to 2.47 GB.
+Wait for recognition to be ready before holding Space.
 
-1. For your existing Chrome, use the extension setup below. For an isolated trial,
-   choose the separate browser; it does not share your ordinary Chrome sign-ins.
-2. Point at ordinary page text and press **Right Option** to type your first
-   real question. It initializes Hermes's lazy agent; no dummy question is needed.
-3. For voice, run `/look setup` to explicitly prepare local recognition, then
-   hold Space, wait for **Listening**, speak and release. Text fields and
-   keyboard-focused controls keep native Space. A tap scrolls.
-4. **Q** recalls answers. Hold Space on an answer for a follow-up. **Esc** stops
-   or dismisses. **Try again**, **Skip**, and **Continue with the rest** recover
-   definite failures; never resend an unknown-outcome action automatically.
-5. `/look stop` ends local capture, tracking, read-aloud, overlays and action
-   approvals. It leaves tabs open and cannot undo changes or cancel a Hermes turn
-   the host already accepted. Stop is shared across Look conversations on this Mac.
+In macOS **System Settings → Privacy & Security → Microphone**, grant permission
+to the app or process launching Hermes, not Chrome. Restart the launching app
+after changing permission. Each recording has a 30-second limit.
+[Downloads and licences](docs/REFERENCE.md#runtime-downloads).
 
-### Separate Look Chrome
+## Connect Chrome
 
-Run `/look start --separate`. This launches/reuses a dedicated persistent profile.
-Only sign in if you intend to retain that account in that profile. Stop leaves
-Chrome and its local debugging port running until you exit that browser.
-Do not forward the port or expose it to Hermes's generic browser tools.
+Choose where you want to browse. Start commands belong in the Hermes conversation
+that should receive your questions.
 
-### Use my existing Chrome
+### Your existing Chrome
 
-Run `/look start --existing`, read the disclosure, then
-`/look start --existing --accept` if you agree. Stable Chrome 145+ needs
-`chrome://inspect/#remote-debugging` enabled and your native Chrome approval.
-This grants **broad debugger access**, including signed-in pages, not merely the
-pointed element. Use regular HTTP(S) tabs in the authorized profile. Look does
-not silently fall back to another browser. After Stop, turn off remote debugging
-in Chrome if no longer wanted. [Connection, revocation and limits](docs/REFERENCE.md#use-my-existing-chrome).
+Use the unpacked extension beta to select tabs in your usual Chrome profile.
+It keeps your existing sign-ins.
 
-### Existing Chrome: extension beta
+1. Run `/look setup extension` in Hermes.
+2. Open `chrome://extensions` in the Chrome profile you want. Enable **Developer
+   mode**, choose **Load unpacked**, and select the folder printed by setup:
 
-1. Run `/look setup extension` (shell: `hermes look setup-extension`). No extension
-   ID, Python path or environment variable is needed.
-2. In the intended Chrome profile, open `chrome://extensions`, enable **Developer
-   mode**, choose **Load unpacked**, and select the printed folder:
-   `~/Library/Application Support/Look/extension/unpacked`.
-   **Command–Shift–G** accepts the path in the macOS picker. Review the broad
-   **debugger**, **nativeMessaging** and **tabs** permissions; the debugging banner remains.
-3. Run `/look start --extension` in the intended Hermes conversation. On an ordinary
-   HTTP(S) tab, open **Look** and choose **Connect this tab** within 120 seconds.
-   No ticket or second Hermes approval. Use **Right Option** for private typed input; wait for
-   **Listening** before speaking.
-4. For another tab, open Look there and choose **Use on this tab**.
-   `/look stop` disconnects and keeps Chrome/tabs open.
+   ```text
+   ~/Library/Application Support/Look/extension/unpacked
+   ```
 
-Setup does not install/enable the extension or bypass Chrome consent/policy.
-After updating: stop Look, restart every Hermes process, rerun setup, **Reload**
-Look in Chrome and pair afresh. The staged folder/ID stay fixed; rerun setup if
-Hermes's Python moves. Remove with `/look setup extension uninstall`, then remove
-Look in Chrome. [Setup, recovery and acceptance gates](docs/CHROME_EXTENSION.md).
+   **Command–Shift–G** opens path entry in the macOS folder picker.
+3. Review Chrome's **debugger**, **nativeMessaging** and **tabs** permissions.
+   **Debugger access is broad page access, not just the element you point at.**
+   Chrome keeps its debugging banner visible.
+4. Run `/look start --extension` in your intended Hermes conversation. Within
+   120 seconds, open **Look** from Chrome's Extensions menu on an ordinary HTTP(S)
+   tab and choose **Connect this tab**.
+5. Return to the page and [ask your first question](#your-first-question).
+   For another tab, open Look there and choose **Use on this tab**.
 
-## Optional eyes and read aloud
+Setup prepares the files but does not install or enable the extension for you.
+There is no automatic extension update.
+[Extension setup, updates and recovery](docs/CHROME_EXTENSION.md).
 
-Start with a useful cursor answer. `/look calibrate` uses verified cached eye
-tracking files; `/look setup eyes` explicitly permits missing downloads and
-camera startup in Look's separate camera window. Grant Camera permission to your
-launching app. Complete the nine-point calibration and accuracy check, move the
-pointer once per page and after zoom/resize, and recalibrate after posture,
-camera or eyewear changes. `/look cursor` stops the camera.
+<details>
+<summary>Existing Chrome without an extension</summary>
 
-**Eye tracking is experimental broad-region input, not a precise pointer or an
-accessibility guarantee.** No population accuracy has been established. It cannot
-approve actions. [Setup and limits](docs/WEBCAM_GAZE.md).
+The native-consent beta requires stable Chrome 145 or newer. That is a protocol
+floor, not a verified version matrix. Use current stable Chrome.
 
-Silent answers need no output model. `hermes look setup-speech` explicitly
-downloads local Phonon-31M English/Russell assets without playing sound; restart
-Hermes, then choose **Read aloud** on an answer. Automatic reading starts off.
-[Asset sizes, licences and offline speech](docs/REFERENCE.md#runtime-downloads).
+Open `chrome://inspect/#remote-debugging` and enable remote debugging. In Hermes,
+run `/look start --existing`, read the disclosure, then run
+`/look start --existing --accept` if you agree. Approve the native Chrome request
+you just initiated. Use regular HTTP(S) tabs in that authorized profile.
 
-## Privacy and action limits
+This grants broad debugger access, including signed-in pages. It does not
+silently switch to a separate browser if connection fails. After `/look stop`,
+turn off remote debugging in Chrome if you no longer want it enabled.
+[Connection, consent and limits](docs/REFERENCE.md#use-my-existing-chrome).
 
-- Local tracking and recognition **do not mean local answers**. Your typed or
-  transcribed question and bounded page evidence go to your configured Hermes
-  model. Hermes can retain this evidence in `state.db`, even with plugin replay
-  recording off; provider retention depends on your provider.
-- Live camera images and eye features stay local; calibration is sensitive and
-  saved locally. The microphone opens only while talking. Failed recordings can
-  remain in memory for retry. The MLX fallback uses a temporary WAV; crashes or
-  deletion failures can leave it in the OS temporary folder.
-- Registration does not download models. Explicit setup fetches pinned assets;
-  Hermes PM separately prepares Python/native dependencies. Optional TypeSafe
-  early highlighting sends the question and static scope descriptions if its key
-  is configured; extra page text is opt-in, off by default.
-- Private cards isolate words and trusted input from website scripts, **not**
-  other debuggers or malicious same-user/root software. Connected conversations
-  replace raw code, terminal, browser and delegation tools with guarded tools.
-- Send, Buy, Delete and ambiguous controls require your primary mouse click on
-  the protected review card. Gaze, speech, keys, page text and model text cannot
-  approve. Typing and GET navigation can themselves have effects on some sites.
-  Password, payment and other secret fields are not supported.
-- Cross-origin frames, canvas, unknown widgets and detached identities may be
-  unavailable. Look fails rather than guessing targets or replaying mutations.
+</details>
 
-[Security/reporting](SECURITY.md) · [Downloads and detailed behavior](docs/REFERENCE.md)
+### A separate Look browser
 
-## Update, recover, remove
+Run `/look start --separate` in Hermes. Look launches or reuses a dedicated Chrome
+profile, separate from your ordinary sign-ins. Open a page there and ask a question.
 
-Quit Hermes and stop its gateway before replacing plugin code. An exact SHA
-installation stays pinned: reinstall the reviewed new SHA with `--force --ref`
-and restart Hermes. `hermes pm install` repairs dependencies; it does not update
-Look or download speech models. Keep dependency/preparation errors if repair fails.
+This profile persists. Only sign in if you want the account retained there.
+`/look stop` leaves its browser and local debugging port running until you exit
+that Chrome instance. Do not forward the port or give it to Hermes's generic
+browser tools.
 
-Before removing the plugin or its Python environment, stop Look and uninstall
-its native host with `/look setup extension uninstall`; remove Look in Chrome. Then:
+## Try eye tracking
+
+Start with a useful cursor answer, then try looking at broad regions of a page.
+Eye tracking is optional and experimental, not a precise pointer replacement.
+
+1. Run `/look setup eyes` on first use. This explicitly permits about 11 MB of
+   downloads and opens Look's separate camera window. Allow its camera access
+   when prompted. Later, `/look calibrate` uses verified cached files.
+2. Maximize the camera window at 100% zoom. Choose **Start calibration**.
+   Look at each dot, tap **Space**, and keep looking until it moves.
+3. After nine accepted points, choose **Start accuracy check**. A new calibration
+   is saved only if its check passes.
+4. Choose **Return to browsing** or **Skip practice**. Move the pointer once on
+   each page to establish its position, and again after zooming or resizing.
+5. Look at a broad page region and ask. Use `/look cursor` to turn off the camera
+   and return to pointer input.
+
+Use good light and one display. Recalibrate after changing posture, camera or
+glasses. No real-camera population accuracy has been established.
+[Calibration, practice and limitations](docs/WEBCAM_GAZE.md).
+
+## Reading and accessibility
+
+You can type instead of speaking and use the pointer instead of eye tracking.
+The cards respect reduced-motion and reduced-transparency preferences.
+
+For local read-aloud, quit Hermes and run:
+
+```sh
+hermes look setup-speech
+```
+
+This explicitly downloads the English Phonon voice, about 65 MB plus voice files,
+without playing sound. Restart Hermes and choose **Read aloud** on an answer.
+Automatic reading starts off. [Speech details](docs/REFERENCE.md#optional-read-aloud).
+
+**This beta is not an accessibility guarantee or a hands-free browser.**
+Action approval requires a primary mouse click. Eye tracking is experimental,
+and screen-reader compatibility has not been established by the release evidence.
+
+## Privacy and control
+
+- **Local sensing, configured-model answers.** Questions and bounded page evidence
+  go to your Hermes model. Hermes can retain that evidence in `state.db` even with
+  plugin replay recording off. Provider retention depends on your provider.
+- **Camera and audio.** Live eye images and features stay local. Calibration is
+  sensitive and saved locally. The microphone opens only while talking. Failed
+  recordings may remain in memory for retry. The MLX recognition fallback uses
+  a temporary WAV that can remain after a crash or deletion failure.
+- **Downloads and extra inference.** Registration does not download models.
+  Explicit setup fetches pinned assets. Optional TypeSafe early highlighting sends
+  the question and static scope descriptions when its key is configured. Additional
+  page text is opt-in and off by default.
+- **Private cards.** Website scripts cannot read the card's words or typed input.
+  This boundary does not protect against other debuggers or malicious same-user
+  or root software. Connected conversations use guarded tools instead of raw code,
+  terminal, generic browser and delegation tools.
+- **Actions need care.** Protected review cards require your mouse click for Send,
+  Buy, Delete and ambiguous controls. Typing and navigation can themselves have
+  effects on some sites. Password, payment and other secret fields are unsupported.
+  Cross-origin frames, canvas, unknown widgets and detached targets can be unavailable.
+
+`/look stop` ends local capture, tracking, read-aloud, overlays and approvals.
+It leaves tabs open, cannot undo changes and cannot cancel a Hermes turn already
+accepted by the host. Look's browser and microphone ownership is shared across
+conversations on this Mac. [Security policy](SECURITY.md).
+
+## Troubleshooting, updates and removal
+
+Use `/look status` for connection state and `/look diagnostics` for technical
+details. Failure cards offer **Try again**, **Skip** and **Continue with the rest**.
+Do not automatically resend a question or action with an unknown outcome.
+
+Before updating, stop Look, quit every Hermes process using it and run
+`hermes gateway stop`. Reinstall the reviewed new commit with `--force --ref`
+and restart Hermes. For the extension, rerun `/look setup extension`, **Reload**
+Look in Chrome and pair again. `hermes pm install` repairs dependencies, not Look
+code or speech models.
+
+To remove Look, stop it and run `/look setup extension uninstall` if you set up
+the extension. Remove Look in Chrome before removing the plugin:
 
 ```sh
 hermes plugins remove hermes-gaze
 ```
 
-Removal does not erase Hermes/provider history, model caches, calibration or the
-separate Chrome profile/sign-ins. [Data locations and selective removal](docs/REFERENCE.md#daily-use-updates-and-removal).
-The install/config name remains `hermes-gaze`; `/gaze` and `hermes gaze` are aliases.
+Removal leaves Hermes/provider history, model caches, calibration and the separate
+Chrome profile and sign-ins intact.
+[Data locations and selective removal](docs/REFERENCE.md#daily-use-updates-and-removal).
 
-## Development and evidence
+## Explore the project
 
-[Contributing and command matrix](CONTRIBUTING.md) · [Change record](CHANGELOG.md) ·
-[Release gates](docs/RELEASE_READINESS.md) · [Local submission draft](docs/SUBMISSION_DRAFT.md) ·
-[Third-party notices](THIRD_PARTY_NOTICES.md) · [Agent architecture guide](AGENTS.md)
+[Technical reference](docs/REFERENCE.md) · [Contributing](CONTRIBUTING.md) ·
+[Release evidence](docs/RELEASE_READINESS.md) · [Changelog](CHANGELOG.md) ·
+[MIT licence](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-Live prompt probes require a self-contained virtualenv with Hermes and its
-dependencies installed; the managed store interpreter alone is insufficient in
-a disposable home. `benchmark/probe_sessions.py` requires `--prompt-only`, uses
-configured inference and private credential copies, and retains answers. It does
-not run the retired HUD flow or share host dependency state. Run only with explicit
-provider authorization; see [probe commands](CONTRIBUTING.md#live-prompt-probes).
-
-Historical [plan](docs/PLAN.md), [prior-art pitch](docs/PRIOR_ART_AND_PITCH.md) and
-[old playbook](docs/DEMO_AND_SUBMISSION_PLAYBOOK.md) are provenance, not current
-install instructions, accuracy claims or evidence of catalogue availability.
+The plugin's install/config name remains `hermes-gaze`. `/gaze` and `hermes gaze`
+remain aliases. Historical plans and pitches in `docs/` are background, not current
+installation instructions or accuracy claims.
