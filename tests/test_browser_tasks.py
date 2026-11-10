@@ -30,6 +30,52 @@ class BrowserTaskTests(unittest.TestCase):
         self.assertTrue(self.tasks.begin('session', 'next-turn', self.owner)['ok'])
         self.assertNotEqual(self.tasks._authorized('session'), '')
 
+    def test_request_stop_does_not_revoke_another_turn(self):
+        self.assertFalse(self.tasks.stop("foreign", "turn")["ok"])
+        self.assertFalse(self.tasks._stopped.is_set())
+        self.assertFalse(self.tasks.stop("session", "old")["ok"])
+        self.assertTrue(self.tasks.stop("session", "turn")["ok"])
+        self.assertTrue(self.tasks._stopped.is_set())
+        self.assertTrue(self.tasks.begin("other", "next", self.owner)["ok"])
+        self.assertFalse(self.tasks.stop("session", "turn")["ok"])
+        self.assertFalse(self.tasks._stopped.is_set())
+
+    def test_stop_latches_during_tool_without_claiming_rollback(self):
+        import threading
+        for dispatched in (False, True):
+            with self.subTest(dispatched=dispatched):
+                self.tasks.begin("session", str(dispatched), self.owner)
+                entered, release = threading.Event(), threading.Event()
+                results = []
+                def blocked(*_):
+                    entered.set()
+                    self.assertTrue(release.wait(2))
+                    if dispatched:
+                        raise ConnectionError("mutation reply lost")
+                    return None
+                self.tasks._check_owner = lambda: None
+                self.tasks._current = (lambda _: None) if dispatched else blocked
+                self.tasks._dom = Mock(side_effect=blocked)
+                worker = threading.Thread(target=lambda: results.append(self.tasks.handle(
+                    "scroll", {"resolution_id": 1, "pixels": 100},
+                    session_id="session", turn_id=str(dispatched))))
+                worker.start()
+                self.assertTrue(entered.wait(2))
+                stop = threading.Thread(target=lambda: self.tasks.stop("session", str(dispatched)))
+                stop.start()
+                self.assertTrue(self.tasks._stopped.wait(2))
+                release.set()
+                worker.join(2)
+                stop.join(2)
+                self.assertFalse(worker.is_alive() or stop.is_alive())
+                if dispatched:
+                    self.assertEqual(results[0]["outcome"], "unknown")
+                    self.assertIsNone(results[0]["executed"])
+                    self.assertEqual(self.tasks._dom.call_count, 1)
+                else:
+                    self.assertFalse(results[0]["executed"])
+                    self.tasks._dom.assert_not_called()
+
     def test_failed_owner_cannot_keep_previous_turn_authority(self):
         self.session.cdp.capture.side_effect = ConnectionError('no focus')
         self.assertFalse(self.tasks.begin('session', 'new-turn')['ok'])

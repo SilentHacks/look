@@ -65,6 +65,39 @@ class VoiceTurnsTests(unittest.TestCase):
     def end(self, turn, **kwargs):
         self.turns.end(session_id='session', turn_id=turn, **kwargs)
 
+    def test_stop_queued_followup_is_request_specific_and_discards_late_asr(self):
+        first = self.turns.submit("first", snapshot("10"))
+        self.pre("first")
+        follow = self.turns.submit("follow-up", {}, item_id=first["item_id"])
+        capture = self.turns.capture(snapshot("20"), transcribing=True)
+        self.assertTrue(self.turns.control("cancel_request", first["item_id"], follow["request_id"])["ok"])
+        self.assertEqual(self.turns.active["request_id"], first["request_id"])
+        self.assertEqual(self.turns.pending[0]["request_id"], capture["request_id"])
+        self.turns.control("cancel_request", capture["item_id"], capture["request_id"])
+        self.assertFalse(self.turns.transcribed(capture["request_id"], "late speech")["ok"])
+        self.end("first")
+        self.assertEqual(len(self.host.messages), 1)
+        self.assertTrue(self.turns.paused)
+        self.turns.close()
+
+    def test_sdk_stop_is_truthful_and_waits_for_exact_end(self):
+        first = self.turns.submit("first", snapshot("10"))
+        self.pre("first")
+        self.turns.delta(session_id="session", turn_id="first", delta="Partial.")
+        self.turns.submit("next", snapshot("20"))
+        self.turns.control("cancel_request", first["item_id"], first["request_id"])
+        self.assertIn("Stop this request in Hermes", self.turns.active["cancel_notice"])
+        self.end("foreign")
+        self.assertIsNotNone(self.turns.active)
+        self.post("first", "Late final")
+        self.end("first", interrupted=True)
+        self.assertEqual(self.turns.runs[0]["text"], "Partial.")
+        self.assertEqual(self.turns.runs[0]["status"], "cancelled")
+        self.assertEqual(len(self.host.messages), 1)
+        self.turns.control("resume")
+        self.assertEqual(len(self.host.messages), 2)
+        self.turns.close()
+
     def test_failed_asr_retains_retry_but_does_not_block_resume(self):
         first = self.turns.capture(snapshot('first'), transcribing=True)
         second = self.turns.capture(snapshot('second'), transcribing=True)

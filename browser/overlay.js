@@ -1424,6 +1424,7 @@
     const turns = (raw.conversation || []).filter(r => !["retried", "skipped"].includes(r.status)).map(r => ({
       id: r.request_id, q: r.utterance || "", a: r.text || "", status: r.status,
       answerNotice: r.answer_notice || "",
+      cancelNotice: r.cancel_notice || "",
       error: ["failed", "interrupted"].includes(r.status) ? r.plain_error || "Hermes couldn’t finish this answer." : "",
     }));
     const local = anchors.get(raw.item_id);
@@ -1435,11 +1436,12 @@
   }
   const visible = () => S.items.filter(i => !i.archived && i.turns.length);
   const current = () => S.items.find(i => i.id === S.cur) || null;
-  const isBusyItem = i => i.turns.some(t => WAITING.includes(t.status) || t.status === "streaming");
+  const isBusyItem = i => i.turns.some(t => WAITING.includes(t.status) || t.status === "streaming" || t.status === "cancelling");
   const started = i => i.turns.length && !WAITING.includes(i.turns[0].status) &&
     (i.turns[0].status !== "streaming" || !!i.turns[0].a.trim());
   const inProgress = () => S.items.filter(i => i.turns.some(t => WAITING.includes(t.status)) && !(S.view === "answer" && S.cur === i.id));
   function stateWord(i) {
+    if (i.turns.some(t => t.status === "cancelling")) return "Stop requested";
     if (i.turns.some(t => t.error)) return "Didn’t finish";
     if (i.turns.some(t => t.status === "streaming")) return "Answering";
     if (i.turns.some(t => t.status === "thinking")) return "Looking into it";
@@ -1493,7 +1495,7 @@
       paused: !!inbox?.paused && !item.turns.some(t => t.error) && (inbox?.waiting || 0) > 0,
       prev: peek(list[i - 1]), next: peek(list[i + 1]),
       item: {id: item.id, subject: item.subject, notice: item.notice, lost: !item.local, host: item.host, gone: isGone(item),
-        turns: item.turns.map(({id, q, a, status, error, answerNotice}) => ({id, q, a, status, error, answerNotice}))}});
+        turns: item.turns.map(({id, q, a, status, error, answerNotice, cancelNotice}) => ({id, q, a, status, error, answerNotice, cancelNotice}))}});
     S.dir = null;
   }
   function renderNote() {
@@ -2246,6 +2248,10 @@
     const item = S.view === "answer" ? current() : null;
     const a = m.action;
     if (a === "stop_action_task") { stopActionTask(); return; }
+    if (a === "cancel_request" && item && m.turn) {
+      control("cancel_request", item.id, m.turn);
+      return;
+    }
     if (a === "next") step(1);
     else if (a === "prev") step(-1);
     else if (a === "dismiss") dismissNote();

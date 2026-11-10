@@ -332,13 +332,24 @@
     } else if (node.look) { node.look.remove(); node.look = null; }
     if (t.a) {
       if (!node.ans) { node.ans = h('div', 'a'); node.el.append(node.ans); }
-      const settled = t.status === 'complete';
+      const settled = !['transcribing', 'queued', 'thinking', 'streaming'].includes(t.status);
       patch(node.ans, MD.view(t.a, {streaming: !settled && !t.answerNotice}), node.live);
     }
     if (t.answerNotice) {
       if (!node.shortened) { node.shortened = h('div', 'answer-notice'); node.el.append(node.shortened); }
       node.shortened.textContent = t.answerNotice;
     } else if (node.shortened) { node.shortened.remove(); node.shortened = null; }
+    if (t.cancelNotice) {
+      if (!node.cancelNotice) { node.cancelNotice = h('div', 'answer-notice'); node.el.append(node.cancelNotice); }
+      node.cancelNotice.textContent = t.cancelNotice;
+    } else if (node.cancelNotice) { node.cancelNotice.remove(); node.cancelNotice = null; }
+    if (isBusy(t.status) || t.status === 'streaming') {
+      if (!node.stop) {
+        node.stop = h('button', 'act', 'Stop request');
+        node.stop.dataset.act = 'cancel_request'; node.stop.dataset.turn = t.id;
+        node.el.append(node.stop);
+      }
+    } else if (node.stop) { node.stop.remove(); node.stop = null; }
     if (t.error) {
       if (!node.err) {
         node.err = h('div', 'err');

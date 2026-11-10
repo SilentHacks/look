@@ -24,6 +24,9 @@ class Native:
     def close(self):
         self.closed = True
 
+    def cancel(self, run, callback):
+        self.cancelled = run["request_id"]
+
 
 class NativeReceiptOwnership(unittest.TestCase):
     def setUp(self):
@@ -96,6 +99,100 @@ class NativeReceiptOwnership(unittest.TestCase):
         self.turns.session_changed(old_session_id="physical", session_id="new")
         self.assertFalse(self.turns.connected)
         self.assertEqual(len(self.native.messages), 1)
+
+    def test_stop_retains_partial_and_exact_receipt_ownership(self):
+        from hermes_gaze.browser.browser_tasks import BrowserTasks
+        self.turns.session.tasks = BrowserTasks(self.turns.session)
+        self.turns.submit("first", snapshot("10"))
+        first = self.turns.active
+        self.pre(first)
+        self.turns.delta(session_id="physical", turn_id="turn", delta="Partial answer.")
+        follow = self.turns.submit("follow-up", {}, item_id=first["item_id"])
+        self.assertFalse(self.turns.control("cancel_request", first["item_id"], "wrong")["ok"])
+        self.assertTrue(self.turns.control("cancel_request", first["item_id"], first["request_id"])["ok"])
+        self.assertEqual(self.native.cancelled, first["request_id"])
+        urgent = self.turns.capture(snapshot("urgent"), transcribing=True)
+        self.assertTrue(urgent["ok"])
+        self.assertEqual(len(self.native.messages), 1)
+        self.turns.delta(session_id="physical", turn_id="turn", delta="Late text")
+        self.turns.post(session_id="physical", turn_id="turn", assistant_response="Late final")
+        self.turns.end(session_id="physical", turn_id="turn")
+        self.assertIs(self.turns.active, first)
+        self.assertEqual(first["text"], "Partial answer.")
+        self.assertEqual(len(self.native.messages), 1)
+        self.turns.native_receipt(first, dict(status="unknown"))
+        for action in ("retry", "skip"):
+            self.assertFalse(self.turns.control(action, first["item_id"], first["request_id"])["ok"])
+        self.turns.native_receipt(first, dict(status="terminal", outcome="cancelled"))
+        self.assertIsNone(self.turns.active)
+        self.assertTrue(self.turns.paused)
+        self.assertEqual(first["status"], "cancelled")
+        self.assertEqual(self.turns.pending[0]["request_id"], follow["request_id"])
+        self.turns.control("resume")
+        self.assertEqual(len(self.native.messages), 2)
+
+    def test_stop_before_pre_blocks_late_turn_and_not_foreign_turn(self):
+        self.turns.submit("first", snapshot("10"))
+        first = self.turns.active
+        self.turns.control("cancel_request", first["item_id"], first["request_id"])
+        self.assertIsNone(self.turns.pre(session_id="foreign", turn_id="foreign", user_message="hello"))
+        self.assertEqual(self.pre(first)["action"], "block")
+        self.assertIs(self.turns.active, first)
+        self.turns.native_receipt(first, dict(status="terminal", outcome="cancelled"))
+
+    def test_stop_transport_failure_still_revokes_exact_browser_task(self):
+        from hermes_gaze.browser.browser_tasks import BrowserTasks
+        self.turns.session.tasks = BrowserTasks(self.turns.session)
+        self.turns.submit("first", snapshot("10"))
+        run = self.turns.active
+        self.pre(run)
+        owner = dict(browser_target="tab", browser_document="doc", browser_route=1)
+        self.turns.session.tasks.begin("physical", "turn", owner)
+        with patch.object(self.native, "cancel", side_effect=RuntimeError("closed")):
+            self.turns.control("cancel_request", run["item_id"], run["request_id"])
+        self.assertTrue(self.turns.session.tasks._stopped.is_set())
+        self.assertIs(self.turns.active, run)
+        self.assertIn("Stop was not confirmed", run["cancel_notice"])
+
+
+class NativeCancellationTransport(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_racing_submit_uses_only_its_admission(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        client = NativeInput.__new__(NativeInput)
+        client.logical_id = "owned"
+        client.loop = asyncio.get_running_loop()
+        client.receipt_admission = ""
+        client.identity = ("instance", 7)
+        client.home = "/profile"
+        client.plugin_id = "hermes-gaze"
+        client.changed = asyncio.Event()
+        run = dict(request_id="request", wire="exact wire", cancel_requested=True)
+        client._rpc = AsyncMock(side_effect=[
+            {"admission_id": "only-this-admission"},
+            {"status": "started"},
+            {"status": "terminal", "ref": {"profile_id": "/profile", "session_id": "owned"},
+             "authority_epoch": 7, "outcome": "cancelled"}])
+        receipts = []
+        with patch("hermes_gaze.runtime.native_input.consent", return_value=True):
+            await asyncio.wrap_future(client.submit(run, lambda r, receipt: receipts.append(receipt)))
+        self.assertEqual(client._rpc.await_args_list[1].args, ("prompt.cancel",))
+        self.assertEqual(client._rpc.await_args_list[1].kwargs,
+                         {"session_id": "owned", "admission_id": "only-this-admission"})
+        self.assertEqual(receipts[0]["outcome"], "cancelled")
+
+    async def test_lost_stop_reply_does_not_settle_or_replay(self):
+        from unittest.mock import AsyncMock
+        client = NativeInput.__new__(NativeInput)
+        client.logical_id = "owned"
+        client._rpc = AsyncMock(side_effect=TimeoutError)
+        run = {"admission_id": "exact"}
+        receipts = []
+        await client._cancel(run, lambda r, receipt: receipts.append(receipt))
+        await client._cancel(run, lambda r, receipt: receipts.append(receipt))
+        self.assertEqual(receipts, [{"status": "cancel_unconfirmed"}])
+        self.assertEqual(client._rpc.await_count, 1)
+        self.assertNotIn("ended", run)
 
 
 class NativeAuthTransport(unittest.TestCase):

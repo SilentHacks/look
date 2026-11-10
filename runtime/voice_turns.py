@@ -154,7 +154,7 @@ class VoiceTurns:
         items = []
         for item in self.items:
             messages = [{k: r.get(k, "") for k in
-                         ("request_id", "utterance", "text", "status", "error")}
+                         ("request_id", "utterance", "text", "status", "error", "cancel_notice")}
                         | {"queue_position": waiting.get(r["request_id"], 0),
                            "answer_notice": self.TRUNCATION_NOTICE if r.get("truncated") else "",
                            "plain_error": plain_error(r["status"], r.get("error", ""))
@@ -184,11 +184,11 @@ class VoiceTurns:
     def _event(self, run, status, **fields):
         previous_status = run["status"]
         timing = TIMINGS.get(run.get("release_timing"))
-        if status in ("complete", "failed", "interrupted") and timing is not None:
+        if status in ("complete", "failed", "interrupted", "cancelled") and timing is not None:
             timing.mark(status)
             timing.finish()
         run.update(status=status, **fields)
-        if status in ("complete", "failed", "interrupted"):
+        if status in ("complete", "failed", "interrupted", "cancelled"):
             item = self._item(run["item_id"])
             # The card already on screen is being read; everything else stays unseen.
             if item and self.selected != item["item_id"]:
@@ -293,7 +293,7 @@ class VoiceTurns:
                     entry["presented"] or entry["archived"] for entry in self.items
                 ) and not any(
                     r["item_id"] == self.selected and
-                    r["status"] in ("transcribing", "queued", "thinking", "streaming")
+                    r["status"] in ("transcribing", "queued", "thinking", "streaming", "cancelling")
                     for r in self.runs)
                 item = dict(item_id=item_id, capture_order=len(self.items) + 1, target_label=label,
                             source_url=str(frozen.get("page_url") or ""), unread=False, snapshot=frozen,
@@ -444,6 +444,11 @@ class VoiceTurns:
             if self.closed or self.active is not run:
                 return
             status = receipt.get("status")
+            if status == "cancel_unconfirmed":
+                if run.get("cancel_requested"):
+                    run["cancel_notice"] = "Stop was not confirmed. Stop this request in Hermes. Waiting for its outcome."
+                    self.publish()
+                return
             if status == "unknown":
                 self.paused = True
                 run["outcome_unknown"] = True
@@ -457,6 +462,20 @@ class VoiceTurns:
             success = (status == "terminal" and receipt.get("outcome") == "completed"
                        and not result.get("failed") and not result.get("interrupted")
                        and bool(run["turn_id"]))
+            if run.get("cancel_requested"):
+                self._flush_title(run)
+                run.update(finished=True, ended=True)
+                self.paused = True
+                self._event(run, "cancelled", cancel_notice=(
+                    "Finished before Stop took effect." if success else
+                    "Request ended. An earlier action may have completed."))
+                if (self.host_session, self.host_turn) == (run["session_id"], run["turn_id"]):
+                    self.host_session = self.host_turn = ""
+                self.active = None
+                native = run.get("native_input")
+                if not self.connected and native is not None and native is not self.connecting_native:
+                    native.close()
+                return
             if success and isinstance(result.get("final_response"), str):
                 text = run["title_stream"].final(result["final_response"][:self.MAX_TEXT + 97])
                 self._retain_text(run, text, replace=True,
@@ -574,6 +593,43 @@ class VoiceTurns:
         return {"ok": True}
 
     def control(self, action, item_id="", request_id=""):
+        if action == "cancel_request":
+            with self.lock:
+                run = next((r for r in self.runs if r["item_id"] == item_id
+                            and r["request_id"] == request_id), None)
+                if not self.connected or not run or run["session_id"] != self.binding["session_id"]:
+                    return {"ok": False, "error": "Request unavailable"}
+                if run.get("cancel_requested"):
+                    return {"ok": True, "status": run["status"]}
+                if run not in self.pending and (self.active is not run or run["ended"]):
+                    return {"ok": False, "error": "This request has already ended"}
+                self.paused = True
+                run["cancel_requested"] = True
+                early = run["snapshot"].get("early_highlight")
+                if early:
+                    early.superseded = True
+                self._flush_title(run)
+                run["finished"] = True
+                if run in self.pending:
+                    self.pending.remove(run)
+                    run.pop("transcribe", None)
+                    run["ended"] = True
+                    self._event(run, "cancelled", cancel_notice="Cancelled before processing.")
+                    return {"ok": True, "status": "cancelled"}
+                native = run.get("native_input")
+                self._event(run, "cancelling", cancel_notice=(
+                    "Stop requested. Waiting for Hermes. An action in progress may still finish." if native else
+                    "Browser actions stopped. Stop this request in Hermes to end processing."))
+                tasks = getattr(self.session, "tasks", None)
+            # stop() latches before waiting for an in-flight browser operation.
+            if native:
+                try:
+                    native.cancel(run, self.native_receipt)
+                except Exception:
+                    self.native_receipt(run, {"status": "cancel_unconfirmed"})
+            if tasks:
+                tasks.stop(run["session_id"], run["turn_id"])
+            return {"ok": True, "status": "cancelling"}
         with self.lock:
             if action == "stop_speaking":
                 self._stop_speaking()
@@ -587,7 +643,7 @@ class VoiceTurns:
                 # Dismissing also answers for what was waiting to be shown; Q brings it back.
                 for entry in self.items:
                     runs = [r for r in self.runs if r["item_id"] == entry["item_id"]]
-                    settled = not any(r["status"] in ("transcribing", "queued", "thinking", "streaming") for r in runs)
+                    settled = not any(r["status"] in ("transcribing", "queued", "thinking", "streaming", "cancelling") for r in runs)
                     if action == "dismiss" and settled:
                         entry["presented"] = True
                     if entry["presented"] and settled:
@@ -755,6 +811,8 @@ class VoiceTurns:
             self.host_session = session_id
             if wire_owned:
                 run["turn_id"] = turn_id
+                if run.get("cancel_requested"):
+                    return {"action": "block", "message": "This Look request was stopped by the user."}
             if not self.connected or session_id != self.binding["session_id"]:
                 return None
             run = self.active
@@ -902,7 +960,9 @@ class VoiceTurns:
                 run["ended"] = True
                 visible = (self.connected and session_id == self.binding["session_id"]
                            and run in self.runs)
-                if visible and run["status"] not in ("interrupted", "skipped", "retried"):
+                if visible and run.get("cancel_requested"):
+                    self._event(run, "cancelled", cancel_notice="Request ended. An earlier action may have completed.")
+                elif visible and run["status"] not in ("interrupted", "skipped", "retried"):
                     if failed or interrupted or not completed:
                         run["finished"] = True
                         self.paused = True

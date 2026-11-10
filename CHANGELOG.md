@@ -8,6 +8,10 @@ No public release, catalogue admission, Store listing or release date is asserte
   frame/context rejections of frame-tree reads and the fixed lease ping. Existing
   bounded rearm handles recovery; arbitrary evaluations, missing replies and
   mutations remain terminal and are never replayed.
+- Added request-specific **Stop request** controls for active and queued questions.
+  Stock canonical Hermes cancellation keeps exact receipt ownership, partial text
+  and paused follow-ups. Other frontends report that processing must be stopped
+  in Hermes. In-flight browser actions are not rolled back or replayed.
 - Refreshed help, setup, settings, error messages and current user guides.
   Privacy disclosures, user choices and browser-action safeguards are unchanged.
 - Grouped audio, runtime and browser internals into packages while keeping the

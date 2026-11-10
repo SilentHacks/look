@@ -10,6 +10,7 @@ import asyncio
 import ctypes
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import socket
@@ -245,6 +246,8 @@ class NativeInput:
                     receipt = await self._rpc("prompt.submit", session_id=self.logical_id,
                                               submission_id=run["request_id"], text=wire)
                     run["admission_id"] = receipt["admission_id"]
+                if run.get("cancel_requested"):
+                    await self._cancel(run, callback)
                 while True:
                     self.changed.clear()
                     receipt = await self._rpc("prompt.receipt", session_id=self.logical_id,
@@ -266,6 +269,22 @@ class NativeInput:
             except Exception:
                 callback(run, {"status": "unknown", "error": "Native connection lost with an unknown outcome. Reconnect this conversation. Do not send the question again."})
         return asyncio.run_coroutine_threadsafe(observe(), self.loop)
+
+    async def _cancel(self, run, callback):
+        """Stock prompt.cancel retires queued work or interrupts its exact running claim."""
+        if not run.get("admission_id") or run.get("cancel_dispatched"):
+            return
+        run["cancel_dispatched"] = True
+        try:
+            await self._rpc("prompt.cancel", session_id=self.logical_id,
+                            admission_id=run["admission_id"])
+        except Exception:
+            # A lost interrupt reply is not a terminal receipt or permission to replay.
+            logging.getLogger(__name__).warning("Look stop was not confirmed; retaining receipt ownership")
+            callback(run, {"status": "cancel_unconfirmed"})
+
+    def cancel(self, run, callback):
+        return asyncio.run_coroutine_threadsafe(self._cancel(run, callback), self.loop)
 
     def close(self):
         if self.closed:

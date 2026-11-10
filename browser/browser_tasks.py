@@ -55,10 +55,11 @@ class BrowserTasks:
                 return failure("No foreground companion page")
             if not owner.get('browser_target') or not owner.get('browser_document'):
                 return failure("No captured browser owner")
-            self.grant = {key: owner.get(key) for key in ('browser_target', 'browser_document', 'browser_route')}
-            self.grant.update(session_id=session_id, turn_id=turn_id)
+            grant = {key: owner.get(key) for key in ('browser_target', 'browser_document', 'browser_route')}
+            grant.update(session_id=session_id, turn_id=turn_id, stop_event=threading.Event())
+            self.grant = grant
             self.snapshot = None
-            self._stopped.clear()
+            self._stopped = grant['stop_event']
             self.running = False
             return {"ok": True}
 
@@ -100,10 +101,17 @@ class BrowserTasks:
                 # A requested confirmation outlives the answer, but no more model calls do.
                 self._stopped.set()
 
-    def stop(self):
+    def stop(self, session_id=None, turn_id=None):
+        grant = self.grant
+        stopped = grant['stop_event'] if grant else self._stopped
+        if session_id is not None and (not grant or
+                (grant['session_id'], grant['turn_id']) != (session_id, turn_id)):
+            return failure("Browser task belongs to another session or turn")
         # Set before waiting for an in-flight operation; the next step cannot start.
-        self._stopped.set()
+        stopped.set()
         with self._lock:
+            if session_id is not None and self.grant is not grant:
+                return failure("Browser task changed while stopping")
             self.running = False
             self.session.actions.invalidate()
             self._display('stopped')
@@ -214,6 +222,8 @@ class BrowserTasks:
                 stale = self._current(args.get('resolution_id'))
                 if stale:
                     return stale
+                if self._stopped.is_set():
+                    return failure('Task stopped')
                 if op in ('fill', 'press', 'scroll', 'open_tab', 'navigate'):
                     self.session.actions.invalidate()
                 started = op in ('fill', 'click', 'request_commit', 'press', 'open_tab', 'navigate', 'scroll')

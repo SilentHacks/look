@@ -49,11 +49,20 @@ Once [installed](#install-from-a-reviewed-checkout) and [connected](#connect-chr
 | Hold **Space** | Talk, after local speech setup |
 | **Q** | Recall answers |
 | **Esc** | Stop or dismiss the current interaction |
+| **Stop request** | Cancel that question or follow-up; keep its partial answer |
 | `/look stop` | Disconnect Look and stop local capture, tracking and read-aloud |
 
 Text fields and keyboard-focused page controls keep their normal Space key.
 Click ordinary page text before talking. A quick Space tap scrolls instead.
 The first real question starts Hermes's lazy agent. No warmup question is needed.
+
+Use **Stop request** beside a question to stop processing. Canonical local Hermes
+connections cancel that exact admission through the stock host API. Other
+frontends stop browser actions and ask you to stop processing in Hermes.
+An action already in progress may still finish; Stop cannot undo it. Queued
+questions and follow-ups stay paused until **Continue with the rest**. You can
+record another question while waiting, but it waits for the active request's
+terminal receipt. An unknown outcome stays owned and cannot be retried or skipped.
 
 ## Get ready
 
@@ -239,9 +248,9 @@ and screen-reader compatibility has not been established by the release evidence
   Cross-origin frames, canvas, unknown widgets and detached targets can be unavailable.
 
 `/look stop` ends local capture, tracking, read-aloud, overlays and approvals.
-It leaves tabs open, cannot undo changes and cannot cancel a Hermes turn already
-accepted by the host. Look's browser and microphone ownership is shared across
-conversations on this Mac. [Security policy](SECURITY.md).
+It leaves tabs open and cannot undo changes. Disconnect is not request cancellation;
+use **Stop request** before disconnecting. Look's browser and microphone ownership
+is shared across conversations on this Mac. [Security policy](SECURITY.md).
 
 ## Troubleshooting, updates and removal
 
