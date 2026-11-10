@@ -176,7 +176,7 @@ class ParakeetCoreML:
         overlap_seconds: float = DEFAULT_OVERLAP_SECONDS,
     ) -> None:
         if variant != "v2":
-            raise ValueError("Only pinned CoreML Parakeet v2 is supported; v3 has unresolved licence terms.")
+            raise ValueError("Only pinned CoreML Parakeet v2 is supported. The licence terms for v3 are unresolved.")
         spec = TDT_VARIANTS[variant]
         self.name = f"parakeet-{variant}-coreml"
         units = encoder_compute_units(compute_units)

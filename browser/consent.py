@@ -230,7 +230,7 @@ class ConsentChrome:
     def _send(self, method, params, *, channel=None, local_id=None):
         with self._lock:
             if not self.live or (channel is not None and not channel.live):
-                raise OwnershipError("Chrome disconnected; outcome unknown. Do not replay the action.")
+                raise OwnershipError("Chrome disconnected with an unknown outcome. Do not repeat the action.")
             self._sequence += 1
             sequence = self._sequence
             future = Future() if channel is None else None
@@ -244,7 +244,7 @@ class ConsentChrome:
             ws.send(json.dumps(message))
         except Exception:
             self.abort()
-            raise OwnershipError("Chrome connection lost; outcome unknown. Do not replay the action.") from None
+            raise OwnershipError("Chrome connection lost with an unknown outcome. Do not repeat the action.") from None
         return sequence, future
 
     def command(self, method: str, params: dict | None = None) -> dict:
@@ -252,11 +252,11 @@ class ConsentChrome:
         try:
             message = future.result(3)
             if "error" in message:
-                raise OwnershipError("Chrome refused the requested operation; browser policy or profile may not support it.")
+                raise OwnershipError("Chrome refused this operation. Its policy or profile may not support it.")
             return message.get("result") or {}
         except TimeoutError:
             self.abort()
-            raise OwnershipError("Chrome reply lost; outcome unknown. Do not replay the action.") from None
+            raise OwnershipError("Chrome reply lost with an unknown outcome. Do not repeat the action.") from None
         finally:
             with self._lock:
                 self._pending.pop(sequence, None)
@@ -343,7 +343,7 @@ class ConsentChrome:
             ws, self._ws = self._ws, None
         for _, _, _, future in pending.values():
             if future is not None and not future.done():
-                future.set_exception(OwnershipError("Chrome connection lost; outcome unknown. Do not replay the action."))
+                future.set_exception(OwnershipError("Chrome connection lost with an unknown outcome. Do not repeat the action."))
         for channel in channels.values():
             channel.lost()
         if sock is not None:

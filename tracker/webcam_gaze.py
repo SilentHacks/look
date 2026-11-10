@@ -64,19 +64,19 @@ class LandmarkEstimator:
         x = np.asarray([r[0] for r in observations], dtype=float)
         y = np.asarray([[r[1], r[2]] for r in observations], dtype=float)
         if x.shape != (len(observations), self.feature_count) or len(x) < 45 or not np.isfinite(x).all() or not np.isfinite(y).all():
-            raise ValueError("Not enough valid calibration samples; try again")
+            raise ValueError("Not enough valid calibration samples. Please try again.")
         if len(np.unique(y, axis=0)) != 9:
             raise ValueError("Calibration requires all nine targets")
         mean, scale = x.mean(axis=0), x.std(axis=0)
         if max(scale) < .001:
-            raise ValueError("Eyes did not move enough during calibration; try again")
+            raise ValueError("Eyes did not move enough during calibration. Please try again.")
         scale = np.maximum(scale, .001)
         a = np.column_stack((np.ones(len(x)), (x - mean) / scale))
         penalty = np.eye(self.feature_count + 1) * self.ridge; penalty[0, 0] = 0
         weights = np.linalg.solve(a.T @ a + penalty, a.T @ y)
         error = float(np.sqrt(np.mean((a @ weights - y) ** 2)))
         if error > .20:
-            raise ValueError("Calibration did not fit the targets; try again in better light")
+            raise ValueError("Calibration did not fit the targets. Please try again in better light.")
         profile = {"model_id": self.model_id, "mean": mean.tolist(), "scale": scale.tolist(),
                    "weights": weights.tolist(), "screen": dict(screen), "fit_error": error}
         self.load(profile)

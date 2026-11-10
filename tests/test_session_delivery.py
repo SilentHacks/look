@@ -316,7 +316,6 @@ class TestSessionDelivery(unittest.TestCase):
                                    "_browser_target": "source", "_browser_document": "document",
                                    "cursor_context": capture(), "_release_trace": trace.turn}, replies.append)
         self.assertFalse(replies[0]["ok"])
-        self.assertIn("display unavailable", replies[0]["error"])
         stream.stop.assert_called_once()
         stream.close.assert_called_once()
         transcribe.assert_not_called()

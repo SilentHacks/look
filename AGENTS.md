@@ -12,18 +12,18 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 |---|---|
 | `plugin.yaml` | Plugin manifest: tools/hooks/skill declarations, config schema. Keep 1:1 with `register()`. |
 | `__init__.py` | Registration of fourteen tools (the same fourteen in `plugin.yaml` and `tools.ALL_TOOLS`), context/stream/final/turn-end hooks, connected-session tool restrictions, `/gaze` connection, CLI and skill. |
-| `tools.py`, `browser_tasks.py` | Operation-specific captured-identity tools and exact user-turn action grants; bounded structure, batch fill/select, click, keys, tabs/navigation, scroll/wait and request-commit. |
-| `service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
-| `early_highlight.py` | Asynchronous, read-only TypeSafe scope decision; 1.5-second deadline and post-answer fallback, never an inbox admission wait. |
-| `voice_turns.py`, `speech.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen evidence and exact turn matching. One speech worker owns cached local Phonon/Russell streaming, output cancellation and pre-audio macOS say fallback; `scripts/setup_speech.py` fetches pinned assets explicitly. |
-| `native_input.py` | Stock canonical local input: same-user private control socket, one-use profile ticket, stable submission ID and terminal receipts/events. Never starts a host or exposes auth to Chrome. |
-| `actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
+| `tools.py`, `browser/browser_tasks.py` | Operation-specific captured-identity tools and exact user-turn action grants; bounded structure, batch fill/select, click, keys, tabs/navigation, scroll/wait and request-commit. |
+| `runtime/service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
+| `runtime/early_highlight.py` | Asynchronous, read-only TypeSafe scope decision; 1.5-second deadline and post-answer fallback, never an inbox admission wait. |
+| `runtime/voice_turns.py`, `audio/speech.py` | `VoiceTurns`: Python-owned browsing inbox, serial admission, frozen evidence and exact turn matching. One speech worker owns cached local Phonon/Russell streaming, output cancellation and pre-audio macOS say fallback; `scripts/setup_speech.py` fetches pinned assets explicitly. |
+| `runtime/native_input.py` | Stock canonical local input: same-user private control socket, one-use profile ticket, stable submission ID and terminal receipts/events. Never starts a host or exposes auth to Chrome. |
+| `browser/actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
-| `voice.py` | `transcribe_audio_buffer` backend chain on macOS: `asr/` (Parakeet TDT on CoreML/ANE in-process) → `parakeet-mlx` → `faster-whisper` (the only backend on Linux). Registration loads and warms one silent CoreML prediction on a daemon before sharing the runner. `record_microphone`, `MAX_AUDIO_BYTES`. Measured release stages and limits are in README. |
-| `asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
-| `server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
+| `audio/voice.py` | `transcribe_audio_buffer` backend chain on macOS: `audio/asr/` (Parakeet TDT on CoreML/ANE in-process) → `parakeet-mlx` → `faster-whisper` (the only backend on Linux). Registration loads and warms one silent CoreML prediction on a daemon before sharing the runner. `record_microphone`, `MAX_AUDIO_BYTES`. Measured release stages and limits are in `docs/REFERENCE.md`. |
+| `audio/asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
+| `runtime/server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
-| `webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
+| `browser/webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
 | `browser/webcam_host.js` | Camera/inference and plain nine-point UI in that separate process's isolated world. No website camera, audio, HTTP sample endpoint or image serialization. |
 | `browser/webcam_features.js` | Shared, version-ordered iris/head and normalized eye-appearance extraction for live and offline frames. Live uses the left eye only; saved offline layout remains both eyes then the original eight features. |
 | `benchmark/gaze_eval.py`, `browser/gaze_eval.js` | Offline frame stepping through the same pinned WASM/features and `GazeEstimator`; no capture devices. `gaze_dataset.py` preserves recordings/import/export; `gaze_tuning.py` and `scripts/gaze.py` run local evaluation and tuning. |
@@ -33,8 +33,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |
 | `browser/panel.js` | Card stack and capsule renderer in two script-disabled, opaque-origin sandbox iframes. All words and the voice-level bars live here. Trusted events return only through its CDP context. |
 | `browser/markdown.js` | PURE allow-list markdown parser for answers, loaded into the frames and into node tests. No DOM, no HTML passthrough, no images, no hrefs. |
-| `naming.py`, `answer_title.py` | PURE plain-language names, errors and speech; bounded opening answer-heading extraction. |
-| `microphone.py` | Single-owner native capture; closes on release, cancellation, definite focus/document loss, device error, disconnect or the native 30-second deadline. Chrome checks cannot block the native deadline. |
+| `runtime/naming.py`, `runtime/answer_title.py` | PURE plain-language names, errors and speech; bounded opening answer-heading extraction. |
+| `audio/microphone.py` | Single-owner native capture; closes on release, cancellation, definite focus/document loss, device error, disconnect or the native 30-second deadline. Chrome checks cannot block the native deadline. |
 | `resolver/` | PURE modules — `bayesian_fusion.py` (scoring + decision policy), `temporal_aligner.py`, `data_extractor.py`. No I/O imports allowed (enforced by `tests/test_layering.py`). |
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`, `webcam_gaze.py` (swappable estimator, personal ridge calibration and measured screen→viewport mapping). Same purity rule. |
@@ -42,6 +42,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `tests/` | stdlib `unittest`, private-Chrome security/recording/webcam probes, `ui_review/probe_*.py` and browser-action acceptance fixtures. `tests/__init__.py` registers a `hermes_gaze` package shell (no `__init__.py` exec), matching Hermes's plugin loader. |
 | `docs/` | Webcam setup, recording/dataset/evaluation guides and browser-action results; also the historical PLAN, prior art/pitch and demo playbook. |
 | `skills/gaze-telepathy/SKILL.md` | Bundled skill for browser evidence, snapshot tools and session setup. Keep simulated decision names/thresholds in sync with `resolver/bayesian_fusion.py`. |
+| `audio/asset_cache.py`, `audio/assets.json` | Pinned recognition and read-aloud asset manifest and checksum-verified local cache loading. |
+| `runtime/release_timing.py` | Bounded local timing instrumentation for release evidence. |
 
 ## Invariants (each with the WHY)
 
@@ -54,7 +56,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   an escaped `<browser_context>` envelope with `<page_data>`, relative pointer age
   and the labelled question. `stamp_resolution` changes only its trusted epoch
   slot. Never slice a rendered packet: its fences and suffix share the 6000-char bound.
-- **Overlay → Python only via `__hermesGazeIntent`.** No `fetch()` to `server.py`, no
+- **Overlay → Python only via `__hermesGazeIntent`.** No `fetch()` to `runtime/server.py`, no
   new HTTP endpoints, no `Runtime.evaluate` polling for decisions. The binding keeps a
   single ordered channel that works on file:// and any origin without CORS. Replies
   are callback-style (`reply({...})` → `api.onIntentResult`) — intents return nothing.
@@ -168,7 +170,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   every turn; returning `False` when Chrome is down would mutate the tool surface
   mid-conversation and break the cached prompt prefix (see Hermes's per-conversation
   prompt-caching invariant). Chrome health is reported in-band (`chrome_connected`).
-- **`MLMultiArray` conversions live only in `asr/coreml_model.py`.** Two CoreML
+- **`MLMultiArray` conversions live only in `audio/asr/coreml_model.py`.** Two CoreML
   traps already bit once: input arrays must be tagged with the real
   `MLMultiArrayDataType*` constants — a hand-coded wrong code makes CoreML read
   the buffer at half width (the fp32-as-fp16 NaN bug) — and outputs must be
@@ -335,7 +337,7 @@ python3 -m unittest discover -s tests -t .       # whole suite (bare `-m unittes
                                                   # tries importing browser/resolver as
                                                   # top-level pkgs and errors — pre-existing)
 python3 -m unittest tests.test_service_intents   # one module
-python3 -m py_compile tests/*.py service.py tools.py
+python3 -m py_compile tests/*.py runtime/service.py tools.py
 node --check browser/overlay.js                  # JS syntax check
 ruff check                                        # if ruff is installed
 .venv/bin/python tests/trust_boundaries_chrome.py    # private Chrome; includes the patched-API page

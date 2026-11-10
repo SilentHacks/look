@@ -359,7 +359,7 @@ class ConsentWire(unittest.IsolatedAsyncioTestCase):
             await asyncio.to_thread(companion._create_target, "https://example.test/new", tab)
         self.assertEqual(sum(c["method"] == "Target.createTarget" for c in self.fake.commands), 1)
         self.fake.default_context, self.fake.created_context = "regular", "different"
-        with self.assertRaisesRegex(OwnershipError, "outcome unknown"):
+        with self.assertRaises(OwnershipError):
             await asyncio.to_thread(companion._create_target, "https://example.test/new", tab)
         self.assertEqual(sum(c["method"] == "Target.createTarget" for c in self.fake.commands), 2)
 

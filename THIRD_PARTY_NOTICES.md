@@ -33,7 +33,7 @@ See [release scope and remaining legal/distribution gates](docs/RELEASE_READINES
   contradicts itself: CC-BY-4.0 frontmatter, Apache 2.0 body. These notices do not
   resolve that contradiction or infer weight terms from the FluidAudio code licence.
 
-`asr/parakeet_coreml.py` vendors silicon-asr 0.1.0's runner, windowing and types,
+`audio/asr/parakeet_coreml.py` vendors silicon-asr 0.1.0's runner, windowing and types,
 adapted for pyobjc CoreML, decoded PCM input and pinned/verified v2-only loading.
 [Upstream MIT licence](https://github.com/WT-MM/silicon-asr/blob/e8f2e021007eab99031183bed484a82bdfc22a28/LICENSE):
 
@@ -72,7 +72,7 @@ SOFTWARE.
   terms beyond the conversion cards were not independently established.
 
 Recognition and Phonon file revisions and SHA-256 expectations are in
-[`assets.json`](assets.json). Weight/embedding hashes derive from immutable
+[`audio/assets.json`](audio/assets.json). Weight/embedding hashes derive from immutable
 publisher LFS metadata, not a claim that this release audit downloaded those weights.
 CoreML/MLX official-distribution acceptance under the Hermes catalog remains a
 maintainer decision; pinning alone is not catalog approval.

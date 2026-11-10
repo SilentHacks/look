@@ -205,7 +205,7 @@ class Companion:
         if self.source == "existing":
             info = self.chrome.command("Target.getTargetInfo", {"targetId": target})["targetInfo"]
             if info.get("targetId") != target or info.get("browserContextId") != params["browserContextId"]:
-                raise OwnershipError("New tab profile could not be verified; outcome unknown. Do not repeat the action.")
+                raise OwnershipError("New tab profile could not be verified. The action has an unknown outcome. Do not repeat it.")
         return target
 
     def show_document(self, target: str | None, document: str | None) -> bool:
@@ -337,7 +337,7 @@ class Companion:
                         return dict(browser_target=target, browser_document=document, browser_route=route)
             if self._stop.wait(.05):
                 break
-        raise ConnectionError("Navigation outcome unknown; do not repeat it automatically")
+        raise ConnectionError("Navigation has an unknown outcome. Do not repeat it automatically.")
 
     def action_after_click(self, *, same_document: bool, **owner) -> dict:
         """Follow only the clicked target through redirects; never retarget by focus."""
@@ -366,7 +366,7 @@ class Companion:
                     return capture
             if self._stop.wait(.05):
                 break
-        raise ConnectionError("Click destination is unavailable; do not repeat the click")
+        raise ConnectionError("Click destination is unavailable. Do not repeat the click.")
 
 
     def action_key(self, key: str, **owner) -> None:

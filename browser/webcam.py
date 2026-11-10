@@ -267,7 +267,7 @@ class WebcamHost:
                 return
             if not Path(_CHROME).is_file():
                 self.state = "failed"
-                self.error = "Install Google Chrome in Applications, then retry /look calibrate; or use /look cursor."
+                self.error = "Install Google Chrome in Applications, then retry /look calibrate. Or use /look cursor."
                 self.diagnostic = {"stage": "preflight", "reason": "chrome_missing"}
                 return
             self.assets = prepare_assets(self.assets, download=download, cancelled=lambda: not self._live())
@@ -288,7 +288,7 @@ class WebcamHost:
                     if profile is not None:
                         self.estimator.load(profile); self.profile = profile
             except (OSError, ValueError, KeyError, TypeError):
-                self.error = "Calibration could not be loaded; run /look calibrate"
+                self.error = "Calibration could not be loaded. Run /look calibrate."
             if self._live():
                 self.state = self._stage = "starting"
                 self._publish_state()

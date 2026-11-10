@@ -243,7 +243,7 @@ class BrowserTasks:
                             self.session.cdp.action_key(key, **self._owner())
                             result = {'ok': True, 'executed': True}
                     else:
-                        return failure('Unsupported key; use fill for text and captured clicks for controls')
+                        return failure('Unsupported key. Use fill for text and captured clicks for controls.')
                 elif op in ('open_tab', 'navigate'):
                     result = self._navigate(args.get('url'), new_tab=op == 'open_tab')
                 elif op == 'scroll':
@@ -266,4 +266,4 @@ class BrowserTasks:
                 self.stop()
                 self.session.clear_hover_snapshot()
                 return {'ok': False, 'executed': None, 'outcome': 'unknown',
-                        'error': f'Browser outcome unknown; do not retry automatically: {exc}'}
+                        'error': f'Browser outcome unknown. Do not retry automatically: {exc}'}

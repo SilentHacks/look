@@ -75,7 +75,7 @@ the audio probe. Neither is part of offline release verification.
 
 This repository ships as a pinned **Hermes source plugin**, not an independently
 verified PyPI wheel, signed app or Store extension. `pyproject.toml` declares the
-Python dependencies. Runtime JS/HTML, `plugin.yaml`, the skill and `assets.json`
+Python dependencies. Runtime JS/HTML, `plugin.yaml`, the skill and `audio/assets.json`
 must travel with the source. Do not strip them into a Python-only wheel.
 Keep [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) in any
 source archive. Models are fetched explicitly into caches, not bundled.

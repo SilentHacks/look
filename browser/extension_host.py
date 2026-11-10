@@ -203,7 +203,7 @@ def install(*, directory=None, manifests=None):
         values[manifest] = json.dumps(_registration(extension_id, directory)).encode()
         before = {path: _read_installed(path) for path in values}
         if previous is None and any(value is not None for value in before.values()):
-            raise ValueError("Look setup found unregistered files; refusing to overwrite them")
+            raise ValueError("Look setup found unregistered files and will not overwrite them.")
         changed = []
         try:
             for path, value in values.items():
@@ -271,7 +271,7 @@ def relay(extension_id, origin, source, destination):
         answer = read_message(stream)
         expected = "status" if first["op"] == "status" else "paired"
         if answer.get("op") != expected or answer.get("request") != pending["request"]:
-            raise ValueError("Look refused this connection; start again explicitly")
+            raise ValueError("Look refused this connection. Run /look start --extension again.")
         send_message(destination, answer)
         if first["op"] == "status":
             return

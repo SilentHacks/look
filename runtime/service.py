@@ -187,7 +187,7 @@ def resolve_now(
             }
 
     if not raw_utterance:
-        return {"ok": False, "error": "empty utterance — no spoken or typed query to resolve"}
+        return {"ok": False, "error": "Type a question or try recording again."}
     utterance = raw_utterance
     if mode == "hover":
         capture = pushed.get("cursor_context") if pushed is not None else session.fetch_cursor_context()
@@ -241,7 +241,7 @@ def resolve_now(
             scroll_x=float(pointer.get("scroll_x", 0.0)), scroll_y=float(pointer.get("scroll_y", 0.0)),
             timestamp=now, bias_offset=session.recalibrator.offset))
     if not candidates:
-        return {"ok": False, "error": "No DOM candidates extracted — is the overlay injected into the Chrome tab?"}
+        return {"ok": False, "error": "No page elements are available. Check that Look is connected to this tab."}
     if not fixations:
         return {"ok": False, "error": "No pointer/gaze fixations recorded yet."}
     page_url = resolution_input.get("page_url")
@@ -594,7 +594,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                     ready = timing.ui_ready
                     if ready is not None and not ready.wait(5):
                         timing.mark("release_ui_timeout")
-                        raise RuntimeError("Release display unavailable; recording cancelled.")
+                        raise RuntimeError("The recording display is unavailable. Recording cancelled.")
                     timing.mark("release_ui_ready")
                     timing.mark("reservation_start")
                     if mode == "hover" and not isinstance(pushed["cursor_context"], dict):

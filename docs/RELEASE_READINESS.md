@@ -76,10 +76,10 @@ exit 0, no findings. Their relative local Markdown targets resolved. Longer
 runtime disclosures moved to `docs/REFERENCE.md`, not discarded.
 
 - Root source licence: MIT, copyright SilentHacks. Vendored
-  `asr/parakeet_coreml.py` has silicon-asr provenance/MIT text in
+  `audio/asr/parakeet_coreml.py` has silicon-asr provenance/MIT text in
   [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Retain both files in archives.
 - Runtime assets are external and explicitly prepared, pinned/hashed by
-  `assets.json` and webcam code. Notices distinguish NVIDIA v2/FluidInference/MLX
+  `audio/assets.json` and webcam code. Notices distinguish NVIDIA v2/FluidInference/MLX
   CC-BY-4.0 weights, Apache-2.0 MediaPipe/Phonon, and MIT runtimes. No v3 licence
   resolution, training-data licence, NVIDIA endorsement or catalogue approval
   is inferred. System fonts are referenced, not bundled.

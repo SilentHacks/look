@@ -109,9 +109,9 @@ Start can reuse that verified browser, including after a Hermes process restart.
 **Compatibility:** `/gaze` and `hermes gaze` remain aliases. `connect` means `start`,
 `disconnect` now performs the full `stop`, and `tracker stop` means `cursor`.
 `timing`, `voice`, `mode`, `resolve`, `listen`, `demo` and `benchmark` remain available.
-The plugin/install/config key is still `hermes-gaze`. Python packages, `gaze_*`
-tool schemas, caches, Chrome profile, calibration and bundled skill identifiers
-are unchanged. Existing configuration and saved calibration need no migration.
+The plugin/install/config key is still `hermes-gaze`. Public `gaze_*` tool schemas,
+caches, Chrome profile, calibration and bundled skill identifiers are unchanged.
+Existing configuration and saved calibration need no migration.
 Bare `/look` and `/gaze` keep the chosen source for this process. An existing
 Chrome reconnect requires explicit acceptance again. Only explicit `setup`
 prepares downloads. Detailed tracker counters moved from
@@ -192,7 +192,7 @@ See [offline read-aloud details](#offline-read-aloud-setup).
 
 All sizes below are approximate decimal payload sizes from publisher metadata, not
 measured transfers. Package installation, cache and compilation overhead are additional.
-ASR and Phonon inputs are pinned in [`assets.json`](../assets.json), with a SHA-256 for
+ASR and Phonon inputs are pinned in [`audio/assets.json`](../audio/assets.json), with a SHA-256 for
 every selected file. Setup verifies cached bytes before fetching only missing files.
 Runtime loaders use local paths only and verify before native loading. A checksum
 failure stops preparation, not a silent fallback or automatic replacement.
