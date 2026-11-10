@@ -193,7 +193,7 @@ def _prepare_recognition(model_name, *, download, report=None):
             except AssetIntegrityError:
                 raise
             except AssetsMissing:
-                if not fetch:
+                if not fetch and (model_name != "parakeet-v3" or repo == "parakeet-v3"):
                     missing.append((repo, load))
             except Exception as exc:
                 logger.debug("Speech backend %s unavailable: %s", repo, exc)
@@ -221,10 +221,10 @@ def _prepare_recognition(model_name, *, download, report=None):
                         _PARAKEET_MODEL = None
             loaders = ([(COREML, _get_coreml_runner), (MLX, _get_parakeet_model)]
                        if apple_silicon_mac() else [])
+            fallback_model = _DEFAULT_MODEL if model_name == "parakeet-v3" else model_name
+            loaders.append((WHISPER[fallback_model], lambda: get_whisper_model(fallback_model)))
             if model_name == "parakeet-v3":
-                loaders = [("parakeet-v3", None)]
-            else:
-                loaders.append((WHISPER[model_name], lambda: get_whisper_model(model_name)))
+                loaders.insert(0, ("parakeet-v3", None))
             for repo, load in loaders:
                 if try_load(repo, load):
                     break
@@ -236,7 +236,7 @@ def _prepare_recognition(model_name, *, download, report=None):
         with _PREPARE_LOCK:
             fetch = not error and not is_ready() and _PREPARE_DOWNLOAD
             if not fetch:
-                if not error and unavailable and not is_ready():
+                if not error and unavailable and not recognition_ready(model_name):
                     error = ("Local speech recognition could not load cached models. Check dependencies, "
                              "then run /look setup. Use Right Option to type.")
                 _PREPARATION_ERROR = error
@@ -247,7 +247,7 @@ def _prepare_recognition(model_name, *, download, report=None):
                 for repo, load in missing:
                     if try_load(repo, load, fetch=True):
                         break
-                if not is_ready():
+                if not recognition_ready(model_name):
                     raise RuntimeError("No usable local speech backend")
             except Exception as exc:
                 error = failed(exc)

@@ -24,6 +24,7 @@ from ...platform_support import apple_silicon_mac
 MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 MODEL_FILE = "parakeet-tdt-0.6b-v3.q8_0.gguf"
 PINS = json.loads(Path(__file__).with_name("parakeet_v3_runtime.json").read_text())
+REQUEST_TIMEOUT = 60
 _LOCK = threading.Lock()
 _RUNNER = None
 
@@ -86,7 +87,7 @@ class Runner:
                  if not k.startswith(("NEMO_SPEECH_", "DYLD_"))},
         )
         try:
-            self._reply(90)
+            self._reply(time.monotonic() + 90)
         except BaseException:
             self.close()
             raise
@@ -103,13 +104,30 @@ class Runner:
         for stream in (self.process.stdin, self.process.stdout):
             stream.close()
 
-    def _reply(self, timeout):
-        deadline = time.monotonic() + timeout
+    def _write(self, data, deadline):
+        fd = self.process.stdin.fileno()
+        os.set_blocking(fd, False)
+        data = memoryview(data)
+        while data:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([], [fd], [], remaining)[1]:
+                raise TimeoutError("Parakeet v3 timed out.")
+            try:
+                written = os.write(fd, data)
+            except BlockingIOError:
+                continue
+            data = data[written:]
+
+    def _reply(self, deadline):
+        os.set_blocking(self.process.stdout.fileno(), False)
         while b"\n" not in self.buffer:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([self.process.stdout], [], [], remaining)[0]:
                 raise TimeoutError("Parakeet v3 timed out.")
-            chunk = os.read(self.process.stdout.fileno(), 65536)
+            try:
+                chunk = os.read(self.process.stdout.fileno(), 65536)
+            except BlockingIOError:
+                continue
             if not chunk:
                 raise RuntimeError("Parakeet v3 worker stopped.")
             self.buffer += chunk
@@ -128,10 +146,10 @@ class Runner:
             raise ValueError("Parakeet v3 accepts up to 30 seconds of mono audio at 8–96 kHz.")
         with self.lock:
             try:
-                self.process.stdin.write(struct.pack("<II", len(audio), sample_rate))
-                self.process.stdin.write(audio.tobytes())
-                self.process.stdin.flush()
-                result = self._reply(60)
+                deadline = time.monotonic() + REQUEST_TIMEOUT
+                self._write(struct.pack("<II", len(audio), sample_rate), deadline)
+                self._write(memoryview(audio).cast("B"), deadline)
+                result = self._reply(deadline)
             except BaseException:
                 self.close()
                 raise

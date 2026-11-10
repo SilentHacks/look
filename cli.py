@@ -57,9 +57,14 @@ def _first_run_guide(session, *, report=None) -> str:
     if platform.system() not in ("Darwin", "Linux"):
         return platform_notice()
     lines = [platform_notice()] if not apple_silicon_mac() else []
-    lines.append("Local speech setup may download " + (
-        "~465 MB (fallbacks up to 2.47 GB)." if apple_silicon_mac() else
-        "~148 MB for base.en (~78 MB for tiny.en).") + " Your camera and microphone stay off.")
+    if _config().whisper_model == "parakeet-v3":
+        lines.append("Local speech setup may download ~721 MB: NVIDIA Parakeet v3 weights "
+                     "from Hugging Face and the official NeMo-Speech.cpp native runtime from GitHub. "
+                     "Fallback models use existing caches only. Your camera and microphone stay off.")
+    else:
+        lines.append("Local speech setup may download " + (
+            "~465 MB (fallbacks up to 2.47 GB)." if apple_silicon_mac() else
+            "~148 MB for base.en (~78 MB for tiny.en).") + " Your camera and microphone stay off.")
     if platform.system() == "Darwin" and not Path(
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file():
         lines.append("Install Google Chrome in Applications.")

@@ -1,10 +1,15 @@
 # Optional NVIDIA Parakeet v3 recognition
 
-Experiment: 2026-11-10. **Keep CoreML v2 as the default.** NVIDIA v3 Q8 is usable
-locally and has cleaner vendor distribution provenance, but this small English
-sample does not justify replacing the working route. Median warm recognition was
-121 ms slower (1.75× CoreML v2); one fewer word error out of 200 is not a reliable
-accuracy advantage. The user's preference for v3 remains an opt-in choice.
+Experiment: 2026-11-10. **Keep CoreML v2 as the default; preserve v3 selection.**
+V3 has cleaner vendor distribution provenance and substantially faster observed
+process-cold/cache-warm preparation: 0.719 s versus 41.711 s in the comparison,
+with verified v3 product loading separately measured at 1.165–1.226 s. That
+preparation advantage matters on each fresh process, not just installation.
+CoreML v2 remains faster once warm: v3 recognition was 121 ms slower (1.75×).
+One fewer word error out of 200 from one speaker does not establish better
+accuracy. Keep the established warm route by default rather than switching
+existing installations on this sample; choose v3 when preparation time or
+vendor-origin artifacts matter more. Neither selection resolves catalog policy.
 
 ## Select and prepare
 
@@ -33,21 +38,27 @@ second of silence before publishing readiness. Failed native loading is cached;
 a dead worker does not silently restart/replay its failed request. Explicit setup
 may restart it. Ordinary availability/inference failures can use the existing
 cache-only v2/Whisper chain; integrity failures propagate and do not fall through.
-A warmed fallback remains capture-ready after v3 failure. No fallback is downloaded
-while transcribing. Logs identify native failure and `_LAST_BACKEND` identifies the
-backend that actually returned the transcript.
+On a fresh process, preparation tries cached CoreML, MLX and Whisper after ordinary
+v3 startup failure, making capture available when a fallback loads. Explicit v3
+setup retries v3 but never downloads fallback models. A warmed fallback remains
+capture-ready after v3 failure. Logs identify native failure and `_LAST_BACKEND`
+identifies the backend that actually returned the transcript.
 
 Word milliseconds from the vendor ABI become seconds, validated against audio
 duration, then receive the exact `audio_epoch`. Zero/quiet-buffer handling and
 normalization remain in `voice.py`. The native worker accepts mono 8–96 kHz and
 at most 30 seconds, matching native capture's ceiling. It has a 90-second startup
-and 60-second inference deadline; native failures kill/reap it. No audio WAV is
-written by this backend: PCM crosses private stdin; text/times return on stdout.
+deadline and one 60-second request deadline shared by nonblocking header/audio
+writes and reply reads. Expiry or native failure kills/reaps the worker without
+restarting or replaying that native request. No audio WAV is written by this
+backend: PCM crosses private stdin; text/times return on stdout.
 
-Cancellation retains existing inbox ownership and terminal-result guards: Stop,
-disconnect and stale requests cannot admit a late transcript. **Stop does not
-interrupt an already-running native decode immediately** (also true of the old
-in-process recognizers). The offline ABI has no cancellation operation. The probe
+Cancellation retains existing inbox ownership and terminal-result guards: Stop
+removes the exact pending request, so a late transcript cannot submit that removed
+request. Disconnect pauses admission; pending ASR and its result may be retained
+in memory while disconnected. **Stop does not interrupt an already-running native
+decode immediately** (also true of the old in-process recognizers). The offline
+ABI has no cancellation operation. The probe
 also exercises forced worker exit during decoding and explicit cached restart;
 it does not establish a new user-facing immediate-cancellation guarantee. No
 microphone, Chrome, account, private speech or paid provider was accessed.
@@ -208,15 +219,31 @@ HOME/HF_HOME under the same network-denying sandbox:
 env HOME="$V3_HOME" HF_HOME="$V3_HF" $P -m tests.parakeet_v3_offline --audio /path/to/jfk.wav
 ```
 
-Verified: 42 targeted tests; actual offline native transcription, exact epoch
-shift, singleton readiness, native silence, 8-kHz resampling, 30-second input,
-over-limit rejection, forced native exit/no implicit restart and explicit offline
-cached restart. The first word in the probe was `And`, start
-`1700000000.24`, end `1700000000.56`. Runtime error/fallback, missing cache,
-integrity failure and hanging-worker deadline paths have device-free regressions.
+Integration verification (2026-11-10):
+- **66 focused tests passed:** the four modules above plus `tests.test_voice_turns`,
+  with external and loopback networking denied.
+- **382 tests passed** in the final `unittest discover -s tests -t .` run. The
+  sandbox denied external networking but allowed loopback/Unix sockets for local
+  transport tests; HOME/HF_HOME pointed to the isolated experiment caches.
+- Actual offline native probe: verified cache load/warmup **1.226 s**, exact epoch
+  shift, singleton readiness, native silence, 8-kHz resampling, 30-second input,
+  over-limit rejection, forced native exit/no implicit restart and explicit offline
+  cached restart. First word: `And`, start `1700000000.24`, end `1700000000.56`.
+- Device-free regressions exercise a live non-reading child with 30-second PCM,
+  a child consuming PCM but withholding its reply, and delayed writes/reads that
+  must share one deadline. Each timeout kills/reaps the child and prevents implicit
+  restart. Startup timeout and fresh empty-singleton CoreML/MLX/Whisper cached
+  fallback preparation are covered, including explicit setup and terminal integrity
+  failure.
+- Called the actual setup guide with each selection and mocked preparation:
+  v3 discloses ~721 MB, NVIDIA weights, the official native runtime, Hugging Face,
+  GitHub and cache-only fallbacks; default setup retains its v2-chain disclosure.
+  No download or device initialization was needed for this copy check.
+
 No full fresh Hermes installation, Linux/Intel execution, multilingual accuracy,
 semantic word-alignment quality, real capture, TUI/UI journey or catalog
-admission was tested. No default change was made.
+admission was tested. No default change was made. The comparison was retained,
+not rerun; the integration probe is not a new multi-backend benchmark.
 
 Measured dependency versions: NumPy 2.5.4, huggingface_hub 1.33.0,
 faster-whisper 1.2.1, CTranslate2 4.8.5, PyObjC/CoreML 13.0, PyArrow 26.0.1,
