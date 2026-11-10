@@ -117,6 +117,13 @@ debugger remains outside this website/other-user boundary.
 | Setup interrupted / file access error | Stop Look, check access to the two documented user-level directories and rerun setup. Ordinary replacement failures restore previously replaced files. Crash/power-loss recovery is rerunning setup. Do not edit Chrome profile preferences. |
 | Browser connected but voice/model unavailable | Check `/look diagnostics` and the separate speech/input/provider setup. Attachment alone does not establish their readiness. |
 
+On macOS the toolbar popup can own focus while Chrome reports its ordinary
+parent window as unfocused. Look now uses the focused popup's own window for
+tab selection; page actions still require the ordinary foreground checks.
+If an older installation shows “Open Look on an ordinary web tab” on an HTTP(S)
+tab, follow **Update** above, including both setup and Chrome's Reload.
+Reload alone does not copy changed source into the staged extension folder.
+
 Host/worker/port loss, debugger detach, extension disable/reload/update, selected-tab
 close/move or restricted frames can end a generation. Stop cancels capture, output,
 tasks and pending approvals, removes overlays and detaches. User tabs and Chrome
@@ -161,7 +168,7 @@ camera/microphone permission is requested by this extension.
 python -m unittest tests.test_extension tests.test_chrome_consent tests.test_first_run tests.test_companion_ownership
 node tests/extension_worker.cjs
 node tests/extension_popup.cjs
-python tests/extension_setup_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --out /tmp/look-setup-evidence
+python tests/extension_setup_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --headed --out /tmp/look-setup-evidence
 python tests/extension_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --out /tmp/look-extension-evidence
 ```
 
@@ -169,8 +176,10 @@ The browser probe uses disposable Chrome for Testing profiles, temporary native
 registration, local pages, a test-only worker driver/inspector and fake
 frontend/device objects. It exercises real plugin registration, setup, native
 discovery, competing profile clicks, expiry, Stop, stale requests and private
-renderer/keyboard ownership. Automatic fixture pairing is not shipped. The actual
-toolbar popup gesture remains a user-operated gate.
+renderer/keyboard ownership. Automatic fixture pairing is not shipped. The setup
+probe's `--headed` mode activates only its disposable Chrome process and opens
+the actual toolbar popup with `chrome.action.openPopup()`. It uses trusted CDP
+mouse input inside that popup, not a physical toolbar click.
 
 No-paste headless acceptance: **100 checks PASS** across eight scenarios, plus
 **63 Python tests** and the Node ownership-race harness. Official mac-arm64
@@ -180,9 +189,11 @@ the probe's debugger `mouseMoved` command even without Look installed. That buil
 is not accepted here. Headed/physical behavior on 145 is unverified. Use current
 stable Chrome for the trial. See the [release evidence](RELEASE_READINESS.md#integrated-verification--2026-11-10).
 
-Headless checks do not establish headed macOS foreground behavior, physical input,
-signed-in acceptance, multiple personal profiles/windows, other extensions,
-managed policy or actual Chrome permission/banner/update UX. Those remain
+The headed setup probe reproduces the macOS popup/owner focus split, pairs through
+the real native host, selects across two normal windows, rejects restricted tabs,
+checks Chrome's incognito exclusion, recovers from expiry, and restages/reloads.
+Physical toolbar gestures, signed-in acceptance, multiple personal profiles,
+other extensions, managed policy and Chrome permission/banner UX remain
 user-operated gates. Store publication additionally needs publisher-owned identity,
 privacy disclosures, packaging, payment/registration and Google's approval. No
 approval date or Store availability is promised. Native-consent Allow/deny/revoke

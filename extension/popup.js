@@ -7,7 +7,9 @@ async function send(op) {
   document.querySelectorAll('button').forEach(button => { button.disabled = true; });
   if (op !== 'status') status.textContent = op === 'stop' ? 'Disconnecting…' : 'Connecting…';
   try {
-    const result = await chrome.runtime.sendMessage({op, request, selection});
+    const owner = await chrome.windows.getCurrent();
+    const result = await chrome.runtime.sendMessage({op, request, selection,
+      popup: {windowId: owner.id, focused: document.hasFocus()}});
     if (!result?.ok) throw Error(result?.error || 'Look did not connect.');
     if (op === 'status' && !result.connected && offered &&
         (result.request !== offered || JSON.stringify(result.selection) !== JSON.stringify(selection))) stale = true;

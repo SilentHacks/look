@@ -196,6 +196,14 @@ function fixture() {
     assert.equal((await popup({op:'status'})).ok, false, 'ineligible tab must not offer Connect');
   }
   f.context.chrome.tabs.query = query;
+  f.focus(false);
+  assert.equal((await popup({op:'status'})).ok, false, 'no focused popup or window cannot offer Connect');
+  const popupOffer = await popup({op:'status',popup:{windowId:7,focused:true}});
+  assert.equal(popupOffer.ok, true, 'focused toolbar popup may own an unfocused normal window');
+  assert.equal((await popup({op:'status',popup:{windowId:8,focused:true}})).ok, false, 'popup cannot substitute another owner');
+  assert.equal(await vm.runInContext('foreground(tabs.get(1) || {id:1,window:7})', f.context), false,
+    'popup focus does not authorize normal actions');
+  f.focus(true);
   let nativeStarts = 0;
   f.context.chrome.runtime.connectNative = () => { nativeStarts++; throw Error('must not open'); };
   f.activate(false); f.activate(true);
@@ -252,6 +260,14 @@ function fixture() {
   await vm.runInContext('closing', f.context);
   assert.equal(vm.runInContext('dead && tabs.size===0', f.context), true);
   assert.equal(attempt.requests.length, 1, 'host loss never reconnects');
+  f = fixture();
+  vm.runInContext('tabs.clear()', f.context);
+  f.context.chrome.debugger.attach = async () => { f.focus(false); f.focus(true); };
+  await assert.rejects(vm.runInContext(
+    'select({id:1,windowId:7,url:"https://fixture.test/"},connection,7)', f.context),
+    /Chrome refused or ended debugger access/);
+  assert.equal(vm.runInContext('dead && tabs.size===0', f.context), true,
+    'focus changes during attachment revoke popup-only authorization');
   // A queued click must not start after Stop completes prior cleanup.
   f = fixture(); await vm.runInContext('stop()', f.context);
   let releaseCleanup;

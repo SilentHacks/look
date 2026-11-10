@@ -8,6 +8,11 @@ No public release, catalogue admission, Store listing or release date is asserte
   disappear or reattach, while the approved browser connection remains live.
   An explicit separate-browser start-page fallback becomes the next return target.
   Disconnect, browser replacement, Stop and Use cursor still revoke the camera.
+- Fixed macOS toolbar-popup connection rejection when the focused popup leaves
+  its ordinary owner window unfocused. Selection uses that popup's exact window;
+  normal page-action foreground checks and one-use connection consent remain.
+  Added headed disposable-Chrome coverage for actual popup pairing, two windows,
+  restricted/incognito exclusion, expiry recovery and staged updates.
 
 - Removed the native-consent start command. Use the extension for your usual
   Chrome or `start --separate` for Look's browser.

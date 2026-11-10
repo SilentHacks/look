@@ -11,12 +11,13 @@ const SETUP = 'Run /look setup extension in Hermes, reload Look in chrome://exte
 const FRESH_REQUEST = 'Connection used, cancelled or expired. Run /look stop, then /look start --extension in Hermes and reopen Look.';
 const urlAllowed = url => /^https?:\/\//.test(url || '');
 const bounded = promise => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Error('Chrome did not reply. Reconnect, but do not repeat the action.')), 5000))]);
-async function foreground(tab) {
+async function foreground(tab, popupWindow = null) {
   const revision = foregroundRevision, connection = port;
   const current = await chrome.tabs.get(tab.id);
   const window = await chrome.windows.get(tab.window);
   if (dead || port !== connection || tabs.get(tab.id) !== tab || current.incognito ||
-      current.windowId !== tab.window || !current.active || window.type !== 'normal' || !window.focused) return false;
+      current.windowId !== tab.window || !current.active || window.type !== 'normal' ||
+      (!window.focused && popupWindow !== tab.window)) return false;
   // A changing observation is unknown for capture, but cannot authorize an action.
   return revision === foregroundRevision ? true : null;
 }
@@ -46,21 +47,23 @@ function stop() {
   closing = Promise.all([closing, ...owned.map(cleanup)]);
   return closing;
 }
-async function select(tab, connection) {
+async function select(tab, connection, popupWindow = null) {
   if (dead || port !== connection || !tab || tab.incognito || !urlAllowed(tab.pendingUrl || tab.url)) fail('Choose an ordinary web tab in a regular Chrome window.');
   const revision = foregroundRevision;
   const current = await chrome.tabs.get(tab.id);
   const window = await chrome.windows.get(tab.windowId);
   if (dead || port !== connection || revision !== foregroundRevision) fail('Connection or foreground changed while selecting a tab.');
   if (!current.active || current.windowId !== tab.windowId || current.incognito ||
-      !urlAllowed(current.pendingUrl || current.url) || !window.focused || window.type !== 'normal') fail('Return to the selected tab before connecting.');
+      !urlAllowed(current.pendingUrl || current.url) || (!window.focused && popupWindow !== tab.windowId) ||
+      window.type !== 'normal') fail('Return to the selected tab before connecting.');
   if (tabs.has(tab.id)) return;
   const owned = {id: tab.id, window: tab.windowId, session: crypto.randomUUID(), scripts: new Set(), contexts: new Map(), claimed: false, closed: false, mainFrame: '', document: '', route: 0};
   tabs.set(tab.id, owned); // Register before attachment so Stop owns in-flight work.
   try {
     owned.attachment = chrome.debugger.attach({tabId: tab.id}, '1.3');
     await bounded(owned.attachment);
-    if (dead || tabs.get(tab.id) !== owned || !await foreground(owned)) fail('Connection changed while attaching.');
+    if (dead || tabs.get(tab.id) !== owned || !await foreground(owned, popupWindow) ||
+        revision !== foregroundRevision) fail('Connection changed while attaching.');
   } catch (_) {
     if (port === connection) await stop();
     fail('Chrome refused or ended debugger access. Start a new connection explicitly.');
@@ -70,7 +73,7 @@ function post(value, connection = port) {
   if (!port || dead || port !== connection) fail('Look disconnected.');
   connection.postMessage(value);
 }
-async function pair(request, tab, revision = foregroundRevision, epoch = connectionRevision) {
+async function pair(request, tab, revision = foregroundRevision, epoch = connectionRevision, popupWindow = null) {
   await closing;
   if (epoch !== connectionRevision || revision !== foregroundRevision) fail('Connection or foreground changed. Reopen Look on the desired tab.');
   if (port || !dead) fail('Disconnect Look before pairing another session.');
@@ -94,7 +97,7 @@ async function pair(request, tab, revision = foregroundRevision, epoch = connect
       if (!pairing || generation || message.generation !== request || message.request !== request ||
           epoch !== connectionRevision || revision !== foregroundRevision) { void stop(); return; }
       generation = message.generation;
-      ready = select(tab, current);
+      ready = select(tab, current, popupWindow);
       const waiter = pairing; pairing = null;
       ready.then(waiter.resolve, waiter.reject);
     } else if (message.id && generation) {
@@ -264,21 +267,25 @@ chrome.windows.onFocusChanged.addListener(() => { foregroundRevision++; });
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html') || sender.tab) return false;
   (async () => {
+    // macOS gives the toolbar popup focus, leaving its normal owner unfocused.
+    // Only our authenticated popup may attest focus; never use this for actions.
+    const popupWindow = message.popup?.focused === true && Number.isInteger(message.popup.windowId)
+      ? message.popup.windowId : null;
     if (message.op === 'stop') await stop();
     else if (message.op === 'pair' || message.op === 'add') {
       const connection = port, revision = foregroundRevision, epoch = connectionRevision;
-      const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+      const [tab] = await chrome.tabs.query({active: true, ...(popupWindow === null ? {currentWindow: true} : {windowId: popupWindow})});
       if (revision !== foregroundRevision || epoch !== connectionRevision) fail('Connection or foreground changed before tab selection.');
       if (message.op === 'pair') {
         const selected = message.selection;
         if (!selected || selected.id !== tab?.id || selected.windowId !== tab.windowId ||
             selected.revision !== revision || selected.epoch !== epoch) fail('Reopen Look on the tab you want to connect.');
-        await pair(message.request, tab, revision, epoch);
-      } else await select(tab, connection);
+        await pair(message.request, tab, revision, epoch, popupWindow);
+      } else await select(tab, connection, popupWindow);
     } else if (message.op !== 'status') fail('Unsupported popup action.');
     if (message.op === 'status' && dead) {
       const revision = foregroundRevision, epoch = connectionRevision;
-      const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
+      const [tab] = await chrome.tabs.query({active: true, ...(popupWindow === null ? {currentWindow: true} : {windowId: popupWindow})});
       let host;
       try { host = await bounded(chrome.runtime.sendNativeMessage('org.look.companion', {op: 'status'})); }
       catch (_) { fail(SETUP); }
@@ -287,7 +294,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (host.request) {
         const window = tab && await chrome.windows.get(tab.windowId);
         if (!tab || tab.incognito || !urlAllowed(tab.pendingUrl || tab.url) ||
-            !tab.active || window.type !== 'normal' || !window.focused)
+            !tab.active || window.type !== 'normal' || (!window.focused && popupWindow !== tab.windowId))
           fail('Open Look on an ordinary web tab in a regular Chrome window.');
         if (revision !== foregroundRevision || epoch !== connectionRevision || !dead) fail('Connection or foreground changed. Reopen Look.');
       }

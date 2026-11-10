@@ -1,5 +1,5 @@
 """Actual action popup + native host + plugin, isolated CfT profile and fake delayed ASR.
-Run: .venv/bin/python tests/extension_setup_chrome.py --chrome PATH --out /tmp/look-setup
+Run: python tests/extension_setup_chrome.py --chrome PATH --headed --out /tmp/look-setup
 Only this disposable Chrome exposes an ephemeral loopback inspector to the test driver.
 """
 from __future__ import annotations
@@ -67,7 +67,7 @@ class Driver:
         return self.call('Target.attachToTarget', dict(targetId=target, flatten=True))['sessionId']
 
 
-def run(chrome, out):
+def run(chrome, out, headed=False):
     checks = []
     def check(name, value):
         assert value, name
@@ -117,7 +117,7 @@ def run(chrome, out):
         launcher = native / 'host'
         launcher.write_text(launcher.read_text().replace(str(native / 'host.py'), str(wrapper)))
         extension = native / 'unpacked'
-        args = [chrome, f'--user-data-dir={profile}', '--headless=new', '--no-first-run',
+        args = [chrome, f'--user-data-dir={profile}', *([] if headed else ['--headless=new']), '--no-first-run',
                 '--no-default-browser-check', '--disable-background-networking', '--disable-component-update',
                 '--disable-sync', '--disable-default-apps', '--password-store=basic', '--use-mock-keychain',
                 '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0',
@@ -130,6 +130,8 @@ def run(chrome, out):
             process.terminate()
             try: process.wait(10)
             except subprocess.TimeoutExpired: process.kill(); process.wait(5)
+            if out:
+                (out / 'chrome.log').write_bytes((directory / 'chrome.log').read_bytes())
         stack.callback(close)
         active = profile / 'DevToolsActivePort'
         until(active.is_file, 15)
@@ -147,11 +149,24 @@ def run(chrome, out):
         driver.call('Page.enable', session=page_session)
         driver.call('Page.setDocumentContent', dict(frameId=driver.call('Page.getFrameTree', session=page_session)['frameTree']['frame']['id'],
                     html='<title>Local setup fixture</title><p>Fixture price: 42 pounds</p>'), page_session)
-        def open_popup():
+        def open_popup(owner=None):
+            if headed:
+                from AppKit import NSRunningApplication, NSApplicationActivateIgnoringOtherApps
+                app = NSRunningApplication.runningApplicationWithProcessIdentifier_(process.pid)
+                assert app is not None, f'disposable Chrome exited: {process.poll()}'
+                app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps)
+                until(app.isActive)
+                driver.evaluate(worker, f'chrome.windows.get({owner}).then(w=>chrome.windows.update(w.id,{{focused:true}}))'
+                                if owner else 'chrome.windows.getLastFocused().then(w=>chrome.windows.update(w.id,{focused:true}))')
+                until(lambda: driver.evaluate(worker, 'chrome.windows.getLastFocused().then(w=>w.focused)'))
             driver.call('Target.activateTarget', dict(targetId=page_id))
-            driver.evaluate(worker, 'chrome.action.openPopup().then(()=>true)')
+            driver.evaluate(worker, f'chrome.action.openPopup({{windowId:{owner}}}).then(()=>true)'
+                            if owner else 'chrome.action.openPopup().then(()=>true)')
             target = until(lambda: next((t for t in driver.targets() if t['url'] == f'chrome-extension://{EXTENSION}/popup.html'), None))
-            return driver.attach(target['targetId'])
+            popup = driver.attach(target['targetId'])
+            if headed:
+                until(lambda: driver.evaluate(popup, 'document.hasFocus()'))
+            return popup
         def state(popup):
             return driver.evaluate(popup, 'Object.fromEntries(["start","pair","add","stop","status"].map(id=>{const n=document.getElementById(id);return [id,{hidden:n.hidden,text:n.textContent,disabled:n.disabled}]}))')
         def snap(popup, name):
@@ -161,7 +176,15 @@ def run(chrome, out):
             driver.evaluate(popup, 'window.close()')
         def start():
             return command('start --extension', session_id='fixture', session_key='fixture-key', platform='fixture')
+        def connect_popup(popup):
+            point = driver.evaluate(popup, '(()=>{const r=document.getElementById("pair").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()')
+            for kind in ('mousePressed', 'mouseReleased'):
+                driver.call('Input.dispatchMouseEvent', dict(type=kind, button='left', clickCount=1, **point), popup)
+            until(lambda: ctx.turns.connected, 25)
         popup = open_popup()
+        if headed:
+            check('focused_toolbar_popup_has_unfocused_normal_owner',
+                  driver.evaluate(popup, '(async()=>document.hasFocus() && !(await chrome.windows.getCurrent()).focused)()'))
         until(lambda: not state(popup)['start']['hidden'])
         check('not_running_popup_shows_start_without_connect', state(popup)['pair']['hidden'])
         start()
@@ -181,6 +204,22 @@ def run(chrome, out):
         until(lambda: state(popup)['pair']['hidden'])
         check('expired_request_removes_connect', not ctx.turns.connected)
         close_popup(popup)
+        # Two real normal windows: the popup must pin its own active tab.
+        original_page = page_id
+        other = driver.evaluate(worker, 'chrome.windows.create({url:' + json.dumps(url + '?second') + '}).then(w=>({id:w.id,tab:w.tabs[0].id}))')
+        page_id = until(lambda: next((t['targetId'] for t in driver.targets() if t['url'] == url + '?second'), None))
+        command('stop')
+        start()
+        popup = open_popup(other['id'])
+        until(lambda: not state(popup)['pair']['hidden'])
+        chosen = driver.evaluate(popup, 'selection')
+        check('second_window_popup_pins_own_tab', chosen['id'] == other['tab'] and chosen['windowId'] == other['id'])
+        connect_popup(popup)
+        check('second_window_connect_attaches_only_own_tab',
+              driver.evaluate(worker, '[...tabs.keys()]') == [other['tab']])
+        command('stop')
+        driver.evaluate(worker, f'chrome.windows.remove({other["id"]})')
+        page_id = original_page
         command('stop')
         start()
         driver.call('Page.navigate', dict(url='chrome://extensions'), page_session)
@@ -190,6 +229,15 @@ def run(chrome, out):
         check('restricted_tab_has_no_connect_and_does_not_consume_request',
               state(popup)['pair']['hidden'] and not ctx.turns.connected)
         close_popup(popup)
+        # Chrome enforces manifest incognito:not_allowed; no private popup is available.
+        check('manifest_refuses_incognito_permission',
+              driver.evaluate(worker, 'chrome.extension.isAllowedIncognitoAccess()') is False)
+        driver.evaluate(worker, 'chrome.windows.create({incognito:true,url:' + json.dumps(url + '?private') + '}).then(()=>true)')
+        private_page = until(lambda: next((t['targetId'] for t in driver.targets() if t['url'] == url + '?private'), None))
+        driver.call('Target.activateTarget', dict(targetId=private_page))
+        check('incognito_window_hidden_from_extension',
+              driver.evaluate(worker, 'chrome.tabs.query({}).then(ts=>ts.every(t=>!t.incognito))') and not ctx.turns.connected)
+        driver.call('Target.closeTarget', dict(targetId=private_page))
         driver.call('Page.navigate', dict(url=url), page_session)
         until(lambda: driver.evaluate(page_session, 'document.readyState === "complete" && location.href === ' + json.dumps(url)))
         command('stop')
@@ -198,10 +246,7 @@ def run(chrome, out):
         until(lambda: not state(popup)['pair']['hidden'])
         driver.evaluate(popup, 'document.getElementById("pair").click()')
         check('synthetic_popup_click_cannot_pair', not ctx.turns.connected)
-        point = driver.evaluate(popup, '(()=>{const r=document.getElementById("pair").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()')
-        for kind in ('mousePressed', 'mouseReleased'):
-            driver.call('Input.dispatchMouseEvent', dict(type=kind, button='left', clickCount=1, **point), popup)
-        until(lambda: ctx.turns.connected, 25)
+        connect_popup(popup)
         check('trusted_popup_click_pairs_actual_plugin_and_host', ctx.turns.binding['session_id'] == 'fixture')
         check('pending_recognition_is_typed_only', session.cdp._inbox_event['recognition']['ready'] is False)
         tab = until(lambda: next((t for t in session.cdp._tabs.values() if t.is_connected and t._ui_frames), None))
@@ -259,6 +304,8 @@ def run(chrome, out):
         driver = Driver(f'ws://127.0.0.1:{port}{endpoint}')
         stack.callback(driver.ws.close)
         wake = driver.call('Target.createTarget', dict(url=f'chrome-extension://{EXTENSION}/popup.html'))['targetId']
+        wake_session = driver.attach(wake)
+        until(lambda: driver.evaluate(wake_session, 'document.readyState === "complete"'))
         replacement = until(lambda: next((t for t in driver.targets() if
             t['url'] == f'chrome-extension://{EXTENSION}/worker.js'), None))
         worker = driver.attach(replacement['targetId'])
@@ -282,6 +329,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chrome', required=True)
     parser.add_argument('--out', type=Path)
+    parser.add_argument('--headed', action='store_true')
     args = parser.parse_args()
     if args.out: args.out.mkdir(parents=True, exist_ok=True)
-    print(json.dumps(run(args.chrome, args.out), indent=2))
+    print(json.dumps(run(args.chrome, args.out, args.headed), indent=2))

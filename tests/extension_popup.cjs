@@ -7,10 +7,10 @@ async function popup(initial) {
   let result = initial, tick;
   const nodes = Object.fromEntries(['status', 'pair', 'start', 'add', 'stop'].map(id =>
     [id, {hidden: true, disabled: false, textContent: '', addEventListener() {}}]));
-  const context = vm.createContext({document: {querySelector: id => nodes[id.slice(1)],
+  const context = vm.createContext({document: {hasFocus: () => true, querySelector: id => nodes[id.slice(1)],
     querySelectorAll: () => ['pair', 'add', 'stop'].map(id => nodes[id])},
     window: {close() {}}, setInterval: fn => { tick = fn; },
-    chrome: {runtime: {sendMessage: async () => result}}});
+    chrome: {windows: {getCurrent: async () => ({id:7})}, runtime: {sendMessage: async () => result}}});
   vm.runInContext(source, context);
   await new Promise(setImmediate);
   return {nodes, async refresh(value) { result = value; tick(); await new Promise(setImmediate); }};
