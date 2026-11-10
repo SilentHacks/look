@@ -48,7 +48,7 @@ def prepare(repo, *, download=False, names=None, local_dir=None):
         raise AssetsMissing("Local speech recognition is not ready. Run /look setup, or press Right Option to type.")
     for name in missing:
         path = hf_hub_download(repo, name, revision=asset["revision"], local_dir=local_dir,
-                               endpoint="https://huggingface.co")
+                               endpoint="https://huggingface.co", token=False)
         verify(path, files[name])
         paths[name] = Path(path)
     name = next(iter(paths))

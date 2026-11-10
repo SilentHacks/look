@@ -4,7 +4,7 @@ description: "Look lets you ask about pages and review browser actions in Chrome
 author: "Abid"
 kind: standalone
 license: MIT
-requires_hermes: ">=0.22.0"
+requires_hermes: ">=0.23.1"
 # Loader eligibility, not a tested-platform matrix. Linux cursor paths remain available.
 platforms:
   - macos

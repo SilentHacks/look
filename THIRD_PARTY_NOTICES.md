@@ -75,7 +75,9 @@ Recognition and Phonon file revisions and SHA-256 expectations are in
 [`audio/assets.json`](audio/assets.json). Weight/embedding hashes derive from immutable
 publisher LFS metadata, not a claim that this release audit downloaded those weights.
 CoreML/MLX official-distribution acceptance under the Hermes catalog remains a
-maintainer decision. Pinning alone is not catalog approval.
+maintainer decision. The [source-policy investigation](docs/CATALOG_READINESS.md#rule-17-source-policy-finding)
+records converter/runtime provenance and a local source-build alternative.
+Pinning alone is not catalog approval.
 
 ## Gradium Phonon read-aloud
 

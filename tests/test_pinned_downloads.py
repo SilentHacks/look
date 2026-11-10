@@ -58,6 +58,7 @@ class PinnedDownloadsTests(unittest.TestCase):
     def fetch(self, repo, name, **kwargs):
         self.assertEqual(kwargs["revision"], cache.ASSETS[repo]["revision"])
         self.assertEqual(kwargs["endpoint"], "https://huggingface.co")
+        self.assertIs(kwargs["token"], False)
         path = self.path(repo, name)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(self.files[repo][name])
@@ -83,6 +84,24 @@ class PinnedDownloadsTests(unittest.TestCase):
             if thread.name in ("gaze-asr-prewarm", "gaze-asr-prepare"):
                 thread.join(2)
                 self.assertFalse(thread.is_alive())
+
+    def test_public_downloads_never_resolve_or_send_ambient_credentials(self):
+        from huggingface_hub.utils import build_hf_headers
+
+        fetch = self.fetch
+        def anonymous_fetch(repo, name, **kwargs):
+            headers = build_hf_headers(token=kwargs.get("token"))
+            self.assertNotIn("authorization", {key.lower() for key in headers})
+            return fetch(repo, name, **kwargs)
+
+        with patch("huggingface_hub.utils._headers.get_token",
+                   side_effect=AssertionError("ambient credential resolution forbidden")), \
+                patch("huggingface_hub.utils._auth.get_token",
+                      side_effect=AssertionError("credential store access forbidden")):
+            self.download.side_effect = anonymous_fetch
+            for repo in self.files:
+                with self.subTest(repo=repo):
+                    cache.prepare(repo, download=True)
 
     def test_restart_uses_cached_fallbacks_before_any_download_and_keeps_preference(self):
         coreml, mlx, whisper = self.fake_loaders()

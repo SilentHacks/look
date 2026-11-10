@@ -4,6 +4,13 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Public model downloads now explicitly disable Hugging Face authentication.
+  A real hub-header regression rejects ambient credential resolution.
+- Raised the Hermes compatibility floor to 0.23.1, the released native-input
+  protocol verified by the stock lifecycle probe.
+- Completed install disclosures and prepared catalog metadata, a PR draft and
+  an uncaptured screenshot plan. Publication and source-policy approval remain gates.
+
 - Eye setup now establishes its browsing connection before pinning the camera's
   lifetime. Repeated Start/setup in the same conversation retains the exact input
   binding, including SDK frontends; changed keys, Stop and browser replacement

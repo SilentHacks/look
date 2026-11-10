@@ -9,13 +9,17 @@ plugin. Ask about a paragraph, table cell or page control without copying it int
 chat. Answers and follow-ups stay in a private card beside the page.
 
 **Source beta for Apple Silicon Mac.** Use one display, native arm64 Python
-3.11–3.14, current stable Google Chrome in Applications, Git and Hermes 0.22.0
+3.11–3.14, current stable Google Chrome in Applications, Git and Hermes 0.23.1
 or newer with a model configured. Start with a non-sensitive page.
 
 ## Install
 
 Run interactively in a terminal. Review the scanner findings and dependency
 preparation before agreeing:
+
+This published pin predates the local catalog-readiness fixes. It is not the
+submission candidate. Replace it only after the fixed commit is published and
+anonymously verified.
 
 ```sh
 hermes plugins install https://github.com/SilentHacks/look.git --ref 341c68b20ef689661b9d88f8bf23e213e5b25338 --enable
@@ -91,14 +95,49 @@ prompts. Stopping or reconnecting resets the mode.
 
 ## Privacy and limits
 
-Speech recognition and eye processing stay local. With an optional TypeSafe key,
-highlighting also sends your question and scope descriptions to TypeSafe.
-Additional page evidence is opt-in.
+Speech recognition and eye processing stay local. Questions and bounded page
+evidence go to your configured model, including an auxiliary scope-selection call
+when needed. Those calls can incur provider costs and remain in Hermes/provider
+history. Optional TypeSafe highlighting sends the question, pointer structure and
+scope descriptions to TypeSafe. Page text is opt-in. TypeSafe can add service
+costs. Its retention policy has not been verified.
 
 Website scripts cannot read the cards or typed questions. Other debuggers and
 malicious local software are outside that protection. Browser actions can change
 sites, including through typing or navigation. Password, payment and other secret
 fields are unsupported. Some frames and custom controls are unavailable.
 Screen-reader compatibility is unverified.
+
+## Installation disclosures
+
+- Registration starts a background GET-only demo/status server at
+  `127.0.0.1:9111` and cache-only speech warmup. Connected sessions keep browser,
+  input and speech workers running. There is no Look telemetry service.
+- Look reads the connecting Hermes profile's permission/isolation config and uses
+  a same-user local socket and one-use session ticket. Extension setup writes
+  reviewed extension files, a Python native host and Chrome native-messaging
+  registration under your user account. It does not read vendor login stores.
+- Separate-browser and eye modes launch Chrome processes. Speech may launch
+  `ffmpeg` to decode audio or macOS `/usr/bin/say` before playback starts.
+  Python/native dependencies are installed separately through Hermes.
+- Explicit setup downloads public, pinned, checksum-verified assets anonymously
+  from Hugging Face and its storage redirects: FluidInference's NVIDIA Parakeet
+  CoreML conversion (465 MB), mlx-community's MLX fallback (2.47 GB), SYSTRAN's
+  OpenAI Whisper fallback (148 MB, or 78.1 MB for tiny.en), and Gradium's Phonon
+  read-aloud model (65 MB plus about 0.26 MB per voice). Eye setup fetches Google's
+  MediaPipe runtime from npm (6.6 MB compressed) and Face Landmarker from Google
+  storage (3.76 MB). These are downloads, not hosted speech or eye inference.
+  Converter-owned CoreML/MLX catalog source-policy acceptance is unresolved.
+- Local storage includes shared model caches, sensitive biometric calibration,
+  extension/native-host files and the separate Chrome profile with any sign-ins.
+  The MLX fallback uses a temporary WAV, deleted after transcription where
+  possible. A crash or deletion failure can leave it behind. Development-only
+  `record_trials`, off by default, writes page evidence to local replay logs.
+  Removing the plugin does not erase these files, Hermes history or provider
+  records.
+
+See [download provenance and sizes](docs/REFERENCE.md#runtime-downloads),
+[removal and retained data](docs/REFERENCE.md#daily-use-updates-and-removal) and
+[third-party terms](THIRD_PARTY_NOTICES.md).
 
 [Guide: recovery, updates and removal](docs/REFERENCE.md) · [MIT licence](LICENSE)

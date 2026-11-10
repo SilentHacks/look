@@ -6,8 +6,11 @@ The development extension has its own [current setup guide](CHROME_EXTENSION.md)
 
 ## Stock session and ownership
 
-Stock native input is verified against Hermes source
-`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`. Look connects only to its own
+Requires Hermes **0.23.1 or newer**. Stock native input was verified on released
+v0.23.1 (`3b421578588243f920886e6fe79a6faa87ea026e`) and stock main
+`3d4dd108cf52e26cf0d7fb218461e53623a8ec2d` by the isolated lifecycle audit.
+These checks use fixture inference and browser attachment, not live providers.
+Hermes 0.22.0 lacks the required session-ticket/receipt protocol. Look connects only to its own
 in-process POSIX gateway through the captured profile's private direct
 `gateway.sock`, obtains a one-use interactive ticket, and resumes the command's
 exact logical session. Auth never enters Chrome. Missing/unsafe sockets,
@@ -184,7 +187,8 @@ recorded immutable Git blob IDs. Weight checksums come from publisher LFS metada
 
 The shared Hugging Face hub defaults to `${HF_HOME:-${XDG_CACHE_HOME:-~/.cache}/huggingface}/hub`.
 `HF_HUB_CACHE` (or legacy `HUGGINGFACE_HUB_CACHE`) overrides it. Downloads use the
-official `https://huggingface.co` endpoint and may follow publisher storage redirects.
+official `https://huggingface.co` endpoint with `token=False`, without resolving
+Hugging Face login credentials, and may follow publisher storage redirects.
 Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
 `webcam-0.10.32`. Warm model caches stay offline. Do not delete shared caches wholesale.
 
@@ -200,7 +204,8 @@ CC-BY-4.0 in frontmatter but says Apache 2.0 in its body. That contradiction is
 unresolved. No v3 weight licence is asserted here. FluidInference publishes the
 conversion and references it in FluidAudio. It is not NVIDIA-hosted or evidence of
 NVIDIA endorsement. Catalog acceptance of converter-owned CoreML/MLX distributions
-still needs a maintainer ruling. See [third-party notices](../THIRD_PARTY_NOTICES.md).
+still needs a maintainer ruling. See the [source-policy investigation](CATALOG_READINESS.md#rule-17-source-policy-finding)
+and [third-party notices](../THIRD_PARTY_NOTICES.md).
 
 Chrome, ffmpeg, CoreML and installed macOS voices are existing local tools, not
 installed by this downloader. Python/native dependencies are prepared separately by

@@ -1,0 +1,50 @@
+# Draft only. Set sha to the anonymously verified fixed public commit before submission.
+# An empty pin deliberately fails admission. No publication or approval is implied.
+name: hermes-gaze
+title: Look
+repo: https://github.com/SilentHacks/look
+sha: ""
+version: "0.1.0"
+requires_hermes: ">=0.23.1"
+description: "Ask about pages and use guarded Chrome actions. Apple Silicon macOS beta with broad debugger access and optional local voice and eyes."
+maintainer: SilentHacks
+tier: community
+category: web
+docs_url: https://github.com/SilentHacks/look
+readme: true
+platforms:
+  - macos
+known_issues:
+  - "Requires Apple Silicon, native arm64 Python 3.11–3.14, Chrome, one display and an in-process local Hermes session with input permission."
+  - "Eye tracking is experimental. Real-camera accuracy and screen-reader compatibility are unverified. English-first voice and UI."
+  - "Questions and page evidence reach the configured model. Optional TypeSafe scope requests can add costs."
+  - "Explicit allow-all skips Look action review for requested actions. Chrome sign-ins, model caches, calibration and Hermes/provider history survive plugin removal."
+  - "Converter-owned CoreML/MLX source acceptance under catalog rule 17 remains unresolved."
+capabilities:
+  provides_tools:
+    - gaze_resolve
+    - gaze_choose
+    - gaze_highlight
+    - gaze_click
+    - gaze_read
+    - gaze_fill
+    - gaze_press
+    - gaze_open_tab
+    - gaze_navigate
+    - gaze_scroll
+    - gaze_wait
+    - gaze_request_commit
+    - gaze_calibrate
+    - gaze_benchmark
+  provides_hooks:
+    - pre_llm_call
+    - on_stream_delta
+    - post_llm_call
+    - on_session_end
+    - on_session_reset
+    - post_compaction
+    - pre_tool_call
+  provides_middleware:
+    - llm_request
+    - tool_execution
+  requires_env: []

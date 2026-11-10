@@ -1,125 +1,104 @@
-# Look: local submission draft
+# Look catalog submission draft
 
-**Prepared for owner review. Not posted or submitted.** Product status: technical
-source beta. No Store approval, catalogue acceptance, new recording or
-user/device sign-off is claimed. Organizer form fields, deadline, video length
-and tagging rules need checking against the current official rules.
-The old playbook is historical, not the source of those requirements.
+Owner review only. Nothing has been posted or submitted. Submit exactly one
+`plugin-catalog/hermes-gaze.yaml` file to NousResearch/hermes-agent after the
+[release gates](CATALOG_READINESS.md) close. The draft entry is
+[catalog/hermes-gaze.yaml](catalog/hermes-gaze.yaml). Its empty SHA deliberately
+blocks submission until a fixed public commit is verified.
 
-## Copy ready for review
+## PR title
 
-**Name:** Look
+Add Look browser companion
 
-**One line:** Ask Hermes about what you point at in Chrome, with private answers
-and guarded browser actions.
+## PR body
 
-**Short description:**
+Look lets you ask Hermes about what you point at in Chrome, with answers and
+follow-ups in private cards. It supports typed input, local English speech,
+local read-aloud, guarded browser actions and optional experimental eye tracking.
+This is an Apple Silicon macOS source beta for one display. Eye tracking is not
+a precise pointer replacement and has no established real-camera accuracy.
 
-Point at something in Chrome and ask Hermes about it. Type your question, or hold
-Space, wait for Listening, then speak. Answers appear in a private card.
-Look can also fill forms, click controls and navigate. Sending, buying, deleting
-and other consequential or unclear actions need your mouse approval on a review card.
+The plugin uses native Python tools, seven hooks, two middleware registrations,
+commands, CLI, a bundled skill and frozen system guidance. Fourteen declared
+browser/evidence tools use captured identities and exact user-turn authority.
+The supported native lane requires Hermes 0.23.1 or newer, an in-process local
+POSIX gateway and explicit profile input permission. It uses the public same-user
+control socket, one-use interactive session ticket and exact terminal receipts.
+It does not start Hermes or modify an installed host.
 
-Speech recognition and optional calibrated eye tracking run locally on your Mac.
-Your questions and page evidence still go to your configured model and may stay
-in Hermes history. This Apple Silicon source beta includes experimental
-broad-region eye tracking, not a precise gaze pointer. It is not a Chrome Web Store release.
+### Installation and privacy disclosures
 
-**What is implemented:**
+- Questions and bounded page evidence go to the configured Hermes model and may
+  remain in Hermes/provider history. An auxiliary scope-selection call can add
+  provider cost. Optional TypeSafe highlighting sends the question, pointer
+  structure and scope descriptions to TypeSafe. Page text is opt-in. TypeSafe
+  can add service costs. Its retention policy has not been verified. Its key
+  comes through Hermes's profile-scoped secret API. No mandatory API key exists.
+- Chrome debugger access is broad, including signed-in pages. The unpacked
+  extension uses debugger, nativeMessaging and tabs permissions. Setup stages
+  reviewed extension files, a Python native host and Chrome native-messaging
+  registration under the user account. Look reads the connecting profile's
+  permission/isolation config. Public asset downloads disable HF authentication
+  and do not resolve vendor login credentials.
+- Separate-browser and eye modes launch Chrome. The separate browser retains
+  sign-ins and exposes a loopback debugging port until Chrome exits, even after
+  Look stops. Speech may spawn ffmpeg or macOS /usr/bin/say. Registration starts
+  a background GET-only demo/status server on 127.0.0.1:9111 and cache-only speech
+  warmup. Browser/input/speech workers run while connected. Python/native package
+  preparation is separate through Hermes. There is no Look telemetry service.
+- Explicit setup fetches pinned, checksum-verified public assets from Hugging
+  Face and its storage redirects: FluidInference's NVIDIA Parakeet CoreML
+  conversion (465 MB), mlx-community's MLX conversion (2.47 GB), SYSTRAN's OpenAI
+  Whisper fallback (148 MB base.en or 78.1 MB tiny.en), and Gradium's Phonon model
+  (65 MB plus about 0.26 MB per voice). Eye setup fetches Google's MediaPipe
+  runtime from npm (6.6 MB compressed) and Face Landmarker from Google storage
+  (3.76 MB). Speech and eye inference stay local. Converter-owned CoreML/MLX
+  acceptance under rule 17 remains unresolved, not approved by these checks.
+- Shared model caches, sensitive biometric calibration, native-host files and
+  Chrome profile/sign-ins persist outside the plugin tree. MLX uses a temporary
+  WAV, deleted after transcription where possible. Crashes/deletion failures
+  can leave it behind. Opt-in development record_trials writes local replay
+  evidence, not audio. Plugin removal does not erase these files or
+  Hermes/provider history. Detailed paths and removal steps are in the README
+  and technical reference.
+- Default action mode requires protected mouse approval for sending, buying,
+  deleting and ambiguous controls. Explicit /look actions allow-all skips Look's
+  approval cards for requested actions during that connection. It can send,
+  buy or delete immediately, including if page instructions mislead the model.
+  Stop/reconnect restores confirmation. Hermes approvals, ownership checks,
+  secret-field exclusions and unknown-outcome/no-replay rules remain enforced.
+  Typing and navigation can themselves have site effects. Unsupported secret
+  fields, frames and custom controls fail rather than being rematched.
+- Card words and typed questions live in opaque, script-disabled frames, not
+  readable website DOM. This is not protection from another authorized debugger
+  or malicious local software. Screen-reader compatibility is unverified.
 
-- Exact cursor identity, bounded structural context and frozen source ownership.
-- Protected typed entry and native push-to-talk, with private streamed answer/history
-  cards, follow-ups, recall, Stop and local read-aloud.
-- Guarded read/fill/click/keys/tabs/navigation/scroll/wait operations, with
-  content-bound single-use mouse approval for consequential/ambiguous controls.
-- Optional nine-point personal webcam calibration in a separate window.
-  Gaze supplies evidence, never action approval.
-- Stock Hermes integration. Separate Chrome, explicit native existing-Chrome
-  consent and a development extension are distinct connection lanes.
+### Provenance and verification
 
-**Evidence statement:**
+MIT source with retained third-party notices. No model weights, native binaries,
+WASM or bytecode are bundled. Exact revisions, file hashes, publishers, sizes and
+licences are documented in the technical reference and third-party notices.
+See CATALOG_READINESS.md for the actual checks and unresolved source-policy gate.
+Do not replace this paragraph with a claim of catalog approval.
 
-Local pinned-source installation, refused dependency preparation, later enable,
-exact-pin discovery, isolated stock registration and scoped removal were
-exercised with stock Hermes. Security/browser/race reports also exist from
-private Chrome and fake-device/scripted-provider runs. They are not ordinary
-signed-in-user, physical-device or current live-provider proof. The
-[release record](RELEASE_READINESS.md) names the remaining gates and versions.
-Do not substitute test totals for those missing journeys.
+Before posting, attach receipts for the final public pin, dependency preparation,
+stock validation, source/payload checks and upstream Ubuntu CI. Local fixture
+inference is not a live provider, physical-device or signed-in-site test.
 
-**Technical distinction:**
+### Screenshots
 
-The model chooses what part of the page your question refers to. Python enforces
-captured identities, ownership, risk and approval rules. Website and answer text
-cannot grant approval. Private words and input live in opaque, script-disabled frames.
-Closed shadow DOM alone is not the privacy boundary. Unknown mutations are not
-silently retried. This is not protection from another authorized debugger or
-malicious same-user software.
+Not captured. The required real UI images and sanitization procedure are listed
+in CATALOG_READINESS.md. Do not submit an icon, mockup or scripted state as a
+live user result. Any fixture-backed image must be labelled as such.
 
-**Limitations/disclosures:**
+## Publication controls
 
-Supported trial lane: native arm64 Apple Silicon Mac, standard Chrome, one
-display, English, stock local in-process Hermes with explicit input permission.
-Existing-browser connections have broad debugger authority. Cross-origin frames,
-canvas and unknown widgets may be unavailable. Typing/navigation can have site
-side effects. Eye tracking has no established population accuracy. Questions and
-bounded page evidence may persist in Hermes/provider history. Models download
-only through explicit setup. Dependencies/native wheels are prepared separately.
-Optional TypeSafe highlighting adds its disclosed question/scope request when
-configured. See [privacy](../README.md#privacy-and-control) and
-[third-party notices](../THIRD_PARTY_NOTICES.md).
+Only the repository owner or a major contributor should submit. Owner approval
+is still required for publishing a commit, opening a PR, contacting maintainers,
+posting or submitting. Catalog updates use a newly reviewed SHA-bump PR and
+Hermes's update mechanism, never a plugin self-updater.
 
-**Source/licence:** MIT repository with attributed vendored/runtime/model terms.
-The public repository is [SilentHacks/look](https://github.com/SilentHacks/look).
-The [README installation](../README.md#install-look) pins an anonymously fetched
-commit. It predates the latest local fixes, so verify a new public pin after
-integration before sharing those changes. No catalogue or Store release is claimed.
-[Full attribution](../THIRD_PARTY_NOTICES.md).
-
-## Suggested 85-second recording plan
-
-This is a plan for a **user-operated actual recording**, not recorded evidence.
-Use the final reviewed installation and a local/non-sensitive page. Show the
-connection lane, consent and beta label honestly. Do not edit scripted behavior
-into an apparently live result.
-
-| Time | User-operated scene |
-|---|---|
-| 0–10s | “I ask Hermes about what I point at.” Show a local table in Chrome and the actual connection lane. |
-| 10–30s | Point to a cell, press Right Option and ask a real typed question. Show the answer arriving in the private card. |
-| 30–45s | If physical mic acceptance passes: hold Space, wait for Listening, ask a follow-up and release. Otherwise demonstrate typed follow-up and say voice was not shown. |
-| 45–65s | On a local fixture, request a safe change and then a consequential fixture control. Show the protected review, then use a real primary mouse click. Never send mail, buy, publish or delete real data. |
-| 65–75s | If personal calibration/check and broad-region pointing work on camera, show them with the beta label. Otherwise omit gaze performance claims and demonstrate the cursor. |
-| 75–85s | Show Stop and say: “Apple Silicon source beta. Tracking is local. Questions and page context go to my configured model.” Show only the owner-approved source/install link after publication. |
-
-Do not display keys, pairing tickets, personal tabs, account names, receipts,
-terminal history or model-profile secrets. Use silence or independently cleared
-narration. Apple fallback voice publication rights are not established. Keep
-asset attribution with the submitted source. Label any cuts, simulated devices,
-scripted provider or prerecorded answer that appears in the video.
-
-## Announcement draft: hold for approval
-
-> I built Look to ask Hermes about what I point at in Chrome. Type a question or
-> hold Space to talk, then read the answer in a private card. Browser actions
-> that send, buy, delete or have unclear effects need your mouse approval.
-> This is an Apple Silicon source beta. Optional eye tracking is experimental.
-> Page context goes to your configured model. See the reviewed README for setup and limits.
-
-Do not post until the owner approves the exact text, media, destination and
-public commit/link. No novelty superlative, “mind reading”, population accuracy,
-Marketplace/Store availability or all-platform claim is supported by this draft.
-
-## Owner submission checklist
-
-- [x] Integrate approved extension/test/release tracks. The final local pin is in the integration handoff.
-- [ ] Clear the final-browser blocker and applicable [release gates](RELEASE_READINESS.md) before recording acceptance.
-- [ ] Review intended refs, author metadata, historical traces and final source/media artifacts.
-- [ ] Verify current organizer eligibility, deadline, fields, video/tag and attribution requirements.
-- [ ] Run headed user/provider/device journeys for every behavior shown. Keep failures and limits honest.
-- [ ] Review recording for private content and clear audio/image/voice rights.
-- [ ] Approve exact public source pin, installation command, media and outbound text.
-- [ ] Repeat isolated public-pin installation and link checks for the final integrated commit before distribution.
-- [ ] Explicitly authorize each PR, post, publication and submission. Retain the resulting receipt.
-
-No checkbox here was completed by inference from a different lane or old report.
+The README's current published install pin predates these fixes. Align the
+README, catalog SHA, source receipts and any image URLs only after the intended
+fixed commit is publicly reachable. An internal candidate cannot be presented as
+an installable public release.
