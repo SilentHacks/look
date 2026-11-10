@@ -1358,7 +1358,7 @@
   }
   const overlap = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
   const inflate = (r, p) => ({left: r.left - p, right: r.right + p, top: r.top - p, bottom: r.bottom + p});
-  // Things you asked about must stay visible; for a table cell, so should its row and column.
+  // Prefer keeping targets visible; table rows and columns are softer placement costs.
   function avoidance(item) {
     const hard = [], soft = [];
     for (const t of item?.targets || []) {
@@ -1376,7 +1376,7 @@
     }
     return {hard, soft};
   }
-  function place(item, want) {
+  function place(item, want, shrink = true) {
     const vw = innerWidth, vh = innerHeight;
     const W = Math.min(CARD_W, vw - 2 * MARGIN);
     const occ = occupancy();
@@ -1385,7 +1385,8 @@
       : {x: state.pointerX ?? vw * .7, y: state.pointerY ?? vh * .3};
     const vmax = Math.max(vw, vh);
     let best = null;
-    const heights = [want, Math.max(170, want * .66), 170].filter((h, i, a) => a.indexOf(h) === i && h <= vh - 2 * MARGIN);
+    const heights = (shrink ? [want, Math.max(170, want * .66), 170] : [want])
+      .filter((h, i, a) => a.indexOf(h) === i && h <= vh - 2 * MARGIN);
     if (!heights.length) heights.push(vh - 2 * MARGIN);
     heights.forEach((H, hi) => {
       for (let y = MARGIN; y <= Math.max(MARGIN, vh - H - MARGIN); y += 13) {
@@ -1607,13 +1608,13 @@
     return avoidance(item).hard.some(r => overlap(rect, r) > 0);
   }
   function maxBodyFor(item) {
-    // The extra 24 is room for the plate's coarse rounding.
-    const chrome = 78 + (S.sizes.prevH || 0) + (S.sizes.nextH || 0);
+    // Measured non-body chrome includes a coarse rounding allowance.
+    const chrome = (S.sizes.chromeH || 78) + (S.sizes.nextH || 0);
     let limit = innerHeight - MARGIN - (S.pos?.y ?? MARGIN) - chrome;
     const {hard} = avoidance(item);
     const W = cardWidth();
     // Stop growing before reaching what you asked about.
-    for (const r of hard) {
+    for (const r of S.view === "answer" && S.reposition.has(S.cur) ? [] : hard) {
       if (S.pos && r.left < S.pos.x + W && r.right > S.pos.x && r.top > S.pos.y) limit = Math.min(limit, r.top - S.pos.y - chrome - 8);
     }
     const vv = window.visualViewport;
@@ -2207,16 +2208,20 @@
         wake();
         return;
       }
-      S.sizes = {prevH: +m.prevH || 0, cardH: +m.cardH || 0, nextH: +m.nextH || 0, contentH: +m.contentH || 0, bodyH: +m.bodyH || 0};
+      S.sizes = {prevH: +m.prevH || 0, cardH: +m.cardH || 0, nextH: +m.nextH || 0,
+        contentH: +m.contentH || 0, bodyH: +m.bodyH || 0, chromeH: +m.chromeH || 0};
       if (S.view) {
         const item = viewItem();
         const mb = maxBodyFor(item);
         if (Math.abs(mb - S.maxBody) > 2) { S.maxBody = mb; pushCard(); }
-        // Long answer ran out of room where it is: find better room once, before it clips hard.
+        // Reserve reading room once; a large target must not trap the answer in a sliver.
         if (S.view === "answer" && S.sizes.contentH > S.sizes.bodyH + 20 && S.maxBody < 300 && !S.reposition.has(S.cur)) {
           S.reposition.add(S.cur);
-          const spot = place(item, Math.min(innerHeight - 2 * MARGIN, S.sizes.contentH + 90));
-          if (spot.covers === 0) { S.pos = {x: spot.x, y: spot.y}; S.maxBody = maxBodyFor(item); pushCard(); }
+          const readingH = Math.max(300 + S.sizes.chromeH + S.sizes.prevH + S.sizes.nextH, innerHeight * .6);
+          const spot = place(item, Math.min(innerHeight - 2 * MARGIN, readingH), false);
+          S.pos = {x: spot.x, y: spot.y + (S.sizes.prevH || 0)};
+          S.maxBody = maxBodyFor(item);
+          pushCard();
         }
         layout();
       }

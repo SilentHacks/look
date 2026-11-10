@@ -511,6 +511,15 @@ input over either scrolls the answer body, without scrolling the website.
 
 The first answer waits for the private frame’s layout measurement before appearing.
 Later size changes update the card without moving your scroll position.
+Sizing includes the measured title, notices, footer and 24px plate rounding.
+If a long answer has under 300px of reading room, it relocates once to reserve
+roughly 60% of the viewport (at least 300px for the body when space permits).
+Placement still minimizes target overlap, but may cover part of a large target
+rather than leave the answer in a shallow strip. Short answers stay compact.
+`HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python tests/ui_review/probe_card_growth.py`
+checks a fresh captured comparison at 1440×900 and 800×700, streaming and settled,
+including viewport bounds, top/manual scroll and 24px plate geometry.
+
 `HERMES_DISABLE_LAZY_INSTALLS=1 .venv/bin/python tests/ui_review/probe_first_answer.py`
 reproduces delayed frame readiness and delayed font metrics in private Chrome,
 then checks long streaming, manual reading, follow-up, Retry and Q recall, plus

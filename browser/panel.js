@@ -616,14 +616,16 @@
   function report() {
     const card = root.querySelector('.card');
     const size = el => el ? Math.ceil(el.getBoundingClientRect().height) : 0;
-    let cardH = 0;
+    let cardH = 0, chromeH = 0;
     if (card) {
       card.style.minHeight = '';
       const natural = size(card);
+      // Non-body layout, not the old plate minimum; reserve one extra rounding step.
+      chromeH = Math.ceil((natural - (body ? body.getBoundingClientRect().height : 0)) / STEP_H) * STEP_H + STEP_H;
       cardH = Math.ceil(natural / STEP_H) * STEP_H;
       card.style.minHeight = `${cardH}px`;
     }
-    const sizes = {t: 'size', prevH: size(root.querySelector('.peek.prev')), cardH,
+    const sizes = {t: 'size', prevH: size(root.querySelector('.peek.prev')), cardH, chromeH,
       nextH: size(root.querySelector('.peek.next')), contentH: body ? body.scrollHeight : 0, bodyH: body ? body.clientHeight : 0};
     const key = JSON.stringify(sizes);
     if (key !== lastMeasure) { lastMeasure = key; send(sizes); }
