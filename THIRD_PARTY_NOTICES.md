@@ -32,6 +32,17 @@ See [release scope and remaining legal/distribution gates](docs/RELEASE_READINES
   [card at `7dd20fe6b1797d35f5e3307e8b1732d9a178edfe`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml/blob/7dd20fe6b1797d35f5e3307e8b1732d9a178edfe/README.md)
   contradicts itself: CC-BY-4.0 frontmatter, Apache 2.0 body. These notices do not
   resolve that contradiction or infer weight terms from the FluidAudio code licence.
+- Optional native **Parakeet TDT 0.6B v3 Q8 GGUF**, published by **NVIDIA**,
+  [revision `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3/tree/541d1f99c6b0c3cd0b11a95167540bb8edefd82b),
+  **CC-BY-4.0**. Look downloads unmodified weights and the pinned model card.
+  Credit NVIDIA; no endorsement is implied. Weight terms do not license training data.
+- Optional [NVIDIA NeMo-Speech.cpp v0.3.0](https://github.com/NVIDIA/NeMo-Speech.cpp/tree/20999cc921d2b14aa58708f61756a8b2e787ba20),
+  **Apache-2.0**, Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+  Its official setup-time archive is retained unmodified, including `LICENSE`,
+  `NOTICE`, `THIRD_PARTY_NOTICES.md` and the complete shipped third-party license
+  directory under `share/licenses/nemo-speech`. Native components are not bundled.
+  [Exact payload, source provenance and residual policy questions](docs/PARAKEET_V3.md).
+  This does not resolve the separate FluidInference CoreML-v3 license contradiction.
 
 `audio/asr/parakeet_coreml.py` vendors silicon-asr 0.1.0's runner, windowing and types,
 adapted for pyobjc CoreML, decoded PCM input and pinned/verified v2-only loading.

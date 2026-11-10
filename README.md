@@ -128,6 +128,11 @@ Screen-reader compatibility is unverified.
   MediaPipe runtime from npm (6.6 MB compressed) and Face Landmarker from Google
   storage (3.76 MB). These are downloads, not hosted speech or eye inference.
   Converter-owned CoreML/MLX catalog source-policy acceptance is unresolved.
+- Optional `parakeet-v3` recognition downloads NVIDIA's Parakeet v3 Q8 GGUF
+  (714 MB) and official NeMo-Speech.cpp v0.3.0 Metal runtime (7.24 MB compressed)
+  from Hugging Face and GitHub. It starts a local Python/native worker with no
+  network listener; audio crosses a private pipe, not a temporary recording.
+  It is not the default. [Setup, benchmarks and provenance](docs/PARAKEET_V3.md).
 - Local storage includes shared model caches, sensitive biometric calibration,
   extension/native-host files and the separate Chrome profile with any sign-ins.
   The MLX fallback uses a temporary WAV, deleted after transcription where

@@ -1,6 +1,6 @@
 """Local speech recognition helpers for hermes-gaze.
 
-Three transcription backends behind one contract (``transcribe_audio_buffer``
+Optional NVIDIA v3 plus the existing three transcription backends share one contract (``transcribe_audio_buffer``
 — ``(text, [{word, start, end}])`` with audio-relative times shifted by
 ``audio_epoch``):
 
@@ -133,6 +133,11 @@ def _get_coreml_runner() -> Any:
 
 def recognition_ready(model_name=_DEFAULT_MODEL):
     """Constant-time capture gate: never take a model loader lock or touch disk."""
+    if model_name == "parakeet-v3":
+        from .asr.parakeet_v3 import ready
+        if ready():
+            return True
+        model_name = _DEFAULT_MODEL
     return (apple_silicon_mac() and (
         _COREML_RUNNER is not None and _COREML_RUNNER is not False or
         _PARAKEET_MODEL is not None and _PARAKEET_MODEL is not False)
@@ -152,8 +157,12 @@ def recognition_status(model_name=_DEFAULT_MODEL):
 def _prepare_recognition(model_name, *, download, report=None):
     """One worker checks every cache before an explicitly requested download."""
     global _PREPARING, _PREPARE_DOWNLOAD, _PREPARE_REPORT, _PREPARATION_ERROR
+    if model_name == "parakeet-v3":
+        from .asr.parakeet_v3 import ready as is_ready
+    else:
+        is_ready = lambda: recognition_ready(model_name)
     with _PREPARE_LOCK:
-        if recognition_ready(model_name):
+        if is_ready():
             return
         if _PREPARING:
             _PREPARE_DOWNLOAD |= download
@@ -172,18 +181,25 @@ def _prepare_recognition(model_name, *, download, report=None):
         def try_load(repo, load, *, fetch=False):
             nonlocal unavailable
             try:
-                prepare(repo, download=fetch)
-                if load() is not None:
+                if repo == "parakeet-v3":
+                    from .asr.parakeet_v3 import get_runner
+                    loaded = get_runner(download=fetch)
+                else:
+                    prepare(repo, download=fetch)
+                    loaded = load()
+                if loaded is not None:
                     return True
                 unavailable = True
             except AssetIntegrityError:
                 raise
             except AssetsMissing:
-                if not fetch:
+                if not fetch and (model_name != "parakeet-v3" or repo == "parakeet-v3"):
                     missing.append((repo, load))
             except Exception as exc:
                 logger.debug("Speech backend %s unavailable: %s", repo, exc)
                 unavailable = True
+                if repo == "parakeet-v3" and not fetch:
+                    missing.append((repo, load))
             return False
 
         def failed(exc):
@@ -193,8 +209,8 @@ def _prepare_recognition(model_name, *, download, report=None):
                     "dependencies, then run /look setup. Use Right Option to type.")
 
         try:
-            if model_name not in WHISPER:
-                raise ValueError("Supported speech models are base.en and tiny.en. Custom models are not supported.")
+            if model_name not in (*WHISPER, "parakeet-v3"):
+                raise ValueError("Supported speech models are base.en, tiny.en and parakeet-v3.")
             # Explicit retries may repair unavailable runtimes, never bypass integrity.
             if download:
                 with _COREML_LOCK:
@@ -205,7 +221,10 @@ def _prepare_recognition(model_name, *, download, report=None):
                         _PARAKEET_MODEL = None
             loaders = ([(COREML, _get_coreml_runner), (MLX, _get_parakeet_model)]
                        if apple_silicon_mac() else [])
-            loaders.append((WHISPER[model_name], lambda: get_whisper_model(model_name)))
+            fallback_model = _DEFAULT_MODEL if model_name == "parakeet-v3" else model_name
+            loaders.append((WHISPER[fallback_model], lambda: get_whisper_model(fallback_model)))
+            if model_name == "parakeet-v3":
+                loaders.insert(0, ("parakeet-v3", None))
             for repo, load in loaders:
                 if try_load(repo, load):
                     break
@@ -215,7 +234,7 @@ def _prepare_recognition(model_name, *, download, report=None):
         # Finish cache-only work atomically with accepting an overlapping Setup.
         # Only the latest completion reporter is retained during repeated Setup.
         with _PREPARE_LOCK:
-            fetch = not error and not recognition_ready(model_name) and _PREPARE_DOWNLOAD
+            fetch = not error and not is_ready() and _PREPARE_DOWNLOAD
             if not fetch:
                 if not error and unavailable and not recognition_ready(model_name):
                     error = ("Local speech recognition could not load cached models. Check dependencies, "
@@ -421,9 +440,9 @@ def transcribe_audio_buffer(
     given, the audio-relative word times are shifted to wall-clock epochs so
     the temporal aligner can weight them against real fixations.
 
-    ``backend``: ``"auto"`` (CoreML Parakeet on native Apple Silicon when available, else
-    faster-whisper), ``"parakeet"`` (try CoreML first, same fallback), or
-    ``"whisper"`` (force the faster-whisper path)."""
+    ``backend`` selects the existing auto/parakeet/whisper chain. Selecting
+    ``parakeet-v3`` here or as ``model_name`` tries the opt-in NVIDIA worker,
+    then the existing cache-only chain on ordinary runtime failure."""
     import numpy as np
 
     audio_np = decode_audio_to_float32(audio_bytes, sample_rate=sample_rate, mime_type=mime_type)
@@ -439,6 +458,26 @@ def transcribe_audio_buffer(
         audio_np = np.clip(audio_np * (0.85 / peak), -1.0, 1.0).astype(np.float32)
 
     global _LAST_BACKEND
+    if backend == "parakeet-v3" or model_name == "parakeet-v3" and backend == "auto":
+        from .asr.parakeet_v3 import get_runner
+        try:
+            runner = get_runner()
+            if timing is not None:
+                timing.mark("asr_model_ready")
+                timing.mark("asr_inference_start")
+            result = runner.transcribe(audio_np, sample_rate, float(audio_epoch or 0.0))
+        except AssetIntegrityError:
+            raise
+        except Exception as exc:
+            logger.warning("Parakeet v3 unavailable (%s); trying cached recognition", exc)
+            backend, model_name = "auto", _DEFAULT_MODEL
+        else:
+            _LAST_BACKEND = "parakeet-v3-metal"
+            if timing is not None:
+                timing.mark("asr_inference_done")
+            return result
+    if model_name == "parakeet-v3":
+        model_name = _DEFAULT_MODEL
     if backend in ("auto", "parakeet"):
         result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0), timing)
         if result is not None:
