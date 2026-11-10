@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from hermes_gaze.config import GazeConfig
-from hermes_gaze.early_highlight import EarlyHighlight, request_payload
+from hermes_gaze.runtime.early_highlight import EarlyHighlight, request_payload
 
 
 class EarlyHighlightTests(unittest.TestCase):

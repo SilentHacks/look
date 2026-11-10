@@ -6,7 +6,7 @@ import unittest
 import wave
 from unittest import mock
 
-from hermes_gaze import voice
+from hermes_gaze.audio import voice
 
 try:
     import numpy as np

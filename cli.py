@@ -9,12 +9,12 @@ import platform
 import time
 from pathlib import Path
 
-from . import service
+from .runtime import service
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
 from .browser.cdp_bridge import get_shared_session
 from .config import GazeConfig
 from .platform_support import apple_silicon_mac, platform_notice
-from .server import get_shared_server
+from .runtime.server import get_shared_server
 from .tools import handle_gaze_resolve
 
 
@@ -50,7 +50,7 @@ def _config() -> GazeConfig:
 
 def _first_run_guide(session, *, report=None) -> str:
     """Explicit downloads only; never connect or open a device."""
-    from . import voice
+    from .audio import voice
 
     if platform.system() not in ("Darwin", "Linux"):
         return platform_notice()
@@ -145,7 +145,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
             return _handle_slash_command("timing")
         if tail:
             return "Usage: /look diagnostics [timing]"
-        from . import voice
+        from .audio import voice
         return json.dumps({
             "chrome_connected": session.cdp.is_connected,
             "chrome_reachable": session.is_chrome_reachable(),
@@ -160,7 +160,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         }, indent=2)
 
     if sub == "timing" and not tail:
-        from .release_timing import TIMINGS
+        from .runtime.release_timing import TIMINGS
         snapshot = TIMINGS.snapshot()
         path = Path.home() / ".cache" / "hermes-gaze" / "release-timing.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -344,7 +344,7 @@ def _run_cli(args: argparse.Namespace) -> int:
         print(result)
         return code
     if sub == "setup-speech":
-        from .speech import setup
+        from .audio.speech import setup
         setup(args.voice)
         return 0
     if sub == "demo":

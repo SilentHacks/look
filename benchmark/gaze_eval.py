@@ -22,7 +22,7 @@ import urllib.request
 import numpy as np
 
 from ..tracker.webcam_gaze import GazeEstimator, LandmarkEstimator
-from ..webcam import WebcamHost
+from ..browser.webcam import WebcamHost
 
 CACHE = Path.home() / ".cache" / "hermes-gaze-eval"
 BROWSER = Path(__file__).resolve().parents[1] / "browser"

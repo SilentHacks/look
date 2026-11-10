@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.browser_tasks import BrowserTasks, navigation_url
+from hermes_gaze.browser.browser_tasks import BrowserTasks, navigation_url
 from hermes_gaze import tools
 
 

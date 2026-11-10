@@ -26,13 +26,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 from ..asset_cache import COREML, prepare
-from .coreml_model import (
-    COMPUTE_ALL,
-    COMPUTE_CPU_AND_GPU,
-    COMPUTE_CPU_AND_NE,
-    COMPUTE_CPU_ONLY,
-    CoremlModel,
-)
+from .coreml_model import COMPUTE_ALL, COMPUTE_CPU_AND_GPU, COMPUTE_CPU_AND_NE, COMPUTE_CPU_ONLY, CoremlModel
 
 logger = logging.getLogger(__name__)
 

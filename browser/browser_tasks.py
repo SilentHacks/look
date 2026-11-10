@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from urllib.parse import urlsplit
 
-from .resolver.cursor_context import build_context, safe_url
+from ..resolver.cursor_context import build_context, safe_url
 from .actions import control_requires_confirmation
 
 

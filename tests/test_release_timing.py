@@ -12,7 +12,7 @@ import unittest
 import weakref
 from unittest.mock import patch
 
-from hermes_gaze.release_timing import ReleaseTimings
+from hermes_gaze.runtime.release_timing import ReleaseTimings
 
 
 class ReleaseTimingTests(unittest.TestCase):
@@ -122,7 +122,7 @@ class ReleaseTimingTests(unittest.TestCase):
 
     def test_disconnect_and_unload_stop_unfinished_release(self):
         from hermes_gaze.browser import cdp_bridge
-        from hermes_gaze import voice_turns
+        from hermes_gaze.runtime import voice_turns
         from tests.test_voice_turns import Host
 
         timings = ReleaseTimings()
@@ -144,7 +144,7 @@ class ReleaseTimingTests(unittest.TestCase):
 
     def test_module_reload_retires_worker_and_prewarm_does_not_start_one(self):
         # Use an isolated module so imported singleton references in other tests stay valid.
-        spec = importlib.util.spec_from_file_location("release_timing_reload", Path(__file__).parents[1] / "release_timing.py")
+        spec = importlib.util.spec_from_file_location("release_timing_reload", Path(__file__).parents[1] / "runtime" / "release_timing.py")
         module = importlib.util.module_from_spec(spec)
         for _ in range(3):
             spec.loader.exec_module(module)
@@ -156,7 +156,7 @@ class ReleaseTimingTests(unittest.TestCase):
             self.assertIsNone(module.TIMINGS.thread)
         script = """import tests, threading
 from unittest.mock import patch
-from hermes_gaze import voice
+from hermes_gaze.audio import voice
 with patch.object(voice, 'apple_silicon_mac', return_value=False), patch.object(
         voice, 'prepare', side_effect=voice.AssetsMissing('empty test cache')):
     voice.prewarm()

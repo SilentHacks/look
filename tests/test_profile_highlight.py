@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze import cli, service
+from hermes_gaze import cli
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.consent import ConsentChrome
 from tests.test_chrome_consent import FakeChrome, until
 from tests import test_first_run

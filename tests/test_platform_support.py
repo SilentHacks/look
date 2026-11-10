@@ -7,7 +7,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from packaging.requirements import Requirement
-from hermes_gaze import cli, platform_support, voice
+from hermes_gaze import cli, platform_support
+from hermes_gaze.audio import voice
 
 
 class PlatformSupport(unittest.TestCase):

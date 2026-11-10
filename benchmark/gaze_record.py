@@ -12,7 +12,7 @@ import secrets
 import threading
 import time
 
-from ..webcam import WebcamHost
+from ..browser.webcam import WebcamHost
 from .gaze_eval import BROWSER, CACHE, private_directory, save_json
 from .gaze_dataset import inventory, pseudonym
 

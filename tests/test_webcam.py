@@ -12,11 +12,11 @@ from unittest.mock import patch
 import numpy as np
 
 from hermes_gaze.benchmark.gaze_research import Candidate, Fit
-from hermes_gaze import service
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.tracker.webcam_gaze import (CHECK_ENOUGH_TRIALS, CHECK_ORDERS, CHECK_PASS_TRIALS, CHECK_POINTS, AppearanceEstimator,
                                              LandmarkEstimator, ScreenPoint, check_map, score_check_trial, screen_to_viewport, summarize_check)
-from hermes_gaze.webcam import WebcamHost
+from hermes_gaze.browser.webcam import WebcamHost
 
 SCREEN = {"left": 0, "top": 0, "width": 1440, "height": 900, "dpr": 2,
           "screen_width": 1440, "screen_height": 900, "screen_left": 0, "screen_top": 25}
@@ -139,9 +139,9 @@ class WebcamContracts(unittest.TestCase):
             self.addCleanup(host.stop)
             def camera():
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
-            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
-                 patch("hermes_gaze.webcam.apple_silicon_mac", return_value=True), \
-                 patch("hermes_gaze.webcam.Path.is_file", return_value=True), \
+            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("hermes_gaze.browser.webcam.apple_silicon_mac", return_value=True), \
+                 patch("hermes_gaze.browser.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 status = host.start(wait=2)
                 self.assertEqual(status["state"], "running")
@@ -272,9 +272,9 @@ class WebcamContracts(unittest.TestCase):
             def event(kind, **data):
                 host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
                     "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", "setup": host._setup, **data})}})
-            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
-                 patch("hermes_gaze.webcam.apple_silicon_mac", return_value=True), \
-                 patch("hermes_gaze.webcam.Path.is_file", return_value=True), \
+            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("hermes_gaze.browser.webcam.apple_silicon_mac", return_value=True), \
+                 patch("hermes_gaze.browser.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 host.start(wait=2)
                 event("calibration_start", screen=SCREEN, viewport={"left": 0, "top": 0, "width": 1440, "height": 900})

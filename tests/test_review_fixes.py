@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
-from hermes_gaze import service
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
 from hermes_gaze.config import GazeConfig
 from hermes_gaze.resolver import bayesian_fusion
@@ -227,7 +227,7 @@ class TestTemporalAlignmentEpochs(unittest.TestCase):
 
     @unittest.skipIf(np is None, "numpy not installed")
     def test_transcribe_shifts_words_by_audio_epoch(self) -> None:
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         seg = types.SimpleNamespace(
             text="press this",
@@ -305,7 +305,7 @@ class TestLlmRerankReorders(unittest.TestCase):
 
 class TestParakeetBackend(unittest.TestCase):
     def test_tokens_to_words_groups_sentencepiece_boundaries(self) -> None:
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         toks = [
             types.SimpleNamespace(text="▁What", start=0.0),
@@ -322,7 +322,7 @@ class TestParakeetBackend(unittest.TestCase):
 
     def test_tokens_to_words_word_level_tokens(self) -> None:
         """parakeet-mlx emits word-level tokens without ▁ markers — each stays its own word."""
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         toks = [
             types.SimpleNamespace(text="What", start=0.0, end=0.3),
@@ -336,7 +336,7 @@ class TestParakeetBackend(unittest.TestCase):
 
     def test_tokens_to_words_leading_space_boundaries(self) -> None:
         """parakeet-mlx subwords mark word starts with a leading space."""
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         toks = [
             types.SimpleNamespace(text=" C", start=0.16, end=0.24),
@@ -353,7 +353,7 @@ class TestParakeetBackend(unittest.TestCase):
         self.assertAlmostEqual(words[1]["end"], 1.92)
 
     def test_tokens_to_words_applies_epoch_offset(self) -> None:
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         toks = [types.SimpleNamespace(text="▁this", start=0.5)]
         words = voice._tokens_to_words(toks, end_s=1.0, epoch_off=1_700_000_000.0)
@@ -362,7 +362,7 @@ class TestParakeetBackend(unittest.TestCase):
     @unittest.skipIf(np is None, "numpy not installed")
     def test_parakeet_result_maps_to_contract(self) -> None:
         """The auto backend must return (text, [{word,start,end}]) from a runner result."""
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         res = types.SimpleNamespace(
             text="press this",
@@ -392,7 +392,7 @@ class TestParakeetBackend(unittest.TestCase):
     @unittest.skipIf(np is None, "numpy not installed")
     def test_coreml_result_maps_to_contract(self) -> None:
         """A TranscriptionResult must map to (text, [{word,start,end}]) via the ▁ grouping."""
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         res = types.SimpleNamespace(
             text="press this",
@@ -419,7 +419,7 @@ class TestParakeetBackend(unittest.TestCase):
     @unittest.skipIf(np is None, "numpy not installed")
     def test_coreml_failure_falls_to_parakeet_mlx(self) -> None:
         """When the CoreML runner raises the auto chain must reach parakeet-mlx."""
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         res = types.SimpleNamespace(
             text="this",
@@ -447,7 +447,7 @@ class TestParakeetBackend(unittest.TestCase):
 
     @unittest.skipIf(np is None, "numpy not installed")
     def test_parakeet_failure_falls_back_to_whisper(self) -> None:
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         seg = types.SimpleNamespace(
             text="this",

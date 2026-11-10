@@ -18,13 +18,13 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import service
+from .runtime import service
 from .browser.cdp_bridge import get_shared_session
 from .cli import _first_run_guide, _handle_slash_command, _run_cli, _setup_cli
 from .config import GazeConfig
 from .resolver.cursor_context import EVIDENCE_RULES, TOOL_RULES
 from .resolver.temporal_aligner import has_deictic_pronoun
-from .server import get_shared_server
+from .runtime.server import get_shared_server
 from .tools import ALL_TOOLS, check_gaze_requirements
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def register(ctx: Any) -> None:
     get_shared_server().start()
 
     # Warm supported verified caches only; fetching requires explicit /look setup.
-    from .voice import prewarm
+    from .audio.voice import prewarm
 
     prewarm(cfg.whisper_model)
 
@@ -98,7 +98,7 @@ def register(ctx: Any) -> None:
             emoji=emoji,
         )
 
-    from .voice_turns import VoiceTurns
+    from .runtime.voice_turns import VoiceTurns
 
     turns = VoiceTurns(ctx, session)
     service.set_voice_turns(turns)
@@ -170,7 +170,7 @@ def register(ctx: Any) -> None:
                 generation = turns.binding_generation
             native = None
             if kwargs.get("platform") == "local":
-                from .native_input import NativeError, NativeInput, consent
+                from .runtime.native_input import NativeError, NativeInput, consent
                 source = kwargs.get("source")
                 logical_id = getattr(source, "chat_id", "")
                 if not native_home or not logical_id:
@@ -271,7 +271,7 @@ def register(ctx: Any) -> None:
             ready()
             if native is None:
                 result += "\nThis frontend uses untracked Look input. If no answer arrives, check the conversation in Hermes; do not resend automatically."
-            from .voice import recognition_ready, recognition_status
+            from .audio.voice import recognition_ready, recognition_status
             if not recognition_ready(cfg.whisper_model):
                 result += "\n" + recognition_status(cfg.whisper_model)
             return result

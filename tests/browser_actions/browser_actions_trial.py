@@ -121,7 +121,7 @@ class Broker:
                     try:
                         self.rig.new_tab(MAIL)
                         self.rig.aim("#mail-heading")
-                        from hermes_gaze import service
+                        from hermes_gaze.runtime import service
                         saved = service.resolve_now(self.session, utterance=MAIL_ASK, activate=False)
                         self._activate(saved)
                     except Exception:
@@ -180,7 +180,7 @@ class Broker:
 
 
 def capture(rig, utterance=FORM_ASK):
-    from hermes_gaze import service
+    from hermes_gaze.runtime import service
     return service.resolve_now(rig.session, utterance=utterance, activate=False)
 
 

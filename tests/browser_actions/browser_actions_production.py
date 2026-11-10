@@ -94,7 +94,8 @@ class Fixtures:
 class ProductionTools:
     """Trace production handlers; real model calls retain Hermes's session-only kwargs."""
     def __init__(self, rig):
-        from hermes_gaze import tools, service
+        from hermes_gaze import tools
+        from hermes_gaze.runtime import service
         self.rig, self.calls = rig, []
         self.turn_number, self.turn_id = 0, ''
         self.host_hooks, self.host_middlewares = [], []
@@ -144,7 +145,8 @@ class ProductionTools:
         from unittest.mock import Mock
         from hermes_cli.plugins import get_plugin_manager
         from tools.registry import registry
-        from hermes_gaze import service, voice
+        from hermes_gaze.runtime import service
+        from hermes_gaze.audio import voice
         manager = get_plugin_manager()
         manager.discover_and_load()
         self.manager = manager
@@ -304,7 +306,7 @@ def run_turn(rig, tools, ask, key, origin, ingress='terminal', *,
                 return True
             tools.plugin_turns.ctx.inject_message = inject
             rig.aim('#form-heading')
-            from hermes_gaze import voice
+            from hermes_gaze.audio import voice
             with patch.object(voice, 'transcribe_audio_buffer', return_value=(ask, [])):
                 if ingress == 'typed':
                     rig.press('AltRight', 'Alt')

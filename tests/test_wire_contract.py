@@ -15,11 +15,11 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_gaze import service
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.config import GazeConfig
 from hermes_gaze.resolver.cursor_context import MAX_CONTEXT
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 
 from hermes_gaze.resolver.bayesian_fusion import (
     BONUS_DIRECT_HIT,

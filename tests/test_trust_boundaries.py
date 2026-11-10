@@ -6,11 +6,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from hermes_gaze import service, voice
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.browser.companion import Companion
 from hermes_gaze.config import GazeConfig
-from hermes_gaze.microphone import Microphone
+from hermes_gaze.audio.microphone import Microphone
 from hermes_gaze.resolver.cursor_context import safe_url
 
 

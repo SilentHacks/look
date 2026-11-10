@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze import asset_cache as cache, cli, service, speech, voice
+from hermes_gaze.audio import asset_cache as cache, speech, voice
+from hermes_gaze import cli
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from tests import test_first_run
 from tests.test_cursor_context import capture
@@ -70,7 +72,7 @@ class PinnedDownloadsTests(unittest.TestCase):
     def fake_loaders(self):
         coreml, mlx, whisper = Mock(), Mock(), Mock()
         self.enterContext(patch.dict(sys.modules, {
-            "hermes_gaze.asr.parakeet_coreml": SimpleNamespace(ParakeetCoreML=coreml),
+            "hermes_gaze.audio.asr.parakeet_coreml": SimpleNamespace(ParakeetCoreML=coreml),
             "parakeet_mlx": SimpleNamespace(from_pretrained=mlx),
             "faster_whisper": SimpleNamespace(WhisperModel=whisper),
         }))
@@ -303,7 +305,7 @@ class PinnedDownloadsTests(unittest.TestCase):
                 Runner.transcribe_array.reset_mock()
                 fixture = test_first_run.FirstRunTests()
                 self.addCleanup(fixture.doCleanups)
-                with patch.dict(sys.modules, {"hermes_gaze.asr.parakeet_coreml": module}):
+                with patch.dict(sys.modules, {"hermes_gaze.audio.asr.parakeet_coreml": module}):
                     fixture.register(None, warm=True)
                     for thread in threading.enumerate():
                         if thread.name == "gaze-asr-prewarm":

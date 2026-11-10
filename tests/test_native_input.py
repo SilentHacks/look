@@ -7,9 +7,9 @@ import tempfile
 import threading
 from unittest.mock import patch
 
-from hermes_gaze.native_input import NativeError, NativeInput
+from hermes_gaze.runtime.native_input import NativeError, NativeInput
 
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 from tests.test_voice_turns import Chrome, snapshot
 
 

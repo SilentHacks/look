@@ -13,11 +13,12 @@ from unittest.mock import Mock, patch
 
 from websockets.sync.server import serve
 
-from hermes_gaze import cli, service
+from hermes_gaze import cli
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
 from hermes_gaze.browser.consent import ConsentChrome, discovery_port
 from hermes_gaze.browser.ownership import OwnedChrome, OwnershipError
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 
 
 GUID = "12345678-1234-1234-1234-123456789abc"

@@ -20,7 +20,7 @@ import tests
 from tests.calibration_chrome import Window, Scripted, fixture, HEADLESS, PERIOD
 from tests.test_webcam import appearance_observations
 from tests.ui_review.devlib import Rig, until
-from hermes_gaze.webcam import WebcamHost
+from hermes_gaze.browser.webcam import WebcamHost
 from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
 
 

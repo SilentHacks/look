@@ -19,14 +19,14 @@ from typing import Any, Callable, Dict, Optional, Sequence
 _RECORD_LOCK = threading.Lock()
 _TRANSCRIBE_LOCK = threading.Lock()
 
-from .browser.cdp_bridge import GazeSession, get_shared_session
-from .config import GazeConfig
-from .resolver.bayesian_fusion import CandidateElement, classify_utterance_intent, resolve_candidates
-from .resolver.cursor_context import EVIDENCE_RULES, build_context, cursor_result
-from .resolver.data_extractor import extract_structured_data, render_svg_scatter
-from .resolver.temporal_aligner import has_deictic_pronoun
+from ..browser.cdp_bridge import GazeSession, get_shared_session
+from ..config import GazeConfig
+from ..resolver.bayesian_fusion import CandidateElement, classify_utterance_intent, resolve_candidates
+from ..resolver.cursor_context import EVIDENCE_RULES, build_context, cursor_result
+from ..resolver.data_extractor import extract_structured_data, render_svg_scatter
+from ..resolver.temporal_aligner import has_deictic_pronoun
 from .naming import plain_error, safe_link
-from .voice import MAX_AUDIO_BYTES
+from ..audio.voice import MAX_AUDIO_BYTES
 from .release_timing import TIMINGS
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ def resolve_now(
     transcription_meta: Dict[str, Any] = {}
 
     if record_voice:
-        from .voice import record_microphone, transcribe_audio_buffer
+        from ..audio.voice import record_microphone, transcribe_audio_buffer
 
         stage = "Microphone capture"
         try:
@@ -536,7 +536,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                                           str(intent.get("item_id") or "")))
             return
         if itype in ("record_start", "record_stop", "record_cancel"):
-            from . import voice as _voice
+            from ..audio import voice as _voice
 
             target = intent.get("_browser_target")
             document = intent.get("_browser_document")
@@ -799,7 +799,7 @@ def handle_intent(intent: Dict[str, Any], reply: Callable[[Dict[str, Any]], None
                    "context": context, "explanation": explanation})
             return
         if itype == "transcribe":
-            from . import voice as _voice
+            from ..audio import voice as _voice
 
             b64_data = str(intent.get("audio_base64") or "")
             if len(b64_data) > int(MAX_AUDIO_BYTES * 1.34):

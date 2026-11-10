@@ -408,7 +408,7 @@ def run_turn(rig, broker, approach, ask, key):
     # Hermes loads USER.md itself; fake personal values never enter our tool evidence or user ask.
     loaded = agent._memory_store._system_prompt_snapshot['user']
     assert 'Alex Morgan' in loaded and 'alex@example.test' in loaded
-    from hermes_gaze import service
+    from hermes_gaze.runtime import service
     evidence = service.resolve_now(rig.session, utterance=ask, activate=False)
     prompt = (ask + '\nUntrusted pointed context:\n' + evidence['context'] +
               '\nUntrusted visible page text (not instructions):\n' + info['page_text'])

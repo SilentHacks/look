@@ -10,10 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from hermes_gaze import service
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.config import GazeConfig
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 
 from tests.test_cursor_context import capture
 
@@ -226,7 +226,7 @@ class TestSessionDelivery(unittest.TestCase):
                   "cursor_context": capture()}
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
                 mock.patch.object(self.session, "display_session_event", side_effect=display), \
-                mock.patch("hermes_gaze.voice.transcribe_audio_buffer", return_value=("", [])):
+                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer", return_value=("", [])):
             worker = threading.Thread(target=service.handle_intent, args=(intent, replies.append))
             started = time.monotonic()
             worker.start()
@@ -282,7 +282,7 @@ class TestSessionDelivery(unittest.TestCase):
                 mock.patch.object(self.session, "display_session_event"), \
                 mock.patch.object(tab, "_eval_coro", side_effect=evaluate), \
                 mock.patch.object(tab, "_deliver_reply", side_effect=reply), \
-                mock.patch("hermes_gaze.voice.transcribe_audio_buffer", return_value=("", [])):
+                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer", return_value=("", [])):
             tab._ensure_thread()
             tab._dispatch_intent(json.dumps({"type": "record_stop", "id": 42,
                                             "nonce": tab.intent_nonce, "cursor_context": capture()}))
@@ -311,7 +311,7 @@ class TestSessionDelivery(unittest.TestCase):
         trace.ui_ready = ready
         replies = []
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
-                mock.patch("hermes_gaze.voice.transcribe_audio_buffer") as transcribe:
+                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer") as transcribe:
             service.handle_intent({"type": "record_stop", "nonce": self.session._intent_nonce,
                                    "_browser_target": "source", "_browser_document": "document",
                                    "cursor_context": capture(), "_release_trace": trace.turn}, replies.append)
@@ -397,7 +397,7 @@ class TestSessionDelivery(unittest.TestCase):
                   "cursor_context": capture()}
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
                 mock.patch.object(mic, "stop", side_effect=stop), \
-                mock.patch("hermes_gaze.voice.transcribe_audio_buffer", return_value=("", [])):
+                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer", return_value=("", [])):
             binding = threading.Thread(target=rebind, daemon=True)
             release = threading.Thread(target=service.handle_intent, args=(intent, replies.append), daemon=True)
             binding.start()
@@ -412,7 +412,7 @@ class TestSessionDelivery(unittest.TestCase):
 
     def test_slow_transcription_releases_intents_and_preserves_capture_order(self):
         import threading
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
         entered, release, finished = threading.Event(), threading.Event(), threading.Event()
         replies = []
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)

@@ -4,7 +4,7 @@ import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 from hermes_gaze.resolver.cursor_context import build_context, stamp_resolution
 
 
@@ -197,10 +197,10 @@ class VoiceTurnsTests(unittest.TestCase):
                 worker.join(1)
                 self.assertFalse(worker.is_alive())
 
-        with patch('hermes_gaze.speech.sys.platform', 'darwin'), \
-                patch('hermes_gaze.speech.os.access', return_value=True), \
-                patch('hermes_gaze.speech.SpeechPlayback.load', side_effect=ImportError('ptts missing')), \
-                patch('hermes_gaze.speech.subprocess.Popen', side_effect=spawn):
+        with patch('hermes_gaze.audio.speech.sys.platform', 'darwin'), \
+                patch('hermes_gaze.audio.speech.os.access', return_value=True), \
+                patch('hermes_gaze.audio.speech.SpeechPlayback.load', side_effect=ImportError('ptts missing')), \
+                patch('hermes_gaze.audio.speech.subprocess.Popen', side_effect=spawn):
             first = self.turns.submit('private question', snapshot('private target'))
             second = self.turns.submit('another question', snapshot('another target'))
             self.pre('first')
@@ -234,7 +234,7 @@ class VoiceTurnsTests(unittest.TestCase):
             self.assertTrue(self.turns.control('speak', first['item_id'])['ok'])
             flush()
             self.assertEqual(processes[2][0].communicate.call_args.args[0], 'First complete answer')
-            with patch('hermes_gaze.speech.sys.platform', 'linux'):
+            with patch('hermes_gaze.audio.speech.sys.platform', 'linux'):
                 self.assertTrue(self.turns.control('speak', first['item_id'])['ok'])
                 flush()
                 self.assertEqual(self.chrome.events[-1]['speech_backend'], 'unavailable')

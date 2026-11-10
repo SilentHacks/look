@@ -10,9 +10,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
 
-from hermes_gaze import service, webcam
+from hermes_gaze.runtime import service
+from hermes_gaze.browser import webcam
 from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 
 
 class Startup(unittest.TestCase):

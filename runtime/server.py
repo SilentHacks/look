@@ -34,11 +34,11 @@ except ImportError:
 
         return _wrapper
 
-from .browser.cdp_bridge import get_shared_session
+from ..browser.cdp_bridge import get_shared_session
 
 logger = logging.getLogger(__name__)
 
-_DEMO_HTML_PATH = Path(__file__).resolve().parent / "benchmark" / "benchmark_page.html"
+_DEMO_HTML_PATH = Path(__file__).resolve().parents[1] / "benchmark" / "benchmark_page.html"
 
 
 class _SessionRequestHandler(BaseHTTPRequestHandler):

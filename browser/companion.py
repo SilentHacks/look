@@ -310,7 +310,7 @@ class Companion:
 
     def action_navigate(self, url: str, *, new_tab: bool, **owner) -> dict:
         """One navigation command; wait only for reads, never replay it."""
-        from ..browser_tasks import navigation_url
+        from .browser_tasks import navigation_url
         url = navigation_url(url)
         tab = self._owned_tab(owner)
         old_document = tab._context_unique_id

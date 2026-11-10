@@ -6,7 +6,7 @@ import json
 import time
 from typing import Any, Dict, List, Optional
 
-from . import service
+from .runtime import service
 from .benchmark.run_benchmark import format_benchmark_markdown, run_benchmark_suite
 from .browser.cdp_bridge import get_shared_session
 from .resolver.bayesian_fusion import LENS_MAX_CARDS

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from collections import deque
 from ..resolver.cursor_context import stamp_resolution
-from ..release_timing import TIMINGS
+from ..runtime.release_timing import TIMINGS
 from ..config import local_cdp_url
 from .consent import ConsentChrome, TargetChannel
 
@@ -43,7 +43,7 @@ except ImportError:
 
         return _wrapper
 
-from ..actions import SnapshotActions
+from .actions import SnapshotActions
 from ..resolver.bayesian_fusion import CandidateElement, ResolutionResult
 from ..tracker.recalibrator import OnlineRecalibrator
 from ..tracker.simulated_gaze import FixationRingBuffer, FixationSample, SimulatedPointerTracker
@@ -681,8 +681,8 @@ class GazeSession:
 
     def __init__(self, cdp_http_url: str = "http://127.0.0.1:9333", *, profile_dir: Path | None = None) -> None:
         from .companion import Companion
-        from ..microphone import Microphone
-        from ..browser_tasks import BrowserTasks
+        from ..audio.microphone import Microphone
+        from .browser_tasks import BrowserTasks
 
         self._cdp = Companion(http_url=cdp_http_url, profile_dir=profile_dir)
         self.microphone = Microphone()
@@ -715,7 +715,7 @@ class GazeSession:
         self._cdp.on_disconnect = self._browser_disconnected
 
     def _browser_disconnected(self) -> None:
-        from .. import service
+        from ..runtime import service
         try:
             self.microphone.cancel()  # Transport loss is definite input loss, not a slow focus probe.
         except Exception:
@@ -830,8 +830,8 @@ class GazeSession:
             return False
 
     def start_webcam(self, *, download: bool = False) -> dict:
-        from ..webcam import WebcamHost
-        from .. import service
+        from .webcam import WebcamHost
+        from ..runtime import service
         turns = service._VOICE_TURNS
         binding = turns.binding if turns is not None else None
         destination = None

@@ -18,10 +18,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import tests
-from hermes_gaze import service, voice
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
 from hermes_gaze.config import GazeConfig
 from hermes_gaze.resolver.cursor_context import cursor_result
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 
 
 def until(predicate, seconds=10):

@@ -12,8 +12,9 @@ from unittest.mock import patch
 os.environ['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
 os.environ['SHOTS'] = os.environ.get('GAZE_REVIEW_OUT', '/tmp/hermes-release-probe')
 from devlib import FakeInput, Rig, until
-from hermes_gaze import cli, voice
-from hermes_gaze.release_timing import TIMINGS
+from hermes_gaze import cli
+from hermes_gaze.audio import voice
+from hermes_gaze.runtime.release_timing import TIMINGS
 
 r = Rig(headless=True, scale=1)
 results = []

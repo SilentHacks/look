@@ -22,9 +22,8 @@ import threading
 import time
 import urllib.request
 
-from .platform_support import apple_silicon_mac
-from .tracker.webcam_gaze import (CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator,
-                                  GazeEstimator, LandmarkEstimator, score_check_trial, summarize_check)
+from ..platform_support import apple_silicon_mac
+from ..tracker.webcam_gaze import CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator, GazeEstimator, LandmarkEstimator, score_check_trial, summarize_check
 
 _ASSETS = {
     "tasks.tgz": ("https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.32.tgz",
@@ -106,7 +105,7 @@ class WebcamHost:
         self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hermes-gaze" / "webcam-calibration.json"
         self.assets = assets
         self.fake_video = fake_video
-        self.runtime_source = runtime_source or Path(__file__).parent / "browser" / "webcam_host.js"
+        self.runtime_source = runtime_source or Path(__file__).with_name("webcam_host.js")
         self.runtime_options = runtime_options or {}
         self.profile = None
         self._calibration_notice = ""
@@ -695,7 +694,7 @@ class WebcamHost:
                     result = self._command("Runtime.evaluate", {"expression": loader, "contextId": self._context})
                     if result.get("exceptionDetails"):
                         raise RuntimeError("Tracker WASM loader failed")
-                    features = Path(__file__).with_name("browser") / "webcam_features.js"
+                    features = Path(__file__).with_name("webcam_features.js")
                     self._command("Runtime.evaluate", {"expression": features.read_text(), "contextId": self._context})
                     if not self._live():
                         return

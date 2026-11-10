@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
 
-from hermes_gaze import service
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.browser.companion import Companion, NoForegroundTab
-from hermes_gaze.voice_turns import VoiceTurns
-from hermes_gaze.webcam import WebcamHost
+from hermes_gaze.runtime.voice_turns import VoiceTurns
+from hermes_gaze.browser.webcam import WebcamHost
 
 
 class OwnedReturn(unittest.TestCase):
@@ -177,9 +177,9 @@ class CameraCompletion(unittest.TestCase):
                 host._context, host._nonce = 8, "private"
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
             generations = []
-            with patch("hermes_gaze.webcam.prepare_assets", return_value=Path(directory)), \
-                 patch("hermes_gaze.webcam.apple_silicon_mac", return_value=True), \
-                 patch("hermes_gaze.webcam.Path.is_file", return_value=True), \
+            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("hermes_gaze.browser.webcam.apple_silicon_mac", return_value=True), \
+                 patch("hermes_gaze.browser.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 for _ in range(2):
                     host.start(wait=2); generations.append(host._setup)

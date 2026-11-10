@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests  # Package shell, not installed Hermes.
 from tests.test_first_run import FirstRunTests
 from tests.test_chrome_consent import until
-from hermes_gaze import cli, service
+from hermes_gaze import cli
+from hermes_gaze.runtime import service
 from hermes_gaze.browser import extension as extension_transport, extension_host
 from hermes_gaze.config import GazeConfig
 

@@ -33,7 +33,7 @@ import wave
 from typing import Any, Dict, List, Optional, Tuple
 
 from .asset_cache import AssetIntegrityError, AssetsMissing, COREML, MLX, WHISPER, prepare
-from .platform_support import apple_silicon_mac
+from ..platform_support import apple_silicon_mac
 
 
 logger = logging.getLogger(__name__)
@@ -482,8 +482,8 @@ def record_microphone(
     sample_rate: int = 16000,
 ) -> bytes:
     """Record through the same single-owner native device as the Chrome talk key."""
-    from .browser.cdp_bridge import get_shared_session
-    from .service import _VOICE_TURNS, _whisper_model_name
+    from ..browser.cdp_bridge import get_shared_session
+    from ..runtime.service import _VOICE_TURNS, _whisper_model_name
 
     model_name = _whisper_model_name()
     if not recognition_ready(model_name):

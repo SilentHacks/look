@@ -21,8 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
 import tests
-from hermes_gaze import service, voice
-from hermes_gaze.webcam import WebcamHost
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
+from hermes_gaze.browser.webcam import WebcamHost
 from benchmark.probe_companion_ui import Tab
 
 PORTRAIT = "https://www.nasa.gov/wp-content/uploads/2023/03/464436main_S69-31741_full.jpg"
@@ -110,7 +111,7 @@ def run(out):
             click_action(camera, "start-check")
             until(lambda: camera_state()["phase"] == "checkIntro")
             assert not host.profile_path.exists()
-            with patch("hermes_gaze.webcam.summarize_check", return_value="good"):
+            with patch("hermes_gaze.browser.webcam.summarize_check", return_value="good"):
                 for trial in range(10):
                     until(lambda: camera_state()["phase"] == "checkIntro" and camera_state()["checkIndex"] == trial)
                     for kind in ("keyDown", "keyUp"):

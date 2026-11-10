@@ -8,10 +8,12 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze import cli, service, voice
+from hermes_gaze import cli
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
 from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.naming import plain_error
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.naming import plain_error
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 
 
 class FirstRunTests(unittest.TestCase):

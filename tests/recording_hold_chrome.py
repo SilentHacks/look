@@ -12,8 +12,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
-from hermes_gaze import service, voice
-from hermes_gaze.microphone import Microphone
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
+from hermes_gaze.audio.microphone import Microphone
 from hermes_gaze.resolver.cursor_context import cursor_result
 from tests.owned_chrome import private_session
 

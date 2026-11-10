@@ -6,9 +6,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.speech import SpeechPlayback
-from hermes_gaze.voice_turns import VoiceTurns
-from hermes_gaze import service, voice
+from hermes_gaze.audio.speech import SpeechPlayback
+from hermes_gaze.runtime.voice_turns import VoiceTurns
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
 from tests.test_voice_turns import Chrome, Host, snapshot
 
 
@@ -226,7 +227,7 @@ class SpeechTests(unittest.TestCase):
         self.finish(turns)
 
     def test_tool_recording_also_stops_output_and_releases_speech_after_input_error(self):
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
         turns, _ = self.rig([Stream()])
         run = self.start(turns, 'tool')
         def broken_input(*args, **kwargs):
@@ -316,9 +317,9 @@ class SpeechTests(unittest.TestCase):
             raise subprocess.TimeoutExpired('say', .02)
         process.communicate.side_effect = communicate
         report = Mock()
-        with patch('hermes_gaze.speech.sys.platform', 'darwin'), \
-                patch('hermes_gaze.speech.os.access', return_value=True), \
-                patch('hermes_gaze.speech.subprocess.Popen', return_value=process):
+        with patch('hermes_gaze.audio.speech.sys.platform', 'darwin'), \
+                patch('hermes_gaze.audio.speech.os.access', return_value=True), \
+                patch('hermes_gaze.audio.speech.subprocess.Popen', return_value=process):
             worker = threading.Thread(target=SpeechPlayback.say, args=('private', cancel, report, 'ptts missing'))
             worker.start()
             self.assertTrue(talking.wait(1))

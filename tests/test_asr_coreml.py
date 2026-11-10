@@ -21,7 +21,7 @@ except ImportError:  # pragma: no cover - system python may lack numpy
 class TestDecodeMultiarrayBytes(unittest.TestCase):
     def test_fp16_storage_under_float32_declaration(self) -> None:
         """Declared Float32 (65568) but the buffer is actually stored fp16."""
-        from hermes_gaze.asr.coreml_model import decode_multiarray_bytes
+        from hermes_gaze.audio.asr.coreml_model import decode_multiarray_bytes
 
         real = np.arange(12, dtype=np.float16).reshape(3, 4) * 0.25
         buf = real.tobytes()  # 24 bytes for 12 declared-float32 elems
@@ -31,7 +31,7 @@ class TestDecodeMultiarrayBytes(unittest.TestCase):
 
     def test_fp32_storage_under_float16_declaration(self) -> None:
         """The inverse: declared Float16 (65552), stored fp32."""
-        from hermes_gaze.asr.coreml_model import decode_multiarray_bytes
+        from hermes_gaze.audio.asr.coreml_model import decode_multiarray_bytes
 
         real = np.arange(8, dtype=np.float32).reshape(2, 4)
         out = decode_multiarray_bytes(
@@ -41,7 +41,7 @@ class TestDecodeMultiarrayBytes(unittest.TestCase):
         np.testing.assert_allclose(out.astype(np.float32), real)
 
     def test_int32_passthrough(self) -> None:
-        from hermes_gaze.asr.coreml_model import decode_multiarray_bytes
+        from hermes_gaze.audio.asr.coreml_model import decode_multiarray_bytes
 
         real = np.array([[240000]], dtype=np.int32)
         out = decode_multiarray_bytes(real.tobytes(), [1, 1], [1, 1], count=1, dtype_code=131104)
@@ -50,7 +50,7 @@ class TestDecodeMultiarrayBytes(unittest.TestCase):
 
     def test_dynamic_last_extent_recovered_from_strides(self) -> None:
         """Encoder quirk: shape says (1,1024,188), strides say (1,1024,192)."""
-        from hermes_gaze.asr.coreml_model import decode_multiarray_bytes
+        from hermes_gaze.audio.asr.coreml_model import decode_multiarray_bytes
 
         real = np.arange(1024 * 192, dtype=np.float32).reshape(1, 1024, 192)
         out = decode_multiarray_bytes(
@@ -61,7 +61,7 @@ class TestDecodeMultiarrayBytes(unittest.TestCase):
         np.testing.assert_array_equal(out, real)
 
     def test_unknown_dtype_code_raises(self) -> None:
-        from hermes_gaze.asr.coreml_model import decode_multiarray_bytes
+        from hermes_gaze.audio.asr.coreml_model import decode_multiarray_bytes
 
         with self.assertRaises(RuntimeError):
             decode_multiarray_bytes(b"\x00" * 4, [1], [1], count=1, dtype_code=42)
@@ -70,7 +70,7 @@ class TestDecodeMultiarrayBytes(unittest.TestCase):
 @unittest.skipIf(np is None, "numpy not installed")
 class TestWindowing(unittest.TestCase):
     def test_iter_windows_pads_short_audio(self) -> None:
-        from hermes_gaze.asr.parakeet_coreml import iter_windows
+        from hermes_gaze.audio.asr.parakeet_coreml import iter_windows
 
         audio = np.ones(5000, dtype=np.float32)
         chunks = list(iter_windows(audio, window_samples=15000, overlap_samples=3000))
@@ -82,7 +82,7 @@ class TestWindowing(unittest.TestCase):
         np.testing.assert_array_equal(chunk[:5000], audio)
 
     def test_iter_windows_overlapping_hops(self) -> None:
-        from hermes_gaze.asr.parakeet_coreml import iter_windows
+        from hermes_gaze.audio.asr.parakeet_coreml import iter_windows
 
         audio = np.ones(30000, dtype=np.float32)
         starts = [s for s, _c, _n in iter_windows(audio, 15000, 3000)]
@@ -90,7 +90,7 @@ class TestWindowing(unittest.TestCase):
         self.assertEqual(starts, [0, 12000, 24000])
 
     def test_stitch_windows_cuts_overlap_at_silence(self) -> None:
-        from hermes_gaze.asr.parakeet_coreml import stitch_windows
+        from hermes_gaze.audio.asr.parakeet_coreml import stitch_windows
 
         # Two windows overlapping [12s, 15s). The largest silence in w1's
         # overlap tokens is 12.2->14.8, so the cut lands at 13.5s: everything

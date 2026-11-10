@@ -85,9 +85,11 @@ def child(args):
         from hermes_cli.gateway_client import connect_gateway
         from run_agent import AIAgent
         from openai.types.chat import ChatCompletion
-        from hermes_gaze import service, cli, voice
+        from hermes_gaze.runtime import service
+        from hermes_gaze import cli
+        from hermes_gaze.audio import voice
         from hermes_gaze.browser.cdp_bridge import GazeSession
-        from hermes_gaze.native_input import NativeInput
+        from hermes_gaze.runtime.native_input import NativeInput
         home = Path(os.environ["HERMES_HOME"]).resolve()
         runner = GatewayRunner(GatewayConfig())
         runner._running = True
@@ -293,7 +295,7 @@ def child(args):
                     output["stop_retains_owner"] = dict(no_rebind=True, final=held["status"])
 
                     # Revoked/tampered one-use native auth is rejected by the real stock socket.
-                    from hermes_gaze import native_input
+                    from hermes_gaze.runtime import native_input
                     real_control = native_input._control
                     def invalid_ticket(home, verb, params=None):
                         answer = real_control(home, verb, params)

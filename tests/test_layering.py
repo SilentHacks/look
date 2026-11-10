@@ -6,7 +6,7 @@
    Only ``from .x import y`` relative imports are allowed. (tests/ is exempt: its
    bootstrap registers a hermes_gaze package *shell* under that sys.modules name.)
 2. resolver/ and tracker/ stay pure: no I/O or sibling-layer imports — all Chrome,
-   HTTP, process, and voice plumbing lives in browser/, service.py, voice.py, server.py.
+   HTTP, process, and voice plumbing lives in browser/, runtime/ and audio/.
 """
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
-from hermes_gaze import service
+from hermes_gaze.runtime import service
 from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.config import GazeConfig
 
@@ -216,7 +216,7 @@ class TestServiceIntents(unittest.TestCase):
 
     def test_transcribe_small_garbage_degrades_to_reply(self) -> None:
         """Tiny undecodable audio must reply (ok False, or ok True with empty text) — never raise."""
-        from hermes_gaze import voice
+        from hermes_gaze.audio import voice
 
         replies: List[Dict[str, Any]] = []
         # Stub the decode so the result is deterministic regardless of which

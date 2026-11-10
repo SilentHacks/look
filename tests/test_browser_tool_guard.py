@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze import service, voice
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
 
 
 class BrowserToolGuardTests(unittest.TestCase):

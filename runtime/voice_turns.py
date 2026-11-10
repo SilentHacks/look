@@ -13,12 +13,12 @@ from collections import deque
 from typing import Any
 
 from .answer_title import INSTRUCTION, TitleStream
-from .config import GazeConfig
-from .speech import SpeechPlayback
+from ..config import GazeConfig
+from ..audio.speech import SpeechPlayback
 from .naming import FALLBACK_SUBJECT, clean_subject, plain_error, speech_text, subject_hint
-from .resolver.cursor_context import MAX_CONTEXT, build_context
-from .resolver.bayesian_fusion import _ACTION_VERBS, _DESTRUCTIVE_VERBS, classify_utterance_intent
-from .resolver.temporal_aligner import has_deictic_pronoun
+from ..resolver.cursor_context import MAX_CONTEXT, build_context
+from ..resolver.bayesian_fusion import _ACTION_VERBS, _DESTRUCTIVE_VERBS, classify_utterance_intent
+from ..resolver.temporal_aligner import has_deictic_pronoun
 from .release_timing import TIMINGS
 
 logger = logging.getLogger(__name__)

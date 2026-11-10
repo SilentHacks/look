@@ -6,9 +6,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 import tests
-from hermes_gaze import service, voice
+from hermes_gaze.runtime import service
+from hermes_gaze.audio import voice
 from hermes_gaze.config import GazeConfig
-from hermes_gaze.voice_turns import VoiceTurns
+from hermes_gaze.runtime.voice_turns import VoiceTurns
 from tests.owned_chrome import private_session
 CHROME='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 SHOTS=Path(os.environ.get('SHOTS', str(Path(__file__).parent/'shots')))
@@ -91,7 +92,7 @@ class Rig:
         self.patches=[patch.object(service,'get_shared_session',return_value=self.session),patch.object(service,'_VOICE_TURNS',self.turns),
             patch.object(service,'_CONFIG',GazeConfig(early_highlight=False)),patch.dict(sys.modules,sounddevice=SimpleNamespace(RawInputStream=stub.RawInputStream)),
             patch.object(voice, 'recognition_ready', return_value=True),  # Scripted ASR, never prepare real models.
-            patch('hermes_gaze.speech.SpeechPlayback.say',side_effect=AssertionError('Real say forbidden'))]
+            patch('hermes_gaze.audio.speech.SpeechPlayback.say',side_effect=AssertionError('Real say forbidden'))]
         for p in self.patches: p.start()
         self.session.configure(hotkey='AltRight')
         self.tab=None
