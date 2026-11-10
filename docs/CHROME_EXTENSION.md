@@ -122,17 +122,18 @@ four-second Python-renewed lease releases intercepted input even if cleanup cann
 run. No reconnect, fallback-tab attachment or mutation replay occurs. A missing
 mutation reply means **unknown outcome**: inspect the website before another action.
 
-During navigation, explicit missing-frame/context rejections of `Page.getFrameTree`
-and the fixed `Look.lease` ping return to the existing bounded rearm without ending
-the connection. The worker never retries commands. Arbitrary `Runtime.evaluate`,
-missing replies and unclassified errors retain terminal handling; lease and rearm
-deadlines are unchanged.
+During navigation, trusted Python classifies read-only evaluations and idempotent
+private-renderer setup/publication separately from browser mutations. Explicit
+missing-context/frame/object rejections return to bounded rearm or the caller.
+Chrome enforces side-effect-free reads. The worker never retries commands; missing
+replies, debugger/host loss, unclassified evaluations and mutations remain terminal.
+Foreground, native generation, isolated context, document and route guards remain.
+See the [evaluation caller audit and regression contract](NAVIGATION_RECOVERY.md).
 
-This is not a seamless-navigation guarantee: a concurrent `Runtime.evaluate`
-can still meet a destroyed context and end the connection. If Look disconnects,
-run `/look stop`, then `/look start --extension` in the intended conversation.
-Reopen Look on the intended tab and choose **Connect this tab**. Inspect the page
-before repeating any action whose outcome is unknown.
+This is not a seamless-navigation guarantee: a concurrent browser mutation can
+still end the connection. If Look disconnects, run `/look stop`, then
+`/look start --extension`, reopen Look on the intended tab and choose
+**Connect this tab**. Inspect the page before repeating an action with unknown outcome.
 
 The alternative without an extension remains `/look start --existing`, then
 `/look start --existing --accept` with native Chrome consent. After Stop,

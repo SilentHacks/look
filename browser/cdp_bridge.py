@@ -179,15 +179,17 @@ class CdpSession:
             logger.debug("CDP connect failed: %s", exc)
             return False
 
-    def eval_js(self, expression: str, timeout: float = 6.0) -> Any:
-        """Evaluate JS in the pinned tab; returns ``Runtime.evaluate`` ``result.value``.
-        Thread-safe. Raises on timeout or page exception; one reconnect attempt on ws failure."""
+    def eval_js(self, expression: str, timeout: float = 6.0, *, operation: str = "mutation") -> Any:
+        """Unclassified JS runs once. Only explicitly read-only JS may reconnect."""
+        if operation != "read":
+            return self.eval_js_once(expression, timeout, operation=operation)
         return self._submit(self._eval_with_reconnect(expression, timeout), timeout + 15.0)
 
     def eval_js_once(self, expression: str, timeout: float = 6.0, *,
-                     context_id: Optional[str] = None) -> Any:
-        """Evaluate a mutation in one document; never reconnect/replay."""
-        return self._submit(self._eval_coro(expression, timeout, context_id=context_id), timeout + 1.0)
+                     context_id: Optional[str] = None, operation: str = "mutation") -> Any:
+        """Evaluate once in one document. Only trusted Python may classify reads/UI."""
+        return self._submit(self._eval_coro(expression, timeout, context_id=context_id,
+                                            operation=operation), timeout + 1.0)
 
     def set_intent_handler(self, fn: Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]) -> None:
         """Register fn(intent, reply) invoked on the intent pool for each binding call."""
@@ -291,7 +293,7 @@ class CdpSession:
             raise
         return True
 
-    async def _push_overlay_config(self) -> None:
+    async def _push_overlay_config(self, context_id: Optional[str] = None) -> None:
         # IIFE is mandatory: top-level const/let in Runtime.evaluate persists in the
         # page's global lexical scope and would collide on the next push/re-inject.
         expr = (
@@ -300,15 +302,16 @@ class CdpSession:
             f"api.setIntentNonce({json.dumps(self.intent_nonce)});"
             "} return true; })()"
         )
-        await self._eval_coro(expr, timeout=5.0)
+        await self._eval_coro(expr, timeout=5.0, context_id=context_id, operation="presentation")
 
     async def _init_ui(self) -> None:
+        document = self._context_unique_id
         frames: Dict[str, Tuple[int, str]] = {}
         panel = "\n".join(Path(__file__).with_name(name).read_text() for name in _PANEL_SOURCES)
         for name in _UI_FRAMES:
             remote = await self._send_cmd("Runtime.evaluate", {
                 "expression": f"window.__HERMES_GAZE_OVERLAY__.uiFrames.{name}",
-                "uniqueContextId": self._context_unique_id}, timeout=5.)
+                "uniqueContextId": document}, timeout=5., operation="read")
             object_id = remote["result"]["objectId"]
             try:
                 node = await self._send_cmd("DOM.describeNode", {"objectId": object_id}, timeout=5.)
@@ -317,11 +320,14 @@ class CdpSession:
             world = await self._send_cmd("Page.createIsolatedWorld", {
                 "frameId": node["node"]["frameId"], "worldName": _WORLD}, timeout=5.)
             frames[name] = (world["executionContextId"], await self._context_key(world["executionContextId"]))
-            await self._eval_coro(panel, timeout=5., context_id=frames[name][1])
+            await self._eval_coro(panel, timeout=5., context_id=frames[name][1], operation="presentation")
+        if document != self._context_unique_id:
+            raise ConnectionError("Chrome document changed during renderer setup")
         self._ui_frames = frames
         self._ui_context_id, self._ui_context_unique_id = frames["card"]
         self._displayed_event = None  # Everything is new to this renderer, including recall.
-        await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.uiReady();true", timeout=5.)
+        await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.uiReady();true", timeout=5.,
+                              context_id=document, operation="presentation")
 
     async def _render_ui(self, message: dict) -> None:
         frame = self._ui_frames.get(str(message.get("frame") or "card"))
@@ -335,7 +341,7 @@ class CdpSession:
             rendered = await self._eval_coro(
                 "(() => {const panel = window.__HERMES_GAZE_PANEL__; if (!panel) return false;"
                 "panel.render(" + json.dumps(message) + "); return true})()",
-                timeout=5., context_id=frame[1])
+                timeout=5., context_id=frame[1], operation="presentation")
             if rendered is not True:
                 return
             if trace is not None and message.get("mode") != "wave":
@@ -357,7 +363,7 @@ class CdpSession:
         async def send() -> None:
             try:
                 await self._eval_coro(f"window.__HERMES_GAZE_PANEL__?.level({float(level):.3f})",
-                                      timeout=1., context_id=frame[1])
+                                      timeout=1., context_id=frame[1], operation="presentation")
             except Exception:
                 logger.debug("Waveform frame dropped", exc_info=True)
             finally:
@@ -391,7 +397,8 @@ class CdpSession:
                 return
             if frame:
                 await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.fromPanel(" + json.dumps(frame) + ","
-                                      + json.dumps(message) + ");true", timeout=5.)
+                                      + json.dumps(message) + ");true", timeout=5.,
+                                      operation="presentation" if message.get("t") in ("size", "hover", "engaged") else "mutation")
             elif message.get("type") == "_ui_render":
                 await self._render_ui(message)
             elif message.get("type") == "_ui_ping":
@@ -481,6 +488,7 @@ class CdpSession:
                 prefix = self._ws.document_prefix if isinstance(self._ws, TargetChannel) else ""
                 self._contexts[context["id"]] = prefix + context["uniqueId"]
         elif method == "Runtime.executionContextsCleared":
+            self._ready = False
             self._context_id = None
             self._context_unique_id = None
             self._contexts.clear()
@@ -500,7 +508,8 @@ class CdpSession:
 
     async def _revoke_route_actions(self) -> None:
         try:
-            await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.)
+            await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.,
+                                  operation="presentation")
         except Exception:
             logger.debug("Route revocation met a navigating document", exc_info=True)
 
@@ -528,19 +537,26 @@ class CdpSession:
                         return False
                     frame_id = tree["frameTree"]["frame"]["id"]
                     self._main_frame_id = frame_id
+                    previous = self._context_unique_id
                     world = await self._send_cmd("Page.createIsolatedWorld",
                                                  {"frameId": frame_id, "worldName": _WORLD}, timeout=5.0)
                     self._context_id = world["executionContextId"]
                     self._context_unique_id = await self._context_key(self._context_id)
+                    document = self._context_unique_id
+                    if not force and self._ready and document == previous and set(self._ui_frames) == set(_UI_FRAMES):
+                        return True
                     if self._closed:
                         return False
                     src = _overlay_source()
-                    if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0)):
+                    if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0,
+                                                                  context_id=document, operation="read")):
                         if self._closed:
                             return False
-                        await self._eval_coro(src, timeout=8.0)
+                        await self._eval_coro(src, timeout=8.0, context_id=document, operation="presentation")
                     await self._init_ui()
-                    await self._push_overlay_config()
+                    await self._push_overlay_config(context_id=document)
+                    if document != self._context_unique_id:
+                        raise ConnectionError("Chrome document changed during rearm")
                     self._ready = True
                     return True
                 except Exception as exc:
@@ -608,7 +624,10 @@ class CdpSession:
 
     # -- request/response --
 
-    async def _send_cmd(self, method: str, params: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+    async def _send_cmd(self, method: str, params: Dict[str, Any], timeout: float, *,
+                        operation: str = "mutation") -> Dict[str, Any]:
+        if operation not in ("mutation", "read", "presentation"):
+            raise ValueError("Unknown trusted CDP operation")
         if self._ws is None:
             raise ConnectionError("CDP websocket is not connected")
         prefix = self._ws.document_prefix if isinstance(self._ws, TargetChannel) else ""
@@ -623,7 +642,7 @@ class CdpSession:
         self._pending[req_id] = fut
         try:
             if getattr(self._owner, "source", "") == "extension":
-                params = dict(params, _look_owner={
+                params = dict(params, _look_operation=operation, _look_owner={
                     "document": (self._context_unique_id or "").removeprefix(prefix),
                     "route": self._route_id})
             await self._ws.send(json.dumps({"id": req_id, "method": method, "params": params or {}}))
@@ -637,15 +656,16 @@ class CdpSession:
             raise RuntimeError(f"CDP {method} failed: {err.get('code')} {err.get('message')}")
         return msg.get("result") or {}
 
-    async def _eval_coro(self, expression: str, timeout: float, context_id: Optional[str] = None) -> Any:
+    async def _eval_coro(self, expression: str, timeout: float, context_id: Optional[str] = None, *,
+                         operation: str = "mutation") -> Any:
         context_id = context_id or self._context_unique_id
         if context_id is None:
             raise ConnectionError("Chrome document is navigating")
         result = await self._send_cmd(
             "Runtime.evaluate",
             {"expression": expression, "returnByValue": True, "awaitPromise": True,
-             "uniqueContextId": context_id},
-            timeout=timeout,
+             "uniqueContextId": context_id, **({"throwOnSideEffect": True} if operation == "read" else {})},
+            timeout=timeout, operation=operation,
         )
         exc = result.get("exceptionDetails")
         if exc:
@@ -665,7 +685,7 @@ class CdpSession:
             try:
                 if self._ws is None and not await self._connect_async():
                     raise ConnectionError(f"No debuggable Chrome page found at {self.http_url}")
-                return await self._eval_coro(expression, timeout)
+                return await self._eval_coro(expression, timeout, operation="read")
             except TimeoutError:
                 raise
             except (OSError, EOFError, ConnectionError, websockets.exceptions.ConnectionClosed) as exc:

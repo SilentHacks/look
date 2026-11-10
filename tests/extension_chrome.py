@@ -56,6 +56,7 @@ class Page(http.server.BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({'go': self.server.go}).encode())
             return
         self.send_response(200); self.send_header('Content-Type', 'text/html'); self.end_headers()
+        self.server.documents.append(self.path)
         self.wfile.write(PAGE)
 
     def do_POST(self):
@@ -79,19 +80,20 @@ def fixture_worker(url, client='main', gated=False):
     # Test-only raw inspector and gesture driver. Production worker refuses these methods.
     return r'''
 const fixtureRoot = root;
-let fixtureFailure = '', fixtureFailures = 0;
+let fixtureFailure = '', fixtureExpression = '', fixtureFailures = 0;
 const fixtureSend = chrome.debugger.sendCommand.bind(chrome.debugger);
 chrome.debugger.sendCommand = async (target, method, params) => {
-  if (fixtureFailure && (fixtureFailure === method ||
+  if (fixtureFailure && (!fixtureExpression || fixtureExpression === params.expression) &&
+      (fixtureFailure === method ||
       fixtureFailure === 'Look.lease' && method === 'Runtime.evaluate' &&
       params.expression === 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true')) {
     fixtureFailure = ''; fixtureFailures++;
-    throw Error('Cannot find context with specified id');
+    throw Error(JSON.stringify({code:-32000,message:'Cannot find context with specified id'}));
   }
   return fixtureSend(target, method, params);
 };
 root = async (method, params) => {
-  if (method === 'Test.failRead') { fixtureFailure = params.method; return {}; }
+  if (method === 'Test.failRead') { fixtureFailure = params.method; fixtureExpression = params.expression || ''; return {}; }
   if (method === 'Test.failures') return {count:fixtureFailures};
   if (method === 'Test.command') {
     const tab = tabs.get(Number(params.target)) || [...tabs.values()][0];
@@ -100,6 +102,7 @@ root = async (method, params) => {
   if (method === 'Test.background') { return {target: (await chrome.tabs.create({url: FIXTURE_URL, active:true})).id}; }
   if (method === 'Test.focus') { await chrome.tabs.update(Number(params.target), {active:true}); return {}; }
   if (method === 'Test.reload') { setTimeout(()=>chrome.runtime.reload(),50); return {}; }
+  if (method === 'Test.detach') { await chrome.debugger.detach({tabId:[...tabs.values()][0].id}); return {}; }
   if (method === 'Test.client') return {client: FIXTURE_CLIENT};
   try { return await fixtureRoot(method, params); }
   catch(error) { await fetch(FIXTURE_URL+'error',{method:'POST',body:method+': '+error.message}); throw error; }
@@ -138,6 +141,7 @@ def scenario(chrome, mode, out=None):
         directory = Path(directory)
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page)
         server.mutations, server.status, server.error = 0, {}, ''
+        server.documents = []
         server.go, server.offers, server.results = False, {}, {}
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
@@ -277,7 +281,7 @@ def scenario(chrome, mode, out=None):
                 for kind in ('keyDown', 'keyUp'):
                     raw('Input.dispatchKeyEvent', dict(type=kind, code=code, key=text))
             def click(selector):
-                until(lambda: evaluate('(()=>{const a=window.__HERMES_GAZE_OVERLAY__,r=a.uiFrame.getBoundingClientRect(),d=a.debug();return Math.abs(r.y-d.frame.y)<1 && Math.abs(r.x-d.card.x)<1})()', tab._context_unique_id))
+                until(lambda: evaluate('(()=>{const a=window.__HERMES_GAZE_OVERLAY__,r=a.uiFrame.getBoundingClientRect(),d=a.debug();return d.sizes.cardH>0 && d.frame.h>0 && Math.abs(r.y-d.frame.y)<1 && Math.abs(r.x-d.card.x)<1})()', tab._context_unique_id))
                 card = tab._ui_frames['card'][1]
                 point = evaluate(f'(()=>{{const r=document.querySelector({json.dumps(selector)}).getBoundingClientRect();return {{x:r.x+r.width/2,y:r.y+r.height/2}}}})()', card)
                 frame = evaluate('(()=>{const r=window.__HERMES_GAZE_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()', tab._context_unique_id)
@@ -311,20 +315,30 @@ def scenario(chrome, mode, out=None):
                     until(lambda: evaluate(f'document.body.textContent.includes("LOCAL_PRODUCT_ANSWER_{number}")', card), 20)
                     check(f'question_{number}_accepted_and_answered_after_rearm', True)
                 question(1)
-                for number in (2, 3):
+                for operation in ('read', 'presentation'):
+                    expression = '!!window.__HERMES_GAZE_OVERLAY__'
+                    root.command('Test.failRead', {'method':'Runtime.evaluate', 'expression':expression})
+                    with unittest_error():
+                        tab.eval_js_once(expression, context_id=tab._context_unique_id, operation=operation)
+                    check(operation + '_context_rejection_keeps_exact_generation', root.live and root.generation == generation)
+                # Chrome itself refuses side effects on classified reads.
+                with unittest_error():
+                    tab.eval_js_once('window.forbiddenReadMutation=true', operation='read')
+                check('read_authority_cannot_mutate', not evaluate('!!window.forbiddenReadMutation'))
+                for number in range(2, 7):
                     old_document = tab._context_unique_id
                     root.command('Test.failRead', {'method':'Page.getFrameTree'})
                     raw('Page.navigate', {'url':url+f'redirect?product={number}'})
                     until(lambda: tab.is_connected and tab._context_unique_id != old_document and bool(tab._ui_frames), 15)
                     check(f'redirect_product_{number}_rearmed_same_generation',
-                          root.live and root.generation == generation and root.command('Test.failures')['count'] == (number - 1) * 2 - 1)
+                          root.live and root.generation == generation and root.command('Test.failures')['count'] == (number - 1) * 2 + 1)
                     with unittest_error():
                         session.cdp.eval_js_once('window.staleProductMutation=true', target=target, document=old_document)
                     check(f'product_{number}_rejects_stale_owner', not evaluate('!!window.staleProductMutation'))
                     root.command('Test.failRead', {'method':'Look.lease'})
                     tab._submit(tab._ui_message(json.dumps({'type':'_ui_ping'})), 3)
                     check(f'lease_rejection_{number}_keeps_generation',
-                          root.live and root.command('Test.failures')['count'] == (number - 1) * 2)
+                          root.live and root.command('Test.failures')['count'] == (number - 1) * 2 + 2)
                     question(number)
                 root.command('Test.background')
                 until(lambda: not evaluate('document.hasFocus()'), 3)
@@ -435,12 +449,23 @@ def scenario(chrome, mode, out=None):
                 evaluate('document.querySelector(".choice.yes").click();document.querySelector(".choice.yes").focus({preventScroll:true});true', card)
                 key('Enter', 'Enter')
                 check('synthetic_and_keyboard_approval_rejected', session.actions._pending is pending and server.mutations == 0)
-                if mode == 'lost-reply':
+                if mode in ('lost-reply', 'navigation-mutation'):
+                    expression = 'fetch("/mutation",{method:"POST"});new Promise(()=>{})'
+                    if mode == 'navigation-mutation':
+                        expression = 'fetch("/mutation",{method:"POST"}).then(()=>location.assign("/redirect?mutation=1"));new Promise(()=>{})'
                     with unittest_error():
-                        tab.eval_js_once('fetch("/mutation",{method:"POST"});new Promise(()=>{})', .2, context_id=tab._context_unique_id)
+                        tab.eval_js_once(expression, .5, context_id=tab._context_unique_id)
                     until(lambda: server.mutations == 1)
+                    if mode == 'navigation-mutation':
+                        until(lambda: '/product?mutation=1' in server.documents)
+                        check('inflight_mutation_reaches_new_document_before_terminal_cleanup', True)
                 elif mode == 'worker-reload':
                     root.command('Test.reload')
+                elif mode == 'debugger-loss':
+                    try:
+                        root.command('Test.detach')
+                    except (ConnectionError, RuntimeError, TimeoutError):
+                        pass  # Detach event may arrive before or after its fixture reply.
                 else:
                     os.kill(int((directory / 'host.pid').read_text()), signal.SIGTERM)
                 until(lambda: not root.live and not turns.connected, 8)
@@ -448,7 +473,7 @@ def scenario(chrome, mode, out=None):
                 check('transport_loss_cancels_native_input_output_task_and_approval', cancel.is_set() and stream.close.called and session.tasks._stopped.is_set() and session.actions._pending is None and not session.microphone._audio)
                 until(lambda: server.status.get('root') is False, 8)
                 check('host_loss_teardown_fails_open_and_keeps_page', process.poll() is None)
-                if mode == 'lost-reply':
+                if mode in ('lost-reply', 'navigation-mutation'):
                     with unittest_error(): tab.eval_js('fetch("/mutation",{method:"POST"})', .1)
                     time.sleep(.3)
                     check('lost_mutation_reply_executes_once_and_generation_never_reconnects', server.mutations == 1 and not root.live)
@@ -477,11 +502,11 @@ if __name__ == '__main__':
     parser.add_argument('--chrome', required=True)
     parser.add_argument('--out', type=Path)
     parser.add_argument('--mode', action='append', choices=(
-        'navigation', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))
+        'navigation', 'navigation-mutation', 'debugger-loss', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))
     args = parser.parse_args()
     if args.out: args.out.mkdir(parents=True, exist_ok=True)
     results = {mode: scenario(args.chrome, mode, args.out) for mode in (args.mode or (
-        'navigation', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))}
+        'navigation', 'navigation-mutation', 'debugger-loss', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))}
     if args.out:
         (args.out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(json.dumps(results, indent=2))

@@ -161,7 +161,8 @@ const METHODS = new Set(['Runtime.enable', 'Runtime.addBinding', 'Runtime.remove
 async function dispatch(message) {
   const connection = port;
   const {id, method, sessionId} = message;
-  const {_look_owner: owner, ...params} = message.params || {};
+  // Only the private native Python channel sets authority; never infer it from JS text.
+  const {_look_owner: owner, _look_operation: operation = 'mutation', ...params} = message.params || {};
   if (!Number.isSafeInteger(id) || id <= 0 || typeof method !== 'string') fail('Invalid Look command.');
   try {
     let result;
@@ -169,6 +170,10 @@ async function dispatch(message) {
     else {
       const tab = [...tabs.values()].find(tab => tab.session === sessionId);
       if (!tab || tab.closed || !METHODS.has(method)) fail('Unknown tab session or unsupported Look method.');
+      if (!['mutation', 'read', 'presentation'].includes(operation)) fail('Unknown Look operation authority.');
+      const recoverable = ['Page.getFrameTree', 'Page.createIsolatedWorld', 'DOM.describeNode', 'Runtime.releaseObject', 'Look.lease'].includes(method) ||
+        method === 'Runtime.evaluate' && operation !== 'mutation';
+      if (method === 'Runtime.evaluate' && operation === 'read') params.throwOnSideEffect = true;
       const current = await chrome.tabs.get(tab.id);
       if (dead || tabs.get(tab.id) !== tab || current.windowId !== tab.window || current.incognito) fail('Tab ownership changed.');
       const revision = foregroundRevision;
@@ -182,7 +187,11 @@ async function dispatch(message) {
         post({id, sessionId, error: {code: -32000, message: 'Selected document or route changed'}}, connection);
         return;
       }
-      if (method === 'Runtime.evaluate' && ![...tab.contexts.values()].includes(params.uniqueContextId)) fail('Unknown isolated document.');
+      if (method === 'Runtime.evaluate' && ![...tab.contexts.values()].includes(params.uniqueContextId)) {
+        if (operation === 'mutation') fail('Unknown isolated document.');
+        post({id, sessionId, error: {code: -32000, message: 'Selected isolated document changed'}}, connection);
+        return;
+      }
       if (method === 'Runtime.addBinding' && (params.name !== BINDING || params.executionContextName !== WORLD)) fail('Unknown Look binding.');
       if (method === 'Page.createIsolatedWorld' && params.worldName !== WORLD) fail('Unknown Look world.');
       try {
@@ -194,18 +203,30 @@ async function dispatch(message) {
             expression: 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true', uniqueContextId: tab.document});
         } else result = await direct(tab, method, params);
       } catch (error) {
-        // These fixed lifecycle reads may meet a disappearing frame/context. Return
-        // the rejection to Python's bounded rearm; never replay arbitrary evaluation.
-        // Timeouts, detach and all unclassified failures still end this generation.
-        if (['Page.getFrameTree', 'Look.lease'].includes(method) && !error.look &&
-            /^(Cannot find context with specified id|Cannot find execution context with given id|Execution context was destroyed\.?|No frame with given id found)\.?$/.test(error.message) &&
+        // Chrome extensions can wrap the protocol error in JSON inside Error.message.
+        let reason = error.message;
+        try {
+          const protocol = JSON.parse(reason);
+          if (protocol.code === -32000 && typeof protocol.message === 'string') reason = protocol.message;
+        } catch (_) { /* Plain Chrome rejection. */ }
+        // Explicit context/frame/object rejection only. Never retry here, and never
+        // downgrade a mutation, timeout, debugger loss or unclassified failure.
+        if (recoverable && !error.look &&
+            /^(Cannot find context with specified id|Cannot find execution context with given id|Execution context was destroyed\.?|No frame with given id found|Could not find object with given id)\.?$/.test(reason) &&
             !dead && port === connection && tabs.get(tab.id) === tab && !tab.closed) {
-          post({id, sessionId, error: {code: -32000, message: error.message}}, connection);
+          post({id, sessionId, error: {code: -32000, message: reason}}, connection);
           return;
         }
         throw error;
       }
       if (dead || tabs.get(tab.id) !== tab) return;
+      if (method === 'Runtime.evaluate' && (port !== connection || owner.document !== tab.document ||
+          owner.route !== tab.route || ![...tab.contexts.values()].includes(params.uniqueContextId) ||
+          revision !== foregroundRevision)) {
+        if (operation === 'mutation') { if (port === connection) await stop(); }
+        else post({id, sessionId, error: {code: -32000, message: 'Evaluation owner changed before reply'}}, connection);
+        return;
+      }
       if (method === 'Page.getFrameTree') tab.mainFrame = result.frameTree.frame.id;
       if (method === 'Page.addScriptToEvaluateOnNewDocument') tab.scripts.add(result.identifier);
       if (method === 'Page.removeScriptToEvaluateOnNewDocument') tab.scripts.delete(params.identifier);

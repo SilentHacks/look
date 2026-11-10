@@ -5,7 +5,7 @@ import threading
 import unittest
 from types import SimpleNamespace
 
-from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
+from hermes_gaze.browser.cdp_bridge import GazeSession
 from hermes_gaze.resolver.cursor_context import build_context
 
 
@@ -257,18 +257,6 @@ class TestSnapshotActions(unittest.TestCase):
         self.assertEqual(self.browser.executed, ["@export"])
         self.assertFalse(self.actions.click("@export", self.rid)["ok"])
 
-    def test_cdp_once_does_not_route_through_reconnect(self):
-        cdp = CdpSession()
-        calls = []
-        async def execute(expression, timeout, context_id=None):
-            calls.append(expression)
-            raise ConnectionError("reply lost")
-        cdp._eval_coro = execute
-        import asyncio
-        cdp._submit = lambda coro, timeout: asyncio.run(coro)
-        with self.assertRaises(ConnectionError):
-            cdp.eval_js_once("click")
-        self.assertEqual(calls, ["click"])
 
 
 if __name__ == "__main__":

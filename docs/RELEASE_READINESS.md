@@ -281,6 +281,38 @@ provider was used. No live gateway, staged extension or native registration was
 updated. Actual headed toolbar consent, physical speech and configured-provider
 recording remain user-operated checks, not established by these fixtures.
 
+### Classified navigation recovery
+
+Baseline `56e38d2a85c5f6c11d687cdce7e254402034fa4d` reproduced the second-redirect
+terminal evaluation failure in disposable CfT 157.0.8103.50. The replacement
+uses trusted Python evaluation authority, not expression matching or blanket retry.
+The [caller audit](NAVIGATION_RECOVERY.md) records read, presentation and mutation
+boundaries, wrapped protocol errors, pinned rearm and unchanged terminal failures.
+
+- Targeted Python transport/ownership/action/first-run checks: **99 tests PASS**.
+- `node --check extension/worker.js` and `node tests/extension_worker.cjs`: PASS.
+- Local browser navigation, navigation-mutation, lost-reply and host-loss:
+  **82 checks PASS**. Five redirects create fresh documents in one generation;
+  six typed questions receive scripted answers. Read side effects, stale action
+  owners and background private rendering are refused. In-flight mutation and
+  lost-reply paths execute one POST, terminate and never reconnect/replay.
+- Additional in-flight-navigation, debugger-detach and surface checks:
+  **53 checks PASS** (navigation-mutation overlaps the preceding run). The server
+  observes the destination document after the one POST. Actual debugger detach
+  tears down capture/output/task/approval. Hostile focus suppression, private
+  answer/input/selection isolation, route-and-back refusal and guarded new-tab
+  ownership transfer pass. Evidence: `/tmp/look-navigation-repair/boundaries/results.json`.
+- Initial post-change fixture clicks raced unmeasured private-frame geometry
+  (`y=0` before the size message). The fixture now waits for nonzero measured
+  card/frame geometry before using trusted Chrome clicks; no product delay,
+  focus override or ownership relaxation was added.
+
+Evidence: `/tmp/look-navigation-repair/after/results.json`; baseline failure and
+intermediate fixture diagnostics are recorded in the implementation handoff.
+No personal browser/profile, account, physical device, live provider or Hermes
+host modification was used. Stock-facing first-run contracts pass; the full
+stock-startup acceptance from the preceding integration was not rerun.
+
 
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes

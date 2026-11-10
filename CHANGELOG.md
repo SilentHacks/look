@@ -10,10 +10,11 @@ No public release, catalogue admission, Store listing or release date is asserte
 
 - Streamed answer cards reserve viewport-bounded reading room for long answers
   while keeping short answers compact and preserving top/manual scroll.
-- Extension navigation recovery preserves the connection for explicitly classified
-  frame/context rejections of frame-tree reads and the fixed lease ping. Existing
-  bounded rearm handles recovery; arbitrary evaluations, missing replies and
-  mutations remain terminal and are never replayed.
+- Extension navigation recovery uses trusted Python read/presentation/mutation
+  authority, decodes Chrome's wrapped context errors and pins renderer rearm to
+  its document. Classified reads reject side effects; private UI can recover.
+  Mutations, missing replies and host/debugger failures retain terminal/no-replay
+  handling. Added repeated redirect/answer and in-flight navigation regressions.
 - Added request-specific **Stop request** controls for active and queued questions.
   Stock canonical Hermes cancellation keeps exact receipt ownership, partial text
   and paused follow-ups. Other frontends report that processing must be stopped

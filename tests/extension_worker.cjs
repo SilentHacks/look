@@ -24,8 +24,8 @@ function fixture() {
     port=connection; generation='a'.repeat(32); dead=false;
     tabs.set(1,{id:1,window:7,session:'selected',closed:false,scripts:new Set(),contexts:new Map([[1,'doc']]),document:'doc',route:2});
   `, context);
-  const command = (method = 'Runtime.evaluate') => {
-    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',expression:'mutation',worldName:'hermes-gaze',_look_owner:{document:'doc',route:2}}};
+  const command = (method = 'Runtime.evaluate', operation = 'mutation') => {
+    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',expression:'mutation',worldName:'hermes-gaze',_look_operation:operation,_look_owner:{document:'doc',route:2}}};
     return vm.runInContext('dispatch(request)', context);
   };
   return {context, messages, commands, listeners, command,
@@ -34,17 +34,26 @@ function fixture() {
     move() { windowId = 8; }};
 }
 (async () => {
-  // Only explicitly safe lifecycle reads may leave the generation available for rearm.
-  for (const method of ['Page.getFrameTree', 'Look.lease']) {
+  // Only trusted classified evaluations/fixed lifecycle operations can reject safely.
+  for (const [method, operation] of [
+    ['Page.getFrameTree', 'mutation'], ['Look.lease', 'mutation'],
+    ['Page.createIsolatedWorld', 'mutation'], ['DOM.describeNode', 'mutation'],
+    ['Runtime.releaseObject', 'mutation'], ['Runtime.evaluate', 'read'],
+    ['Runtime.evaluate', 'presentation'],
+  ]) {
     const read = fixture();
-    read.context.chrome.debugger.sendCommand = async (_, name) => {
-      read.commands.push({method:name});
-      throw Error('Cannot find context with specified id');
+    read.context.chrome.debugger.sendCommand = async (_, name, params) => {
+      read.commands.push({method:name, params});
+      throw Error(JSON.stringify({code:-32000,message:'Cannot find context with specified id'}));
     };
-    await read.command(method);
+    await read.command(method, operation);
     assert.equal(vm.runInContext('dead', read.context), false, method + ' must not end navigation recovery');
     assert.match(read.messages[0].error.message, /Cannot find context/);
     assert.equal(read.commands.length, 1, 'worker must not retry even a safe read');
+    if (method === 'Runtime.evaluate') {
+      assert.equal(read.commands[0].params._look_operation, undefined, 'authority must not reach Chrome');
+      assert.equal(!!read.commands[0].params.throwOnSideEffect, operation === 'read');
+    }
     read.context.chrome.debugger.sendCommand = async () => ({frameTree:{frame:{id:'main'}}});
     await read.command('Page.getFrameTree');
     assert.equal(read.messages[1].result.frameTree.frame.id, 'main', 'next rearm read must use the same generation');
@@ -53,7 +62,7 @@ function fixture() {
     ['Runtime.evaluate', 'Cannot find context with specified id'],
     ['Page.navigate', 'No frame with given id found'],
     ['Input.dispatchKeyEvent', 'Execution context was destroyed.'],
-    ['Page.createIsolatedWorld', 'No frame with given id found'],
+    ['Page.createIsolatedWorld', 'Debugger is not attached'],
     ['Page.getFrameTree', 'Target closed'],
     ['Look.lease', 'Debugger is not attached'],
     ['Page.getFrameTree', 'Chrome did not reply. Reconnect, but do not repeat the action.'],
@@ -67,6 +76,33 @@ function fixture() {
     assert.equal(vm.runInContext('dead && tabs.size===0', failed.context), true, method + ': ' + message);
     assert.equal(failed.messages.length, 0, 'ambiguous/terminal failures must not become retryable replies');
     assert.ok(failed.commands.filter(c => c.method === method && (method !== 'Runtime.evaluate' || c.params.expression === 'mutation')).length <= 1, 'no mutation replay');
+  }
+  for (const operation of ['read', 'presentation', 'mutation']) {
+    const stale = fixture();
+    let finish;
+    stale.context.chrome.debugger.sendCommand = async (_, method, params) => {
+      stale.commands.push({method, params});
+      if (params.expression === 'mutation') return new Promise(resolve => { finish = resolve; });
+      return {};
+    };
+    const evaluating = stale.command('Runtime.evaluate', operation);
+    await new Promise(resolve => setImmediate(resolve));
+    vm.runInContext("tabs.get(1).document='new-doc';tabs.get(1).contexts.clear()", stale.context);
+    finish({result:{value:'OLD_PRIVATE_RESULT'}});
+    await evaluating;
+    assert.equal(stale.messages.some(m => m.result), false, 'stale result must not be accepted');
+    assert.equal(vm.runInContext('dead', stale.context), operation === 'mutation');
+    assert.equal(stale.commands.filter(c => c.params.expression === 'mutation').length, 1);
+  }
+  for (const operation of ['read', 'presentation']) {
+    const background = fixture();
+    background.focus(false);
+    await background.command('Runtime.evaluate', operation);
+    assert.equal(background.commands.length, 0, 'classification cannot authorize background access');
+    const terminal = fixture();
+    terminal.context.chrome.debugger.sendCommand = async () => { throw Error('Debugger is not attached'); };
+    await terminal.command('Runtime.evaluate', operation);
+    assert.equal(vm.runInContext('dead', terminal.context), true, 'classified debugger failure is terminal');
   }
   const timeout = fixture();
   timeout.context.setTimeout = fn => setTimeout(fn, 0);

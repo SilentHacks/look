@@ -284,12 +284,12 @@ class Companion:
                     ready = tab.eval_js_once(
                         "document.visibilityState === 'visible' && document.hasFocus() && "
                         "!!window.__HERMES_GAZE_OVERLAY__?.returnFromCalibration()",
-                        timeout=.4, context_id=owner["browser_document"])
+                        timeout=.4, context_id=owner["browser_document"], operation="presentation")
                     if (ready and set(frames) == {"card", "pill"} and
-                            all(tab.eval_js_once("!!window.__HERMES_GAZE_PANEL__", timeout=.4, context_id=context[1])
+                            all(tab.eval_js_once("!!window.__HERMES_GAZE_PANEL__", timeout=.4, context_id=context[1], operation="read")
                                 for context in frames.values()) and frames == tab._ui_frames
                             and tab.eval_js_once("document.visibilityState === 'visible' && document.hasFocus()",
-                                                 timeout=.4, context_id=owner["browser_document"])
+                                                 timeout=.4, context_id=owner["browser_document"], operation="read")
                             and valid() and self._return_tab(owner) is tab):
                         self._last_foreground = dict(owner)
                         return {"ok": True}
@@ -333,7 +333,7 @@ class Companion:
                         or not result.get("loaderId")):
                     if (document == destination._context_unique_id and route == destination._route_id
                             and destination.eval_js_once("document.readyState !== 'loading' && document.hasFocus()",
-                                                         timeout=1., context_id=document)):
+                                                         timeout=1., context_id=document, operation="read")):
                         return dict(browser_target=target, browser_document=document, browser_route=route)
             if self._stop.wait(.05):
                 break
@@ -427,7 +427,7 @@ class Companion:
                         try:
                             owner = self._document_owner(tab)
                             if tab.eval_js_once("document.visibilityState === 'visible' && document.hasFocus()",
-                                                timeout=.3, context_id=owner["browser_document"]):
+                                                timeout=.3, context_id=owner["browser_document"], operation="read"):
                                 if self._document_owner(tab) == owner:
                                     self._last_foreground = owner
                         except (ConnectionError, RuntimeError, TimeoutError):
@@ -493,7 +493,7 @@ class Companion:
             if not tab.is_connected:
                 continue
             try:
-                if tab.eval_js("document.visibilityState === 'visible' && document.hasFocus()", timeout=.5):
+                if tab.eval_js("document.visibilityState === 'visible' && document.hasFocus()", timeout=.5, operation="read"):
                     self._last_foreground = self._document_owner(tab)
                     return tab
             except Exception:
@@ -553,7 +553,7 @@ class Companion:
             return None
         state = tab.eval_js_once(
             "({hidden:document.visibilityState !== 'visible', focused:document.hasFocus()})",
-            timeout=.5, context_id=document)
+            timeout=.5, context_id=document, operation="read")
         if tab._context_unique_id != document:
             return "Recording cancelled: the source document changed."
         if isinstance(state, dict):
@@ -580,12 +580,12 @@ class Companion:
             return
         try:
             if inbox and not tab.eval_js(
-                    "document.visibilityState === 'visible' && document.hasFocus()", timeout=.5):
+                    "document.visibilityState === 'visible' && document.hasFocus()", timeout=.5, operation="read"):
                 return
             delivered = tab.eval_js_once(
                 "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
                 "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");return true})()",
-                timeout=1., context_id=document)
+                timeout=1., context_id=document, operation="presentation")
             if delivered:
                 tab._displayed_event = event
                 tab._displayed_document = document
