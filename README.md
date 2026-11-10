@@ -17,12 +17,11 @@ or newer with a model configured. Start with a non-sensitive page.
 Run interactively in a terminal. Review the scanner findings and dependency
 preparation before agreeing:
 
-This published pin predates the local catalog-readiness fixes. It is not the
-submission candidate. Replace it only after the fixed commit is published and
-anonymously verified.
+The immutable pin below includes the catalog-readiness fixes and NVIDIA v3 default.
+Catalog admission and retained v2 converter-source acceptance remain under review.
 
 ```sh
-hermes plugins install https://github.com/SilentHacks/look.git --ref 341c68b20ef689661b9d88f8bf23e213e5b25338 --enable
+hermes plugins install https://github.com/SilentHacks/look.git --ref a5a9715bbf7d23261b901098283f0f68ab70eb0b --enable
 hermes config set plugins.isolation in_process
 hermes config set plugins.entries.hermes-gaze.allow_gateway_injection true
 hermes plugins doctor hermes-gaze --ci
