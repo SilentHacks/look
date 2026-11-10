@@ -14,6 +14,9 @@ No public release, catalogue admission, Store listing or release date is asserte
   Added headed disposable-Chrome coverage for actual popup pairing, two windows,
   restricted/incognito exclusion, expiry recovery and staged updates.
 
+- Native-host transport loss no longer risks Python aborting at shutdown while
+  Chrome's input pipe remains open. Input framing and terminal-loss handling stay
+  unchanged; the reader uses unbuffered stdin.
 - Removed the native-consent start command. Use the extension for your usual
   Chrome or `start --separate` for Look's browser.
 - Added connection-scoped `/look actions allow-all` to execute requested actions

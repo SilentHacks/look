@@ -307,7 +307,9 @@ def main():
     args = parser.parse_args()
     try:
         config = configuration(args.config.parent if args.config else None)
-        relay(config["extension_id"], args.action_or_origin, sys.stdin.buffer, sys.stdout.buffer)
+        # The input daemon can outlive the peer. Never hold stdin's buffered lock
+        # during interpreter finalization when Chrome keeps its input pipe open.
+        relay(config["extension_id"], args.action_or_origin, sys.stdin.buffer.raw, sys.stdout.buffer)
     except (OSError, EOFError, ValueError, TypeError):
         # Never print capabilities, native messages, browser text or protocol error bodies.
         sys.exit(1)

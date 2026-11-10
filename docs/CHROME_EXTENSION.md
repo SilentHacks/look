@@ -80,11 +80,12 @@ debugger remains outside this website/other-user boundary.
 ## Update, move or remove
 
 - **Update:** `/look stop` in every running Hermes process using Look. Update the
-  plugin, restart Hermes, and run `/look setup extension` again. In
-  `chrome://extensions`, **Reload** Look, then pair afresh. Repeated setup is safe.
-  It refreshes only Look's owned files and exact-origin registration. A live or
-  waiting Look runtime refuses setup/removal. A conflicting registration or
-  symlink is refused rather than overwritten.
+  plugin, restart Hermes and its gateway, then run `/look setup extension` again.
+  In `chrome://extensions`, **Reload** Look and reload the web page. Run
+  `/look start --extension`, open Look on that page and choose **Connect this tab**.
+  Repeated setup refreshes only Look's owned files and exact-origin registration.
+  A live or waiting Look runtime refuses setup/removal. A conflicting registration
+  or symlink is refused rather than overwritten. Eye calibration is not removed.
   All browser sources now share the account-scoped runtime path
   `~/.cache/hermes-gaze/chrome-profile`, not Hermes-profile data. Restart every
   Hermes process when upgrading. Earlier per-profile separate-browser folders are

@@ -139,6 +139,7 @@ class SessionStartup(unittest.TestCase):
         self.turns.bind(session_key="key", session_id="session")
         self.enterContext(patch.object(service, "_VOICE_TURNS", self.turns))
         self.enterContext(patch.object(type(self.session.cdp), "is_connected", new_callable=PropertyMock, return_value=True))
+        self.enterContext(patch.object(self.session.cdp.chrome, "_ws", Mock()))
         self.session.configure(mode="webcam")
         self.enterContext(patch.object(self.session.cdp, "capture_return_owner", return_value={"browser_target": "source"}))
 
@@ -165,7 +166,7 @@ class SessionStartup(unittest.TestCase):
                         elif action == "cursor":
                             self.session.configure(mode="hover")
                         else:
-                            with patch.object(type(self.session.cdp), "is_connected", new_callable=PropertyMock, return_value=False):
+                            with patch.object(self.session.cdp.chrome, "_ws", None):
                                 release.set(); host._thread.join(2)
                         release.set(); host._thread.join(2)
                         self.assertFalse(host._thread.is_alive())

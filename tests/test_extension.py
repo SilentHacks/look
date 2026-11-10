@@ -97,6 +97,41 @@ class NativeHostTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.object(extension_host, 'runtime_directory', return_value=Path(tmp.name)).start()
 
+    def test_peer_shutdown_exits_with_chrome_input_still_open(self):
+        directory = extension_host.runtime_directory()
+        listener = socket.socket(socket.AF_UNIX)
+        self.addCleanup(listener.close)
+        listener.bind(str(directory / "relay.sock"))
+        (directory / "relay.sock").chmod(0o600)
+        listener.listen(1)
+        listener.settimeout(5)
+        script = (
+            "import runpy, sys\n"
+            f"h = runpy.run_path({extension_host.__file__!r})\n"
+            "g = h['main'].__globals__\n"
+            f"g['configuration'] = lambda *_: {{'extension_id': {EXTENSION!r}}}\n"
+            f"g['runtime_directory'] = lambda: g['Path']({str(directory)!r})\n"
+            "g['pending_request'] = lambda: dict(socket='relay.sock', request='fixture', capability='private')\n"
+            f"sys.argv = ['host', 'chrome-extension://{EXTENSION}/']\n"
+            "h['main']()\n"
+        )
+        with subprocess.Popen([sys.executable, "-c", script], stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as child:
+            try:
+                send_message(child.stdin, dict(op="pair", request="fixture"))
+                peer, _ = listener.accept()
+                with peer, peer.makefile("rwb", buffering=0) as stream:
+                    self.assertEqual(read_message(stream)["op"], "pair")
+                    send_message(stream, dict(op="paired", request="fixture"))
+                    self.assertEqual(read_message(child.stdout)["op"], "paired")
+                    time.sleep(0.1)  # Let the daemon block on the still-open Chrome pipe.
+                    peer.shutdown(socket.SHUT_RDWR)
+                self.assertEqual(child.wait(5), 1)  # Terminal transport loss, not SIGABRT.
+                self.assertEqual(child.stderr.read(), b"")
+            finally:
+                if child.poll() is None:
+                    child.kill()
+
     def test_exact_registration_private_config_and_uninstall(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

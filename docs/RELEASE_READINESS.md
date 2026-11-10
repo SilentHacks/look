@@ -352,6 +352,51 @@ before another action and reconnect explicitly.
 
 
 
+### Popup and tracker integration — 2026-11-10
+
+Master retained tracker lifetime commit `f4669ef` and cherry-picked popup commit
+`6dd0e2c` as `2b18bb3`. The only cherry-pick conflict was additive changelog
+content; both entries remain. Untracked `docs/research/` was left untouched.
+- Full project suite passed: `.venv/bin/python -m unittest discover -s tests -t .`
+  — **370 tests**, **15.161 seconds**, including the native-host shutdown regression.
+  The first combined run exposed four startup subtest failures: the tracker
+  fixture mocked page attachment instead of an approved browser socket. The
+  fixture now models socket presence/loss; no product lifetime guard was weakened.
+
+- Node popup/worker harnesses and syntax checks passed:
+  `node tests/extension_popup.cjs`, `node tests/extension_worker.cjs`,
+  `node --check extension/popup.js`, `node --check extension/worker.js`.
+- Headed CfT **157.0.8103.50** passed **20 checks** with a disposable profile:
+  `.venv/bin/python tests/extension_setup_chrome.py --chrome '/tmp/look-urgent-integrated/browser/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing' --headed --out /tmp/look-integrated-popup-20261110`.
+  The real focused toolbar popup reproduced its unfocused normal owner, then
+  connected through the native host. Two windows, restricted/incognito exclusion,
+  expiry, synthetic-click rejection and stopped restaging/reload passed.
+  Popup owner focus is used only for connection selection; action dispatch still
+  uses strict ordinary foreground guards.
+- Fake-camera handoff passed **7 checks**:
+  `.venv/bin/python tests/webcam_handoff_chrome.py --out /tmp/look-integrated-tracker-20261110`.
+  Real fake-video inference survives missing browsing tabs, explicit fallback and
+  return without replacing the tracker process; Use cursor closes only the tracker.
+- A private subprocess/socket regression reproduced the old native-host shutdown
+  abort (**SIGABRT**, return code `-6`) when the peer closes but Chrome's stdin
+  stays open. This is actionable teardown failure, not connection authorization
+  failure. Reading raw stdin avoids the buffered-reader finalization lock without
+  a join delay or changes to framing, consent, foreground guards or terminal loss.
+
+`~/.hermes/plugins/hermes-gaze` was verified as a symlink to
+`/Users/Abid/Projects/hermes-gaze`. Running Hermes still needs a restart; staged
+extension files still need setup and Chrome Reload. Follow the
+[stopped update sequence](CHROME_EXTENSION.md#update-move-or-remove), including
+gateway restart and page reload. Calibration remains intact.
+
+The README's public pin remains `10ff13d7480e36a884084091be435a739bc1e722`;
+it does not include these local fixes. No push or public-pin refresh was performed.
+No personal browser/profile, accounts, real camera/microphone/speakers, provider
+or Hermes host changes were used. Physical toolbar clicks, signed-in behavior,
+real speech/calibration and provider answers remain user-operated acceptance.
+The headed probe opens the actual popup through Chrome's action API and supplies
+trusted CDP mouse input, not a physical toolbar gesture.
+
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes
 mutation was used. The user trial below is a procedure, not completed acceptance.
