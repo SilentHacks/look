@@ -22,6 +22,10 @@ No public release, catalogue admission, Store listing or release date is asserte
   collector wire contracts exercise the actual JS producer. Live session probes
   require `--prompt-only` and self-contained Hermes dependencies, without private
   host dependency-state sharing.
+- Final integrated extension acceptance: 66 headless checks pass on stable CfT
+  157.0.8103.50. The older CfT 145.0.7632.6 mouse-driver stall reproduces without
+  Look; no product timeout, ownership or replay policy changed. Headed/device/
+  provider acceptance remains user-operated.
 
 Earlier measurements and design iterations remain in dated docs and Git history;
 they are not current platform, hardware, provider or population-accuracy guarantees.

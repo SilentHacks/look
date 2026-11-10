@@ -1,7 +1,7 @@
 # Look Chrome extension — source beta
 
 Use selected tabs in your existing Google Chrome, with stock Hermes unchanged.
-Supported lane: Apple Silicon macOS, Google Chrome 145+, regular HTTP(S) tabs.
+Supported lane: Apple Silicon macOS, current stable Google Chrome, regular HTTP(S) tabs.
 This is an unpacked developer installation, not a Chrome Web Store release.
 
 ## Set up once
@@ -154,6 +154,13 @@ native registration, local pages, a test-only worker driver/inspector and fake
 frontend/device objects. It exercises the real plugin registration, setup command,
 staged native host and transport; automatic fixture pairing is not shipped. It is
 not a released-package install or real provider/device trial.
+
+Final integrated headless acceptance: **66 checks PASS** on official mac-arm64
+Chrome for Testing **157.0.8103.50** (stable at verification). Chrome 145 is a
+protocol floor, not a verified compatibility matrix: CfT **145.0.7632.6** stalls
+the probe's debugger `mouseMoved` command even without Look installed. That build
+is not accepted here; headed/physical behavior on 145 is unverified. Use current
+stable Chrome for the trial. See the [release evidence](RELEASE_READINESS.md#integrated-verification--2026-11-10).
 
 Headless checks do not establish headed macOS foreground behavior, physical input,
 signed-in acceptance, multiple personal profiles/windows, other extensions,

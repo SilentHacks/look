@@ -160,16 +160,26 @@ fixed; integrated stock validation reports **zero warnings**.
   repeated **actual shell** `hermes look setup-extension` passed in a private home.
   The native registration uses only the fixed extension origin. Final update,
   staged-host relocation/status and scoped-removal receipts accompany the handoff.
-- **Browser acceptance blocker:** available bundled Chrome for Testing
-  **145.0.7632.6** passed 11 setup/pairing/opaque-frame checks, then the test-only
-  `Input.dispatchMouseEvent` (`mouseMoved`) lost its reply; the generation revoked
-  with “Chrome reply lost; outcome unknown. Do not replay the action.”
-  Trusted-input/answer checks and the other three scenarios were not reached.
-  No retry, timeout increase, browser-policy bypass or runtime workaround was added.
-  This is not a passing final browser run or proof of a product-only root cause.
-  Earlier setup-track **157.0.8103.50 / 66-check** proof is historical attribution,
-  not a result on this integrated candidate. Resolve/retest in a supported isolated
-  browser before treating the extension lane as accepted or recording a success claim.
+- **Final extension browser acceptance: 66 checks PASS** on the integrated
+  `0ef0c2dd` runtime with official mac-arm64 Chrome for Testing **157.0.8103.50**,
+  the [current stable channel](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
+  at verification. All four disposable-profile scenarios completed: private
+  trusted input/answer, lost reply, native-host loss and worker reload. The saved
+  screenshot shows the private answer; website text/selection/key leakage checks,
+  focus/route/document refusal, guarded new tabs and Stop passed.
+- The earlier **145.0.7632.6** blocker is isolated to that build's **headless
+  `chrome.debugger` mouse driver**, not Look: a standalone extension with no Look
+  scripts/native host reproduced the missing `mouseMoved` reply and absent mouse
+  event while a concurrent `Runtime.evaluate` succeeded. The same isolated command
+  replied in 10.4ms and delivered a trusted event on 157. The instrumented Look
+  run on 145 revoked at its unchanged three-second deadline. No replay, timeout
+  increase, ownership relaxation or product workaround was added.
+- **145 is not browser-accepted by this work.** Its headed/physical behavior is
+  unverified; the headless result does not establish that all Chrome 145 builds
+  or ordinary user input are broken. Use current stable Chrome for the user trial.
+  The native-consent lane's 145 protocol floor is separate from extension acceptance.
+- Relevant follow-up regressions: **56 tests PASS** across extension, native
+  consent, first-run and companion ownership; Node worker guards PASS.
 
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes
@@ -179,8 +189,8 @@ mutation was used. The user trial below is a procedure, not completed acceptance
 
 ### Before a public source-beta announcement
 
-1. Review the final immutable local commit and the browser blocker above. Clear
-   applicable browser acceptance before claiming release/recording success.
+1. Review the final immutable local commit and the version-specific browser
+   evidence above. Headless extension acceptance is not headed/device acceptance.
 2. Owner reviews personal Git metadata, historical raw traces/developer paths,
    final source archive, intended refs and any demo media; approve the precise
    publication scope. No automatic rewrite or broad ref publication.
