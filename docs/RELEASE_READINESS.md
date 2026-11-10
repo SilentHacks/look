@@ -116,7 +116,7 @@ The configured SSH origin was left unchanged.
 
 Anonymous `git ls-remote` reported public `master` at
 [`10ff13d7480e36a884084091be435a739bc1e722`](https://github.com/SilentHacks/look/commit/10ff13d7480e36a884084091be435a739bc1e722).
-The README uses this full SHA with the official stock Hermes
+The README then used this full SHA with the official stock Hermes
 [Git source installer](https://github.com/NousResearch/hermes-agent/blob/2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19/hermes_cli/plugins_cmd_install.py),
 not a catalogue name, release tag or unpublished local commit.
 
@@ -140,10 +140,9 @@ The archived host printed the same missing native-tool/install-stamp warnings
 described below. This verifies plugin installation, not a fresh Hermes application
 install or a working browser/provider/device session.
 
-**Pin limit:** this public commit predates the local card-sizing, exact cancellation
-and navigation changes. Publish the integrated fixes separately, then anonymously
-fetch and repeat installation/doctor before updating the README pin.
-A local commit, including this documentation change, is not a public install pin.
+**Historical pin limit:** that public commit predates the card-sizing, exact
+cancellation and navigation changes. The later publication section records the
+new source pin separately; these installation results do not verify that newer pin.
 
 ### Earlier local-source installation
 
@@ -389,8 +388,8 @@ extension files still need setup and Chrome Reload. Follow the
 [stopped update sequence](CHROME_EXTENSION.md#update-move-or-remove), including
 gateway restart and page reload. Calibration remains intact.
 
-The README's public pin remains `10ff13d7480e36a884084091be435a739bc1e722`;
-it does not include these local fixes. No push or public-pin refresh was performed.
+At this integration, the README's public pin was still
+`10ff13d7480e36a884084091be435a739bc1e722`; no push or pin refresh had occurred.
 No personal browser/profile, accounts, real camera/microphone/speakers, provider
 or Hermes host changes were used. Physical toolbar clicks, signed-in behavior,
 real speech/calibration and provider answers remain user-operated acceptance.
@@ -400,6 +399,23 @@ trusted CDP mouse input, not a physical toolbar gesture.
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes
 mutation was used. The user trial below is a procedure, not completed acceptance.
+
+### Source publication and install pin refresh — 2026-11-10
+
+Owner-authorized branch cleanup published the reviewed popup/tracker integration
+`341c68b20ef689661b9d88f8bf23e213e5b25338` to `SilentHacks/look` master by
+fast-forward from `3166330`. The SSH origin now uses the renamed public repository.
+The README pins that already-pushed product commit, not the documentation commit
+that updates the command.
+
+Targeted verification at the product commit passed: **45 Python tests** across
+extension, webcam startup and calibration return, plus the Node popup and worker
+harnesses. The earlier integrated browser evidence above still describes its
+original runs; no personal browser, device, provider or installed host was used.
+The temporary-home stock installer/doctor was **not repeated for this newer pin**;
+the installation results for `10ff13d7` above remain historical, not verification
+of the new command. Headed/device/provider and announcement gates remain separate.
+
 
 ## Exact remaining release gates
 

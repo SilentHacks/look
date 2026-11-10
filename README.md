@@ -18,7 +18,7 @@ Run interactively in a terminal. Review the scanner findings and dependency
 preparation before agreeing:
 
 ```sh
-hermes plugins install https://github.com/SilentHacks/look.git --ref 10ff13d7480e36a884084091be435a739bc1e722 --enable
+hermes plugins install https://github.com/SilentHacks/look.git --ref 341c68b20ef689661b9d88f8bf23e213e5b25338 --enable
 hermes config set plugins.isolation in_process
 hermes config set plugins.entries.hermes-gaze.allow_gateway_injection true
 hermes plugins doctor hermes-gaze --ci
