@@ -122,6 +122,12 @@ four-second Python-renewed lease releases intercepted input even if cleanup cann
 run. No reconnect, fallback-tab attachment or mutation replay occurs. A missing
 mutation reply means **unknown outcome**: inspect the website before another action.
 
+During navigation, explicit missing-frame/context rejections of `Page.getFrameTree`
+and the fixed `Look.lease` ping return to the existing bounded rearm without ending
+the connection. The worker never retries commands. Arbitrary `Runtime.evaluate`,
+missing replies and unclassified errors retain terminal handling; lease and rearm
+deadlines are unchanged.
+
 The alternative without an extension remains `/look start --existing`, then
 `/look start --existing --accept` with native Chrome consent. After Stop,
 `/look start --separate` explicitly selects Look's separate browser. No source is

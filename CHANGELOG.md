@@ -4,6 +4,10 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Extension navigation recovery preserves the connection for explicitly classified
+  frame/context rejections of frame-tree reads and the fixed lease ping. Existing
+  bounded rearm handles recovery; arbitrary evaluations, missing replies and
+  mutations remain terminal and are never replayed.
 - Refreshed help, setup, settings, error messages and current user guides.
   Privacy disclosures, user choices and browser-action safeguards are unchanged.
 - Grouped audio, runtime and browser internals into packages while keeping the

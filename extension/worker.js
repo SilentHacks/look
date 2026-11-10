@@ -185,13 +185,26 @@ async function dispatch(message) {
       if (method === 'Runtime.evaluate' && ![...tab.contexts.values()].includes(params.uniqueContextId)) fail('Unknown isolated document.');
       if (method === 'Runtime.addBinding' && (params.name !== BINDING || params.executionContextName !== WORLD)) fail('Unknown Look binding.');
       if (method === 'Page.createIsolatedWorld' && params.worldName !== WORLD) fail('Unknown Look world.');
-      if (method === 'Look.focus') {
-        result = {foreground: await foreground(tab), document_current: params.uniqueContextId === tab.document};
-      } else if (method === 'Look.lease') {
-        if (params.uniqueContextId !== tab.document) fail('Lease belongs to another document.');
-        result = await direct(tab, 'Runtime.evaluate', {
-          expression: 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true', uniqueContextId: tab.document});
-      } else result = await direct(tab, method, params);
+      try {
+        if (method === 'Look.focus') {
+          result = {foreground: await foreground(tab), document_current: params.uniqueContextId === tab.document};
+        } else if (method === 'Look.lease') {
+          if (params.uniqueContextId !== tab.document) fail('Lease belongs to another document.');
+          result = await direct(tab, 'Runtime.evaluate', {
+            expression: 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true', uniqueContextId: tab.document});
+        } else result = await direct(tab, method, params);
+      } catch (error) {
+        // These fixed lifecycle reads may meet a disappearing frame/context. Return
+        // the rejection to Python's bounded rearm; never replay arbitrary evaluation.
+        // Timeouts, detach and all unclassified failures still end this generation.
+        if (['Page.getFrameTree', 'Look.lease'].includes(method) && !error.look &&
+            /^(Cannot find context with specified id|Cannot find execution context with given id|Execution context was destroyed\.?|No frame with given id found)\.?$/.test(error.message) &&
+            !dead && port === connection && tabs.get(tab.id) === tab && !tab.closed) {
+          post({id, sessionId, error: {code: -32000, message: error.message}}, connection);
+          return;
+        }
+        throw error;
+      }
       if (dead || tabs.get(tab.id) !== tab) return;
       if (method === 'Page.getFrameTree') tab.mainFrame = result.frameTree.frame.id;
       if (method === 'Page.addScriptToEvaluateOnNewDocument') tab.scripts.add(result.identifier);

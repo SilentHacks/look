@@ -48,6 +48,9 @@ document.querySelector('#delete').onclick=()=>fetch('/mutation',{method:'POST'})
 
 class Page(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith('/redirect'):
+            self.send_response(302); self.send_header('Location', '/product?' + self.path.partition('?')[2]); self.end_headers()
+            return
         if self.path == '/gate':
             self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
             self.wfile.write(json.dumps({'go': self.server.go}).encode())
@@ -76,7 +79,20 @@ def fixture_worker(url, client='main', gated=False):
     # Test-only raw inspector and gesture driver. Production worker refuses these methods.
     return r'''
 const fixtureRoot = root;
+let fixtureFailure = '', fixtureFailures = 0;
+const fixtureSend = chrome.debugger.sendCommand.bind(chrome.debugger);
+chrome.debugger.sendCommand = async (target, method, params) => {
+  if (fixtureFailure && (fixtureFailure === method ||
+      fixtureFailure === 'Look.lease' && method === 'Runtime.evaluate' &&
+      params.expression === 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true')) {
+    fixtureFailure = ''; fixtureFailures++;
+    throw Error('Cannot find context with specified id');
+  }
+  return fixtureSend(target, method, params);
+};
 root = async (method, params) => {
+  if (method === 'Test.failRead') { fixtureFailure = params.method; return {}; }
+  if (method === 'Test.failures') return {count:fixtureFailures};
   if (method === 'Test.command') {
     const tab = tabs.get(Number(params.target)) || [...tabs.values()][0];
     return direct(tab, params.method, params.params || {});
@@ -268,6 +284,65 @@ def scenario(chrome, mode, out=None):
                 time.sleep(.15)
                 check(name + '_timers_disabled', evaluate('!window.fixtureTimer', context))
             check('website_cannot_access_isolated_api', evaluate('typeof window.__HERMES_GAZE_OVERLAY__ === "undefined"'))
+            if mode == 'navigation':
+                generation = root.generation
+                def question(number):
+                    raw('Input.dispatchMouseEvent', dict(type='mouseMoved', x=105, y=105))
+                    key(tab.overlay_config['hotkey'], 'Alt' if tab.overlay_config['hotkey'] == 'AltRight' else '`')
+                    card = tab._ui_frames['card'][1]
+                    until(lambda: evaluate('!!document.querySelector("#hg-input")', card))
+                    click('#hg-input')
+                    until(lambda: evaluate('document.activeElement?.id==="hg-input" && document.hasFocus()', card))
+                    evaluate('document.querySelector("#hg-input").value="";true', card)
+                    raw('Input.insertText', dict(text=f'Explain product {number}'))
+                    key('Enter', 'Enter')
+                    until(lambda: bool(turns.active) and ctx.inject_message.call_count == number)
+                    run = turns.active
+                    turn = f'navigation-turn-{number}'
+                    turns.pre(session_id='fixture-session', turn_id=turn, user_message=run['wire'])
+                    turns.post(session_id='fixture-session', turn_id=turn, assistant_response=f'## Product\n\nLOCAL_PRODUCT_ANSWER_{number}')
+                    turns.end(session_id='fixture-session', turn_id=turn)
+                    raw('Input.dispatchMouseEvent', dict(type='mouseMoved', x=10, y=10))
+                    until(lambda: evaluate(f'document.body.textContent.includes("LOCAL_PRODUCT_ANSWER_{number}")', card), 20)
+                    check(f'question_{number}_accepted_and_answered_after_rearm', True)
+                question(1)
+                for number in (2, 3):
+                    old_document = tab._context_unique_id
+                    root.command('Test.failRead', {'method':'Page.getFrameTree'})
+                    raw('Page.navigate', {'url':url+f'redirect?product={number}'})
+                    until(lambda: tab.is_connected and tab._context_unique_id != old_document and bool(tab._ui_frames), 15)
+                    check(f'redirect_product_{number}_rearmed_same_generation',
+                          root.live and root.generation == generation and root.command('Test.failures')['count'] == (number - 1) * 2 - 1)
+                    with unittest_error():
+                        session.cdp.eval_js_once('window.staleProductMutation=true', target=target, document=old_document)
+                    check(f'product_{number}_rejects_stale_owner', not evaluate('!!window.staleProductMutation'))
+                    root.command('Test.failRead', {'method':'Look.lease'})
+                    tab._submit(tab._ui_message(json.dumps({'type':'_ui_ping'})), 3)
+                    check(f'lease_rejection_{number}_keeps_generation',
+                          root.live and root.command('Test.failures')['count'] == (number - 1) * 2)
+                    question(number)
+                root.command('Test.background')
+                until(lambda: not evaluate('document.hasFocus()'), 3)
+                card = tab._ui_frames['card'][1]
+                with unittest_error():
+                    tab._submit(tab._render_ui({'frame':'card','view':'compose','title':'BACKGROUND_NAVIGATION_MARKER'}), 3)
+                check('navigation_recovery_does_not_allow_background_private_render',
+                      not evaluate('document.body.textContent.includes("BACKGROUND_NAVIGATION_MARKER")', card))
+                root.command('Test.focus', {'target':target})
+                until(lambda: evaluate('document.hasFocus()'))
+                check('return_to_selected_product_keeps_connection', root.live and root.generation == generation)
+                for kind in ('mousePressed', 'mouseReleased'):
+                    raw('Input.dispatchMouseEvent', dict(type=kind, button='left', clickCount=1, x=105, y=105))
+                with patch('hermes_gaze.audio.voice.recognition_ready', return_value=True), \
+                     patch.object(session.microphone, 'start', return_value={'ok':True}) as start:
+                    raw('Input.dispatchKeyEvent', dict(type='keyDown', code='Space', key=' '))
+                    until(lambda: start.called, 3)
+                    key('Escape', 'Escape')
+                    raw('Input.dispatchKeyEvent', dict(type='keyUp', code='Space', key=' '))
+                    check('space_hold_after_redirect_reaches_native_capture_without_device', start.call_count == 1)
+                command('stop')
+                until(lambda: not root.live)
+                return checks
             if mode == 'surface':
                 raw('Input.dispatchMouseEvent', dict(type='mouseMoved', x=105, y=105))
                 key(tab.overlay_config['hotkey'], 'Alt' if tab.overlay_config['hotkey'] == 'AltRight' else '`')
@@ -396,10 +471,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--chrome', required=True)
     parser.add_argument('--out', type=Path)
+    parser.add_argument('--mode', action='append', choices=(
+        'navigation', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))
     args = parser.parse_args()
     if args.out: args.out.mkdir(parents=True, exist_ok=True)
-    results = {mode: scenario(args.chrome, mode, args.out) for mode in (
-        'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale')}
+    results = {mode: scenario(args.chrome, mode, args.out) for mode in (args.mode or (
+        'navigation', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))}
     if args.out:
         (args.out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(json.dumps(results, indent=2))

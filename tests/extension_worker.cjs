@@ -25,7 +25,7 @@ function fixture() {
     tabs.set(1,{id:1,window:7,session:'selected',closed:false,scripts:new Set(),contexts:new Map([[1,'doc']]),document:'doc',route:2});
   `, context);
   const command = (method = 'Runtime.evaluate') => {
-    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',expression:'mutation',_look_owner:{document:'doc',route:2}}};
+    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',expression:'mutation',worldName:'hermes-gaze',_look_owner:{document:'doc',route:2}}};
     return vm.runInContext('dispatch(request)', context);
   };
   return {context, messages, commands, listeners, command,
@@ -34,6 +34,56 @@ function fixture() {
     move() { windowId = 8; }};
 }
 (async () => {
+  // Only explicitly safe lifecycle reads may leave the generation available for rearm.
+  for (const method of ['Page.getFrameTree', 'Look.lease']) {
+    const read = fixture();
+    read.context.chrome.debugger.sendCommand = async (_, name) => {
+      read.commands.push({method:name});
+      throw Error('Cannot find context with specified id');
+    };
+    await read.command(method);
+    assert.equal(vm.runInContext('dead', read.context), false, method + ' must not end navigation recovery');
+    assert.match(read.messages[0].error.message, /Cannot find context/);
+    assert.equal(read.commands.length, 1, 'worker must not retry even a safe read');
+    read.context.chrome.debugger.sendCommand = async () => ({frameTree:{frame:{id:'main'}}});
+    await read.command('Page.getFrameTree');
+    assert.equal(read.messages[1].result.frameTree.frame.id, 'main', 'next rearm read must use the same generation');
+  }
+  for (const [method, message] of [
+    ['Runtime.evaluate', 'Cannot find context with specified id'],
+    ['Page.navigate', 'No frame with given id found'],
+    ['Input.dispatchKeyEvent', 'Execution context was destroyed.'],
+    ['Page.createIsolatedWorld', 'No frame with given id found'],
+    ['Page.getFrameTree', 'Target closed'],
+    ['Look.lease', 'Debugger is not attached'],
+    ['Page.getFrameTree', 'Chrome did not reply. Reconnect, but do not repeat the action.'],
+  ]) {
+    const failed = fixture();
+    failed.context.chrome.debugger.sendCommand = async (_, name, params) => {
+      failed.commands.push({method:name, params});
+      throw Error(message);
+    };
+    await failed.command(method);
+    assert.equal(vm.runInContext('dead && tabs.size===0', failed.context), true, method + ': ' + message);
+    assert.equal(failed.messages.length, 0, 'ambiguous/terminal failures must not become retryable replies');
+    assert.ok(failed.commands.filter(c => c.method === method && (method !== 'Runtime.evaluate' || c.params.expression === 'mutation')).length <= 1, 'no mutation replay');
+  }
+  const timeout = fixture();
+  timeout.context.setTimeout = fn => setTimeout(fn, 0);
+  timeout.context.chrome.debugger.sendCommand = () => new Promise(() => {});
+  await timeout.command('Look.lease');
+  assert.equal(vm.runInContext('dead', timeout.context), true, 'a missing lease reply remains terminal');
+  const detached = fixture();
+  let rejectRead;
+  detached.context.chrome.debugger.sendCommand = () => new Promise((_, reject) => { rejectRead = reject; });
+  const reading = detached.command('Page.getFrameTree');
+  await new Promise(resolve => setImmediate(resolve));
+  const rejectOld = rejectRead;
+  detached.listeners.detach({tabId:1});
+  rejectOld(Error('Cannot find context with specified id'));
+  await reading;
+  assert.equal(vm.runInContext('dead', detached.context), true, 'safe read failure cannot revive a detached generation');
+  assert.equal(detached.messages.length, 0);
   let f = fixture();
   f.focus(false);
   await f.command();
