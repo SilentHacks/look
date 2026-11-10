@@ -843,7 +843,10 @@ On macOS, prefix it with
 `sandbox-exec -p '(version 1)(allow default)(deny network*)'` to prove offline use.
 
 
-Development smoke: use Python from a Hermes environment:
+Development smoke: use Python from a self-contained virtualenv with Hermes and
+its dependencies installed. The managed store interpreter alone is insufficient:
+the disposable home has no dependency selection. The harness does not share or
+modify the host's dependency state.
 
 ```bash
 python benchmark/probe_sessions.py --prompt-only --trials 10 --sources tui --require-pass --output /tmp/gaze-prompts-neutral.json

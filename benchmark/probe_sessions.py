@@ -244,7 +244,6 @@ def run(args) -> dict:
     import yaml
     from hermes_cli.config import load_config
     from hermes_constants import get_hermes_home
-    from pm.environments import installs_root
 
     root = args.plugin_root.resolve() if args.plugin_root else Path(__file__).resolve().parents[1]
     config = load_config()
@@ -255,8 +254,6 @@ def run(args) -> dict:
         temp = Path(directory)
         (temp / "plugins").mkdir()
         (temp / "skills").mkdir()  # Hermes omits even plugin skill hints when this directory is absent.
-        if installs_root().is_dir():
-            (temp / "installs").symlink_to(installs_root(), target_is_directory=True)
         (temp / "plugins" / "hermes-gaze").symlink_to(root, target_is_directory=True)
         for name in (".env", "auth.json"):
             if (home / name).exists():
