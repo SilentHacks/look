@@ -27,6 +27,7 @@ HELP = """/look · /look start     Start in Chrome
 /look calibrate         Set up eye tracking
 /look cursor            Turn off the camera; use the pointer
 /look setup             Prepare local speech recognition
+/look setup extension   Prepare the existing-Chrome extension
 /look setup eyes        Prepare eye tracking and open its camera
 /look diagnostics       Show technical details
 /look help advanced     More commands"""
@@ -39,7 +40,7 @@ ADVANCED_HELP = """/look demo                         Open the practice dashboar
 /look benchmark                    Run the simulated benchmark
 /look diagnostics timing           Save recent release traces
 /gaze remains an alias for /look. connect=start; disconnect=stop; voice=listen; timing=diagnostics timing.
-Shell: hermes look status|diagnostics|setup-speech|demo|resolve|listen|benchmark.
+Shell: hermes look status|diagnostics|setup-extension [--uninstall]|setup-speech|demo|resolve|listen|benchmark.
 Start and stop inside Hermes; shell commands do not bind or stop a running conversation."""
 
 
@@ -105,12 +106,38 @@ def _tracker_summary(session) -> str:
     return "Eye tracking is on."
 
 
+def _setup_extension(*, remove=False):
+    if not apple_silicon_mac():
+        return 1, "The Look extension supports Google Chrome on Apple Silicon Mac only."
+    from .browser.extension_host import install, install_directory, uninstall
+    from .browser.ownership import acquire_runtime_lease
+    try:
+        # The same lock as every browser source: never update a live/waiting generation.
+        with acquire_runtime_lease(get_shared_session().cdp._owned_chrome.profile):
+            if remove:
+                uninstall()
+                return 0, "Look extension files and native registration removed. Remove Look in chrome://extensions."
+            install()
+    except ValueError as exc:
+        return 1, str(exc)
+    except OSError:
+        return 1, ("Look extension setup could not finish. /look stop in every Hermes process, then try again. "
+                "Check file access if it still fails; docs/CHROME_EXTENSION.md has recovery steps.")
+    return 0, ("Look extension prepared. In Chrome: chrome://extensions → Developer mode → Load unpacked.\n"
+            "Select this folder (or Reload Look if already installed):\n"
+            + str(install_directory() / "unpacked") +
+            "\nThen open an ordinary web tab and run /look start --extension in this conversation. "
+            "Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
+
+
 def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str:
     argv = (raw_args or "").strip().split()
     sub = argv[0].lower() if argv else "start"
     tail = [arg.lower() for arg in argv[1:]]
     if sub in ("help", "--help", "-h"):
         return ADVANCED_HELP if tail == ["advanced"] else HELP
+    if sub == "setup" and tail in (["extension"], ["extension", "uninstall"]):
+        return _setup_extension(remove=tail[-1] == "uninstall")[1]
     session = get_shared_session()
 
     if sub == "diagnostics":
@@ -152,9 +179,10 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         try:
             ticket = session.cdp.start_extension(on_ready=on_ready, on_error=on_error)
         except (OSError, ValueError):
-            return "Extension connection unavailable. Stop Look first; check native-host setup in docs/CHROME_EXTENSION.md."
-        return ("In Chrome, open Look and connect this tab with this one-use ticket (expires in 120 seconds):\n"
-                + ticket + "\n/look stop cancels. Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
+            return "Extension connection unavailable. /look stop, then /look setup extension; retry /look start --extension."
+        return ("Open Look from Chrome’s Extensions menu on the web tab you want to use. Paste this one-use ticket and choose Connect this tab (expires in 120 seconds):\n"
+                + ticket + "\n/look stop cancels. If it expires: /look stop, then /look start --extension. "
+                "Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
 
     if sub in ("start", "connect") and (tail or session.cdp.source == "existing"):
         from .browser.consent import DISCLOSURE, PREPARE
@@ -295,6 +323,8 @@ def _setup_cli(subparser: argparse.ArgumentParser) -> None:
     p_diag.add_argument("detail", nargs="?", choices=("timing",))
     p_speech = subs.add_parser("setup-speech", help="Download the offline voice without playing audio")
     p_speech.add_argument("--voice", default="Russell", help="English catalogue voice name")
+    p_extension = subs.add_parser("setup-extension", help="Prepare or update the existing-Chrome beta extension")
+    p_extension.add_argument("--uninstall", action="store_true", help="Remove Look's extension files and native registration")
     p_demo = subs.add_parser("demo", help="Open the practice dashboard")
     p_demo.add_argument("--mode", choices=("hover", "simulated"), default="hover")
     p_listen = subs.add_parser("listen", help="Record, transcribe and resolve a short question")
@@ -309,6 +339,10 @@ def _setup_cli(subparser: argparse.ArgumentParser) -> None:
 
 def _run_cli(args: argparse.Namespace) -> int:
     sub = getattr(args, "gaze_subcommand", None) or "status"
+    if sub == "setup-extension":
+        code, result = _setup_extension(remove=args.uninstall)
+        print(result)
+        return code
     if sub == "setup-speech":
         from .speech import setup
         setup(args.voice)

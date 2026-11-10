@@ -91,5 +91,27 @@ function fixture() {
   vm.runInContext(`dead=false; port=replacement; generation='b'.repeat(32); tabs.clear()`, f.context);
   finish({targetInfos: []}); await old;
   assert.equal(replacement.length, 0, 'old native generation must not reply to a replacement connection');
+  // Setup health is a ticket-free, read-only one-shot; it never creates a paired port.
+  f = fixture();
+  await vm.runInContext('stop()', f.context);
+  const probes = [];
+  f.context.chrome.runtime.sendNativeMessage = async (...args) => { probes.push(args); return {op:'status',version:1}; };
+  const popup = message => new Promise(resolve => f.listeners.popup(message,
+    {id:'look',url:'chrome-extension://look/popup.html'}, resolve));
+  assert.equal((await popup({op:'status'})).ok, true);
+  assert.equal(probes.length, 1);
+  assert.equal(probes[0][1].op, 'status');
+  assert.equal('ticket' in probes[0][1], false);
+  assert.equal(vm.runInContext('port===null && dead', f.context), true);
+  f.context.chrome.runtime.sendNativeMessage = async () => { throw Error('private platform failure'); };
+  const absent = await popup({op:'status'});
+  assert.equal(absent.ok, false);
+  assert.equal(absent.error.includes('private platform failure'), false);
+  f.context.chrome.tabs.query = async () => [{id:1,active:true,windowId:7,url:'chrome://extensions'}];
+  let nativeStarts = 0;
+  f.context.chrome.runtime.connectNative = () => { nativeStarts++; throw Error('must not open'); };
+  assert.equal((await popup({op:'pair',ticket:'bad'})).ok, false);
+  assert.equal((await popup({op:'pair',ticket:'a'.repeat(24)+'.'+'b'.repeat(64)})).ok, false);
+  assert.equal(nativeStarts, 0, 'malformed tickets/restricted tabs must not start the host or consume a ticket');
   console.log('PASS extension foreground/activation races, moved-tab, route, native-focus, stale-creation, forged-popup and stale-port guards');
 })().catch(error => { console.error(error); process.exitCode = 1; });

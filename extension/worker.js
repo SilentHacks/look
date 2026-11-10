@@ -5,7 +5,10 @@ const tabs = new Map();
 let port = null, generation = '', ready = null, pairing = null, dead = true;
 let closing = Promise.resolve(), lastPython = 0;
 let foregroundRevision = 0;
-const fail = text => { throw Error(text); };
+const safeError = text => Object.assign(Error(text), {look: true});
+const fail = text => { throw safeError(text); };
+const SETUP = 'Run /look setup extension in Hermes, reload Look in chrome://extensions, then try again.';
+const FRESH_TICKET = 'Ticket refused or expired. In Hermes: /look stop, then /look start --extension. Paste the new ticket here.';
 const urlAllowed = url => /^https?:\/\//.test(url || '');
 const bounded = promise => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Error('Chrome did not reply. Reconnect explicitly; do not repeat an action.')), 5000))]);
 async function foreground(tab) {
@@ -69,11 +72,17 @@ function post(value, connection = port) {
 async function pair(ticket, tab) {
   await closing;
   if (port || !dead) fail('Disconnect Look before pairing another session.');
-  if (!/^[0-9a-f]{24}\.[0-9a-f]{64}$/.test(ticket || '')) fail('Enter the current pairing ticket from Hermes.');
+  if (!/^[0-9a-f]{24}\.[0-9a-f]{64}$/.test(ticket || '')) fail('Paste the complete pairing ticket from /look start --extension.');
+  if (!tab || tab.incognito || !urlAllowed(tab.pendingUrl || tab.url)) fail('Choose an ordinary web tab in a regular Chrome window.');
   dead = false;
   const current = chrome.runtime.connectNative('org.look.companion');
   port = current;
-  current.onDisconnect.addListener(() => { void chrome.runtime.lastError; if (port === current) void stop(); });
+  current.onDisconnect.addListener(() => {
+    const error = chrome.runtime.lastError?.message || '';
+    if (port !== current) return;
+    if (pairing) pairing.reject(safeError(/not found|forbidden|start native/i.test(error) ? SETUP : FRESH_TICKET));
+    void stop();
+  });
   current.onMessage.addListener(message => {
     if (port !== current || dead) return;
     lastPython = Date.now();
@@ -91,7 +100,7 @@ async function pair(ticket, tab) {
     await bounded(new Promise((resolve, reject) => {
       pairing = {resolve, reject}; current.postMessage({op: 'pair', ticket});
     }));
-  } catch (_) { await stop(); fail('Pairing failed or expired. Start Look in Hermes again.'); }
+  } catch (error) { if (port === current) await stop(); throw error; }
 }
 async function root(method, params) {
   if (method === 'Look.ready') { await ready; return {}; }
@@ -224,7 +233,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (message.op === 'pair') await pair(message.ticket, tab);
       else await select(tab, connection);
     } else if (message.op !== 'status') fail('Unsupported popup action.');
+    if (message.op === 'status' && dead) {
+      let host;
+      try { host = await bounded(chrome.runtime.sendNativeMessage('org.look.companion', {op: 'status'})); }
+      catch (_) { fail(SETUP); }
+      if (host?.op !== 'status' || host.version !== 1) fail(SETUP);
+    }
     return {ok: true, connected: !dead && !!generation};
-  })().then(reply, () => reply({ok: false, error: 'Look could not connect. Start a fresh connection in Hermes; check native-host setup and Chrome debugger access.'}));
+  })().then(reply, error => reply({ok: false, error: error.look ? error.message : 'Chrome did not complete the connection. Check debugger access, then /look stop and /look start --extension in Hermes.'}));
   return true;
 });

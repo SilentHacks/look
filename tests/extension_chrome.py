@@ -32,8 +32,8 @@ from hermes_gaze.browser import extension_host
 from hermes_gaze.config import GazeConfig
 
 HERE = Path(__file__).resolve().parents[1]
-# Public fixture key only: stable temporary extension ID, not a credential or Store identity.
-KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyDgP264bQnXS+Z2YprKicyi9ANMJd3ZRgnhlvCoIJyJ3nZnAtmbEhbHVzIVpB3NPhB6eWcaGdz0j7M7WwizD6+gdhJwpraPMDPaJTmAjScYrDIr3TW+ISdhfy4hlvad2KjtXnY+a5jDrq8xyLxiX98Xpu39rdm6Qm0nDEfI7gTP1n1TBRLpp0LalS+RQ1wLp1cEgivNqtGa5DD7GZnzhpUwhSqaTumQJtWvm07klh+eY5LPKeXl4gLn/AM+9P1Scq+hssjtwQB/3Gpf9IRLR05G9ZN8mviP1xOYGRZ0evOVu/WWIuH8aMMJEprg6KsAx8um+FOB20yNrVzAXIBWtTwIDAQAB'
+# The shipped public key keeps setup, relocation and the real Chrome origin in agreement.
+KEY = json.loads((HERE / 'extension/manifest.json').read_text())['key']
 EXTENSION = ''.join(chr(97 + int(c, 16)) for c in hashlib.sha256(base64.b64decode(KEY)).hexdigest()[:32])
 PAGE = b'''<!doctype html><title>Look disposable adapter fixture</title>
 <style>body{font:20px system-ui;padding:60px}button{padding:20px}</style>
@@ -120,26 +120,29 @@ def scenario(chrome, mode, out=None):
         stack.enter_context(patch.object(plugin, '_handle_slash_command', wraps=cli._handle_slash_command))
         native = directory / 'native'
         profile = directory / 'profile'
-        extension_host.install(EXTENSION, directory=native, manifests=profile / 'NativeMessagingHosts')
-        stack.enter_context(patch('hermes_gaze.browser.extension.configuration', lambda: extension_host.configuration(native)))
+        stack.enter_context(patch.object(extension_host, 'install_directory', return_value=native))
+        stack.enter_context(patch.object(extension_host, 'manifest_directory', return_value=profile / 'NativeMessagingHosts'))
+        command('setup extension')
+        check('setup_stages_native_host_and_fixed_extension_without_binding', (native / 'unpacked/manifest.json').is_file() and not turns.connected)
+        command('setup extension')
+        check('repeated_setup_retains_exact_origin', extension_host.configuration(native)['extension_id'] == EXTENSION)
         # Wrapper records only its own child PID; the real installed host main/framing/relay runs unchanged.
         wrapper = directory / 'host_entry.py'
         wrapper.write_text('import os,runpy\nfrom pathlib import Path\n'
                            + f'Path({str(directory / "host.pid")!r}).write_text(str(os.getpid()))\n'
-                           + f'runpy.run_path({str(HERE / "browser/extension_host.py")!r},run_name="__main__")\n')
+                           + f'runpy.run_path({str(native / "host.py")!r},run_name="__main__")\n')
         launcher = native / 'host'
-        launcher.write_text(launcher.read_text().replace(str(HERE / 'browser/extension_host.py'), str(wrapper)))
+        launcher.write_text(launcher.read_text().replace(str(native / 'host.py'), str(wrapper)))
         result = command('start --extension', session_id='fixture-session', session_key='fixture-key', platform='fixture')
         root = session.cdp.chrome
         ticket = root._ticket
         check('registered_plugin_creates_explicit_one_use_pairing', ticket and ticket in result and not turns.connected)
-        extension = directory / 'extension'
-        extension.mkdir()
-        manifest = json.loads((HERE / 'extension/manifest.json').read_text())
-        manifest['key'] = KEY
+        check('waiting_generation_refuses_setup_and_uninstall', cli._setup_extension()[0] == 1 and cli._setup_extension(remove=True)[0] == 1)
+        extension = native / 'unpacked'
+        manifest = json.loads((extension / 'manifest.json').read_text())
         manifest['host_permissions'] = [url + '*']  # Only the disposable error reporter needs this.
         (extension / 'manifest.json').write_text(json.dumps(manifest))
-        (extension / 'worker.js').write_text((HERE / 'extension/worker.js').read_text() + fixture_worker(ticket, url))
+        (extension / 'worker.js').write_text((extension / 'worker.js').read_text() + fixture_worker(ticket, url))
         args = [chrome, f'--user-data-dir={profile}', '--headless=new', '--no-first-run', '--no-default-browser-check',
                 '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps',
                 '--password-store=basic', '--use-mock-keychain', f'--disable-extensions-except={extension}',

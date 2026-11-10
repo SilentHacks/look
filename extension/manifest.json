@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Look",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqN8W6iWp9+sZFc9Nsj5H6P3R8pOk3mMSUDdJVZ/6ACHhxurE53ET7kzt2/y8vs7poeDuYQanOy+ZF1m1X/g73WkZpev6/zDmSmKq9mJ1h/MneVyvf/YioQwnQ6oQUdZ/aKwtw16HqtQ4tntTcEWbiS0dBnevQU6UTQ/bEcSAXPJQ2AS0IquvUY2s2Y89KjgrUylbDslDVji/GNVT0apsAnOZ/h810r5XkD+ZuetH6kH7N41m2y5GHvRVctj+SBzglMRT2IMf5y1eHYnAfdWAQ8pU4S6qtlExJJWqMz3oY7gBRYv/uMMsrQ9WsOG1ppzDp+ORnf2ON3cpuAIAKddslwIDAQAB",
   "minimum_chrome_version": "145",
   "description": "Connect selected Chrome tabs to your running Look session.",
   "permissions": ["debugger", "nativeMessaging", "tabs"],

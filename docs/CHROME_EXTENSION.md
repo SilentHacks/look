@@ -1,109 +1,143 @@
-# Look Chrome extension — local development
+# Look Chrome extension — source beta
 
-Alternative to [native Chrome consent](../README.md#use-my-existing-chrome).
-Stock Hermes stays unmodified. This is an unpacked development installation,
-not a Chrome Web Store release or a production-security certification.
-Initial lane: Apple Silicon macOS, Google Chrome 145+, regular HTTP(S) tabs.
+Use selected tabs in your existing Google Chrome, with stock Hermes unchanged.
+Supported lane: Apple Silicon macOS, Google Chrome 145+, regular HTTP(S) tabs.
+This is an unpacked developer installation, not a Chrome Web Store release.
 
-## Install explicitly
+## Set up once
 
-Use the same stable Look checkout and Python environment that run the plugin.
-Do not move/delete either while this native host is registered.
+1. Install and enable Look in stock Hermes using the README. Restart Hermes after
+   updating Look. In a Hermes conversation, run:
 
-1. Install/enable Look in stock Hermes as described in the README. Restart Hermes
-   after updating the plugin. Its existing input permission is still required.
-2. In the intended Chrome profile, open `chrome://extensions`, enable **Developer
-   mode**, choose **Load unpacked**, and select this checkout's `extension/`
-   directory. Copy **Look**'s 32-letter extension ID from that page.
-3. From this checkout, using the plugin environment's Python:
-
-   ```sh
-   /absolute/path/to/venv/bin/python browser/extension_host.py install --extension-id THE_EXACT_EXTENSION_ID
+   ```text
+   /look setup extension
    ```
 
-   This explicitly writes only Look's user-level launcher/configuration under
-   `~/Library/Application Support/Look/extension/` and its exact-origin
-   `org.look.companion.json` registration under
-   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`.
-   No sudo, Chrome settings changes, profile copy, Hermes patch or automatic
-   extension installation. Importing Look does not install anything.
+   No Python path, extension ID or environment variable is needed. Setup copies
+   Look's extension and stdlib native host to
+   `~/Library/Application Support/Look/extension/`, and registers only
+   `org.look.companion.json` in Google Chrome's user-level
+   `NativeMessagingHosts/` directory. It uses that Hermes process's Python.
+   Shell equivalent: `hermes look setup-extension` (unavailable in Hermes host
+   isolation; use the slash command there).
 
-Chrome requires **debugger**, **nativeMessaging** and **tabs** permissions. The
-Debugger API grants broad page access, not read-only/pointed-element permission;
-Chrome's debugging banner remains. The extension has no content scripts, host
-permissions, externally connectable API, web-accessible resources, cloud relay
-or model-accessible debugger interface. Disabling remote debugging is fine:
-this connection does not use its setting, port or discovery file.
+2. In the Chrome profile you want to use, open **chrome://extensions**, enable
+   **Developer mode**, choose **Load unpacked**, and select the folder printed by
+   setup:
 
-## Connect to a conversation
+   ```text
+   ~/Library/Application Support/Look/extension/unpacked
+   ```
 
-1. In the intended running Hermes conversation, stop any previous Look connection
-   with `/look stop`, then run **`/look start --extension`**.
-2. In Chrome, return to an ordinary web tab, open **Look** from the Extensions
-   menu, paste that command's pairing ticket, and choose **Connect this tab**.
+   In the macOS folder picker, **Command–Shift–G** accepts this path. Pin Look in
+   Chrome's Extensions menu if you want it in the toolbar.
+
+3. Read Chrome's permission prompt. Look needs **debugger**, **nativeMessaging**
+   and **tabs**. Debugger grants broad page access, not a read-only or
+   pointed-element-only permission. Chrome's debugging banner remains.
+
+Setup does not launch Chrome, change browser settings, install/enable an extension,
+copy a profile, open a device, or patch Hermes. Installation and permissions remain
+Chrome's user-controlled steps. Unmanaged macOS cannot use an unpublished local
+CRX as a consumer-install shortcut ([Chrome distribution rules][distribution]).
+
+The manifest's public `key` fixes the beta ID to
+`onaibmgfpfkhhdmblanemokijinknifa`, independent of checkout location. It is a
+public development identity, not a secret, profile identity, Store reservation or
+publisher-authentication claim ([Chrome identity guidance][identity]). Do not
+change it on updates. There is no Store listing or automatic extension update.
+
+## Connect to this conversation
+
+1. Stop any previous connection with `/look stop`. In the intended running Hermes
+   conversation, run **`/look start --extension`**. Its existing Look input
+   permission is still required.
+2. Return to an ordinary web tab. Open **Look** from Chrome's Extensions menu,
+   paste the command's ticket, and choose **Connect this tab**. The popup checks
+   the native host and shows setup or expired-ticket recovery when needed.
 3. Return to the page. `/look status` reports readiness. Point and hold Space;
-   wait for **Listening** before speaking. The configured compose shortcut also
-   opens the existing private typed-input card.
-4. For another tab in this Chrome profile, open Look there and choose **Use on
-   this tab**. Unselected tabs are not instrumented. Guarded new-tab operations
-   retain the exact selected source window/profile; there is no all-tabs grant.
+   wait for **Listening** before speaking. The configured compose shortcut opens
+   the private typed-input card. Microphone/speech setup is separate.
+4. For another tab in this profile, open Look there and choose **Use on this tab**.
+   Unselected tabs are not instrumented. Guarded new tabs retain the exact selected
+   source window/profile; there is no all-tabs grant.
 
-The ticket selects the particular running Look instance and the conversation /
-Hermes profile that issued it. It expires after 120 seconds, is consumed once,
-and is not saved by the extension. Do not share it or paste it as a model
-question. It cannot resume a disconnected generation. The native port pins the
-Chrome extension-profile instance; the extension ID alone is **not** a Chrome
-profile identity. A same-user debugger or malicious local program is outside
-this website/other-user isolation boundary, just as for the native-consent lane.
-Look's browser/microphone owner is machine-scoped: stop it before choosing a
-second runtime or conversation.
+A ticket selects the exact running Look instance and issuing Hermes conversation /
+profile. It expires after **120 seconds**, is consumed once and is never saved by
+the extension. Copy only the ticket, not the surrounding explanation; do not share
+it or submit it as a model question. If it expires: `/look stop`, then
+`/look start --extension` for a fresh ticket. Stop before changing conversations
+or runtimes; Look's browser/microphone owner is machine-scoped.
 
-Only the focused selected tab's protected renderer receives new private content.
-Python retains evidence and action policy: captured identity, connection/document/
-route/task epochs, exact user turn, risk classification and single-use protected
-mouse approval. Neither the extension popup, page text nor the model approves an
-action. Page evidence you ask about goes to your configured model and may remain
-in Hermes history. Browser attachment does not prove provider, audio or gaze
-readiness. Camera/microphone setup remains a separate explicit choice.
+The native port pins the Chrome extension-profile instance; the extension ID alone
+is not a Chrome profile identity. No discovery list, auto-pairing, clipboard access,
+URL-carried ticket, cloud relay or background reconnect is used. A same-user
+malicious program/debugger remains outside this website/other-user boundary.
 
-## Stop, recover, update, uninstall
+## Update, move or remove
 
-- `/look stop` or **Disconnect** ends the paired generation, cancels local
-  capture/output/tasks/approvals, removes overlays and detaches. User tabs and
-  Chrome stay open. Stop cannot cancel an already admitted Hermes model turn.
-- Host/worker/port loss and Chrome debugger detach are terminal. No reconnect,
-  reattach or action replay. A missing mutation reply means **unknown outcome**;
-  inspect the website before issuing another action.
-- The page's four-second Python-renewed input lease expires even if cleanup
-  cannot run; it removes the surface and releases intercepted input. The worker
-  also ends the connection when Python stops responding. Background renewals carry
-  only liveness, never private renderer content or action authority.
-  Native recording checks tab/window focus through a fixed browser-API operation,
-  not a background page evaluation. Slow checks remain unknown; definite loss cancels.
-- DevTools, Chrome's Stop banner, another debugger, tab close/move, browser policy,
-  extension disable/reload/update, and restricted embedded frames can end access.
-  Look does not work around Chrome policy or attach another tab as a fallback.
-- After a failure: `/look stop`, fix the reported setup/Chrome problem, then
-  `/look start --extension` and pair again. Old approvals and tickets stay dead.
-- Update in place only while stopped: update Look, reload its unpacked extension,
-  restart Hermes, and pair afresh. If the checkout or Python environment moves,
-  uninstall then run the install command from the new location. Reinstall also
-  after the unpacked ID changes. Existing registration is never silently replaced.
-- To uninstall, first `/look stop` and **Disconnect**, then run:
+- **Update:** `/look stop` in every running Hermes process using Look; update the
+  plugin, restart Hermes, and run `/look setup extension` again. In
+  `chrome://extensions`, **Reload** Look, then pair afresh. Repeated setup is safe;
+  it refreshes only Look's owned files and exact-origin registration. A live or
+  waiting Look runtime refuses setup/removal. A conflicting registration or
+  symlink is refused rather than overwritten.
+- **Moved checkout:** the staged extension/native host do not depend on its old
+  source path. If Hermes's Python environment moves or is replaced, restart
+  Hermes in the working environment and rerun setup to refresh the launcher.
+  Do not move/delete the Python environment and expect an old launcher to work.
+  The Chrome-loaded folder and extension ID stay fixed.
+- **Migrating the older manual-ID beta:** stop Look, run
+  `/look setup extension uninstall`, remove the old Look entry in
+  `chrome://extensions`, and follow setup above. Setup refuses to silently switch
+  an already registered, different extension ID.
+- **Uninstall:** `/look stop`, then **Disconnect** if the popup is still connected;
+  run `/look setup extension uninstall` (shell:
+  `hermes look setup-extension --uninstall`). Remove Look in
+  `chrome://extensions`. Repeating removal is safe. Only Look's exact native
+  registration and managed files are removed; unknown files and browser data stay.
+  Empty setup directories/the setup lock can remain. Removal alone cannot kill an
+  already running host. To reinstall, rerun setup and Load unpacked again.
 
-  ```sh
-  /absolute/path/to/venv/bin/python browser/extension_host.py uninstall
-  ```
+## Recovery
 
-  Remove Look in `chrome://extensions`. The command removes only Look's exact
-  native registration/configuration/launcher; no browser directory or data.
-  Removing the registration alone does not terminate an already running host.
+| Problem | Action |
+|---|---|
+| Popup asks for setup / native host unavailable | `/look stop`; rerun `/look setup extension` in the intended Hermes environment, Reload Look, then start and pair again. Use stable Google Chrome's normal user-data location; custom `--user-data-dir`, other channels and managed policies are not this setup command's supported lane. |
+| Ticket refused/expired | Stop and start again in the intended conversation; paste the fresh ticket. Never retry an old generation. |
+| Chrome refuses debugging | Choose an ordinary HTTP(S) tab in a regular window. Close DevTools/another debugger on that tab. Respect Chrome policy and its Stop banner; Look does not bypass them. |
+| Setup refuses existing registration/files | Keep them intact. If they are your older Look install, use Look's uninstall first. Otherwise resolve the conflicting installation explicitly; do not delete another application's registration. |
+| Setup interrupted / file access error | Stop Look, check access to the two documented user-level directories and rerun setup. Ordinary replacement failures restore previously replaced files; crash/power-loss recovery is rerunning setup. Do not edit Chrome profile preferences. |
+| Browser connected but voice/model unavailable | Check `/look diagnostics` and the separate speech/input/provider setup. Attachment alone does not establish their readiness. |
 
-The native-consent option remains `/look start --existing` then
-`/look start --existing --accept`. `/look start --separate` explicitly selects
-Look's separate browser after Stop. No source is substituted silently.
+Host/worker/port loss, debugger detach, extension disable/reload/update, selected-tab
+close/move or restricted frames can end a generation. Stop cancels capture, output,
+tasks and pending approvals, removes overlays and detaches; user tabs and Chrome
+stay open. An already admitted Hermes model turn can still finish. The page's
+four-second Python-renewed lease releases intercepted input even if cleanup cannot
+run. No reconnect, fallback-tab attachment or mutation replay occurs. A missing
+mutation reply means **unknown outcome**: inspect the website before another action.
 
-## Reviewer checks and limits
+The alternative without an extension remains `/look start --existing`, then
+`/look start --existing --accept` with native Chrome consent. After Stop,
+`/look start --separate` explicitly selects Look's separate browser. No source is
+substituted silently.
+
+## Privacy and ownership
+
+Only the focused selected tab's opaque-origin, script-disabled private renderer
+receives new private content. Python retains captured identities, connection /
+document / route / task epochs, exact user-turn ownership, live risk classification
+and single-use protected mouse approval. Neither popup, page text nor model can
+approve an action. The extension has no content scripts, host permissions,
+externally connectable API, web-accessible resources or model-accessible debugger
+interface. It does not use remote debugging settings/ports/discovery files.
+
+Page evidence you ask about goes to your configured model and may remain in Hermes
+history. Native microphone permissions belong to Hermes, not Chrome. No browser
+camera/microphone permission is requested by this extension.
+
+## Verification and remaining gates
 
 ```sh
 python -m unittest tests.test_extension tests.test_chrome_consent tests.test_profile_highlight tests.test_first_run
@@ -111,40 +145,23 @@ node tests/extension_worker.cjs
 python tests/extension_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --out /tmp/look-extension-evidence
 ```
 
-Observed on 2026-11-09: **42 Python tests**, the Node ownership-race checks and
-**54 named headless browser checks** passed, including native-host loss,
-worker reload, pending-approval cancellation and a deliberately lost mutation
-reply with exactly one execution. The settled private answer was inspected
-visually. The browser was official Chrome for Testing **157.0.8103.50**, mac-arm64:
-[Google archive](https://storage.googleapis.com/chrome-for-testing-public/157.0.8103.50/mac-arm64/chrome-mac-arm64.zip),
-196,583,703 bytes, SHA-256
-`aceb0578a1cc3631358b164dbbef04bf8936f96c690fb78c3ac25b7655e795e8`.
-Archive size/checksum matched the preceding research run; no verified bundle
-signature, system installation or personal-browser trial is claimed.
+The browser probe uses only a temporary Chrome for Testing profile, temporary
+native registration, local pages, a test-only worker driver/inspector and fake
+frontend/device objects. It exercises the real plugin registration, setup command,
+staged native host and transport; automatic fixture pairing is not shipped. It is
+not a released-package install or real provider/device trial.
 
-One independent GPT review found three P1 defects: late tab creation crossing a
-replacement pairing, cached activation across a window-state await, and background
-evaluation blocking recording-loss detection. All three were corrected and covered
-by deterministic race checks plus real-browser native-watchdog cancellation with
-page focus-loss listeners suppressed. No second review or production acceptance
-claim is implied.
+Headless checks do not establish headed macOS foreground behavior, physical input,
+signed-in acceptance, multiple personal profiles/windows, other extensions,
+managed policy or actual Chrome permission/banner/update UX. Those remain
+user-operated gates. Store publication additionally needs publisher-owned identity,
+privacy disclosures, packaging, payment/registration and Google's approval; no
+approval date or Store availability is promised. Native-consent Allow/deny/revoke
+acceptance is separate.
 
-The browser probe creates its own temporary profile, native-host registration,
-local pages and a test-only extension driver/inspector. The shipped extension
-has neither its automatic fixture pairing nor its raw inspector operations.
-No remote-debugging flag/pipe/setting, real device, account, provider request or
-installed-Hermes mutation is used. Fake device objects exercise cancellation,
-not physical hardware. The registered plugin and real native host/transport are
-used; model admission is a local frontend stub, not a real model call.
+Runtime has no extension subscription/cloud relay fee. Existing model/audio/tracker
+costs remain. Development verification uses no paid product/provider calls or
+purchases; assistant/reviewer billing is not exposed.
 
-Headless browser API focus is not headed macOS foreground acceptance. Physical
-input, personal signed-in tabs, multiple real Chrome profiles/windows, managed
-policies, coexistence with other extensions, actual disable/update/Chrome-banner
-UX, real devices and Store distribution still need user-operated acceptance.
-Do not interpret these development checks as those trials.
-
-Runtime needs no cloud relay or extension subscription. Existing model/audio/
-tracker costs remain. Store registration/review and consumer packaging are not
-implemented; no Store approval or publication is claimed.
-Development verification made no paid product/provider calls or Store purchases.
-Assistant/reviewer model billing is not exposed.
+[distribution]: https://developer.chrome.com/docs/extensions/how-to/distribute/install-extensions
+[identity]: https://developer.chrome.com/docs/extensions/reference/manifest/key

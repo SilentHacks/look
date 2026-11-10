@@ -1,15 +1,23 @@
 """Private temporary sockets/install roots; no Chrome, Hermes host, devices or providers."""
 import asyncio
+import base64
+import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import socket
 import struct
 import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
+from hermes_gaze import cli
+from hermes_gaze.browser import extension_host
 from hermes_gaze.browser.cdp_bridge import CdpSession
 from hermes_gaze.browser.extension import ExtensionChrome
 from hermes_gaze.browser.extension_host import (MAX_MESSAGE, configuration, install, read_message,
@@ -17,7 +25,8 @@ from hermes_gaze.browser.extension_host import (MAX_MESSAGE, configuration, inst
 from hermes_gaze.browser.ownership import OwnershipError
 from tests.test_chrome_consent import until
 
-EXTENSION = 'a' * 32
+KEY = json.loads((Path(__file__).resolve().parents[1] / 'extension/manifest.json').read_text())['key']
+EXTENSION = ''.join(chr(97 + int(c, 16)) for c in hashlib.sha256(base64.b64decode(KEY)).hexdigest()[:32])
 
 
 class Peer:
@@ -86,19 +95,127 @@ class NativeHostTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             directory, manifests = root / 'look', root / 'chrome'
-            manifest = install(EXTENSION, directory=directory, manifests=manifests)
+            manifest = install(directory=directory, manifests=manifests)
             self.assertEqual(json.loads(manifest.read_text())['allowed_origins'], ['chrome-extension://' + EXTENSION + '/'])
             self.assertEqual(configuration(directory)['extension_id'], EXTENSION)
-            with self.assertRaises(ValueError):
-                install('b' * 32, directory=directory, manifests=manifests)
+            self.assertEqual(install(directory=directory, manifests=manifests), manifest)
+            directory.joinpath('host').chmod(0o600)
+            install(directory=directory, manifests=manifests)
+            self.assertTrue(directory.joinpath('host').stat().st_mode & 0o100)
             with self.assertRaises(ValueError):
                 relay(EXTENSION, 'chrome-extension://' + 'b' * 32 + '/', io.BytesIO(), io.BytesIO())
             unrelated = manifests / 'unrelated.json'
             unrelated.write_text('{}')
+            keep = directory / 'unpacked' / 'keep.txt'
+            keep.write_text('unrelated')
             uninstall(directory=directory, manifests=manifests)
+            uninstall(directory=directory, manifests=manifests)
+            self.assertEqual(keep.read_text(), 'unrelated')
             self.assertTrue(unrelated.exists())
             self.assertFalse(manifest.exists())
             self.assertFalse((directory / 'host').exists())
+
+    def test_relocation_update_and_failed_update_keep_working_host(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory, manifests = root / 'installed look', root / 'chrome'
+            source = root / 'source'
+            (source / 'browser').mkdir(parents=True)
+            shutil.copytree(Path(__file__).parents[1] / 'extension', source / 'extension')
+            script = source / 'browser/extension_host.py'
+            shutil.copyfile(extension_host.__file__, script)
+            with patch.object(extension_host, '__file__', str(script)):
+                install(directory=directory, manifests=manifests)
+            shutil.rmtree(source)
+            def status():
+                request = io.BytesIO()
+                send_message(request, {'op': 'status'})
+                result = subprocess.run([str(directory / 'host'), f'chrome-extension://{EXTENSION}/'],
+                                        input=request.getvalue(), capture_output=True, timeout=5, check=True)
+                return read_message(io.BytesIO(result.stdout))
+            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            moved_python = root / 'new python'
+            moved_python.symlink_to(sys.executable)
+            with patch.object(sys, 'executable', str(moved_python)):
+                install(directory=directory, manifests=manifests)
+            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            # Simulate a single failed atomic replacement during an update, not a working no-op.
+            original = extension_host._replace
+            attempts = []
+            def fail_once(path, value, mode):
+                attempts.append(path)
+                if len(attempts) == 2:
+                    raise OSError('fixture disk failure')
+                original(path, value, mode)
+            (directory / 'unpacked/popup.html').write_text('previous popup')
+            with patch.object(extension_host, '_replace', side_effect=fail_once), self.assertRaises(OSError):
+                install(directory=directory, manifests=manifests)
+            self.assertEqual((directory / 'unpacked/popup.html').read_text(), 'previous popup')
+            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            install(directory=directory, manifests=manifests)
+            self.assertEqual(status(), {'op': 'status', 'version': 1})
+
+    def test_conflicts_symlinks_and_legacy_id_are_not_overwritten_or_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory, manifests = root / 'look', root / 'chrome'
+            manifest = install(directory=directory, manifests=manifests)
+            original = manifest.read_bytes()
+            foreign = dict(json.loads(original), allowed_origins=['chrome-extension://' + 'b' * 32 + '/'])
+            manifest.write_text(json.dumps(foreign))
+            for operation in (install, uninstall):
+                with self.assertRaises(ValueError):
+                    operation(directory=directory, manifests=manifests)
+                self.assertEqual(json.loads(manifest.read_bytes()), foreign)
+                self.assertTrue((directory / 'host').exists())
+            manifest.write_bytes(original)
+            victim = root / 'unrelated'
+            victim.write_text('keep')
+            target = directory / 'unpacked/popup.js'
+            target.unlink()
+            target.symlink_to(victim)
+            for operation in (install, uninstall):
+                with self.assertRaises(OSError):
+                    operation(directory=directory, manifests=manifests)
+                self.assertEqual(victim.read_text(), 'keep')
+                self.assertTrue(manifest.exists())
+            target.unlink()
+            config = directory / 'config.json'
+            config.write_text(json.dumps({'extension_id': 'b' * 32}))
+            foreign['path'] = str(directory / 'host')
+            manifest.write_text(json.dumps(foreign))
+            with self.assertRaises(ValueError):
+                install(directory=directory, manifests=manifests)
+            uninstall(directory=directory, manifests=manifests)
+
+    def test_setup_commands_use_current_environment_and_refuse_live_runtime(self):
+        from tests.test_first_run import FirstRunTests
+        from hermes_gaze.browser.ownership import acquire_runtime_lease
+        fixture = FirstRunTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        _, session, ctx, command, _ = fixture.register(None)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            session.cdp._owned_chrome.profile = root / 'lease'
+            with patch.object(cli, 'get_shared_session', return_value=session), \
+                 patch.object(extension_host, 'install_directory', return_value=root / 'look'), \
+                 patch.object(extension_host, 'manifest_directory', return_value=root / 'chrome'):
+                command('setup extension')
+                self.assertTrue((root / 'look/unpacked/manifest.json').is_file())
+                self.assertFalse(ctx.turns.connected)
+                ctx.inject_message.assert_not_called()
+                with acquire_runtime_lease(root / 'lease'):
+                    self.assertEqual(cli._setup_extension()[0], 1)
+                    self.assertEqual(cli._setup_extension(remove=True)[0], 1)
+                    self.assertTrue((root / 'look/host').exists())
+                import argparse
+                parser = argparse.ArgumentParser()
+                cli._setup_cli(parser)
+                args = parser.parse_args(['setup-extension', '--uninstall'])
+                self.assertEqual(args.func(args), 0)
+                self.assertFalse((root / 'look/host').exists())
+                self.assertEqual(cli._setup_extension(remove=True)[0], 0)
 
     def test_framing_refuses_oversized_truncated_and_nonobject_messages(self):
         for raw in (struct.pack('<I', MAX_MESSAGE + 1), b'\x04\x00', struct.pack('<I', 9) + b'{}',

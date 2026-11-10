@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+from contextlib import contextmanager
+import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +16,7 @@ import stat
 import struct
 import sys
 import threading
+import tempfile
 
 NAME = "org.look.companion"
 MAX_MESSAGE = 768 * 1024  # Below Chrome's 1 MiB native-host output ceiling.
@@ -81,57 +86,151 @@ def configuration(directory=None):
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ValueError("Look host configuration is not private")
         config = json.loads(source.read(4097))
-    if not ID.fullmatch(config.get("extension_id", "")):
+    if not isinstance(config, dict) or not isinstance(config.get("extension_id"), str) or not ID.fullmatch(config["extension_id"]):
         raise ValueError("Look extension ID is invalid")
     return config
 
 
-def install(extension_id, *, directory=None, manifests=None):
-    if not ID.fullmatch(extension_id):
-        raise ValueError("Expected the exact 32-letter Chrome extension ID")
-    directory = private_directory(directory or install_directory())
-    manifests = Path(manifests or manifest_directory())
-    manifests.mkdir(parents=True, exist_ok=True)
-    # Refuse to replace another host. Explicit uninstall is required before relocation/update.
-    paths = [directory / "config.json", directory / "host", manifests / (NAME + ".json")]
-    if any(p.exists() or p.is_symlink() for p in paths):
-        raise ValueError("Look native host already exists; uninstall it before installing again")
-    values = [json.dumps({"extension_id": extension_id}),
-              "#!/bin/sh\nexec " + shlex.join([sys.executable, str(Path(__file__).resolve()),
-                                             "--config", str(paths[0])]) + ' "$@"\n',
-              json.dumps(dict(name=NAME, description="Look browser companion", path=str(paths[1]),
-                              type="stdio", allowed_origins=[f"chrome-extension://{extension_id}/"]))]
-    created = []
+@contextmanager
+def _setup_lock(directory):
+    fd = os.open(directory / ".setup.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(fd, "r+") as lock:
+        _private_file(os.fstat(lock.fileno()))
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise ValueError("Another Look setup is running. Try again when it finishes.") from None
+        yield
+
+
+def _private_file(info):
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("Look setup files must be private regular files owned by this user")
+
+
+def _read_installed(path):
     try:
-        for path, value in zip(paths, values):
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700 if path == paths[1] else 0o600)
-            created.append(path)
-            with os.fdopen(fd, "w") as output:
-                output.write(value)
-    except BaseException:
-        for path in reversed(created):
-            path.unlink()
-        raise
-    return paths[-1]
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "rb") as source:
+        _private_file(os.fstat(source.fileno()))
+        return source.read()
+
+
+def _registration(extension_id, directory):
+    return dict(name=NAME, description="Look browser companion", path=str(directory / "host"),
+                type="stdio", allowed_origins=[f"chrome-extension://{extension_id}/"])
+
+
+def _owned_install(directory, manifest):
+    config = _read_installed(directory / "config.json")
+    registration = _read_installed(manifest)
+    if config is None:
+        if registration is not None:
+            raise ValueError("Native registration belongs to a different install")
+        return None
+    config = json.loads(config)
+    if not isinstance(config, dict) or not isinstance(config.get("extension_id"), str):
+        raise ValueError("Look host configuration is invalid")
+    extension_id = config.get("extension_id", "")
+    if not ID.fullmatch(extension_id):
+        raise ValueError("Look extension ID is invalid")
+    if registration is not None:
+        value = json.loads(registration)
+        expected = _registration(extension_id, directory)
+        if not isinstance(value, dict) or any(value.get(key) != expected[key] for key in ("name", "path", "type", "allowed_origins")):
+            raise ValueError("Native registration belongs to a different install")
+    return extension_id
+
+
+def _replace(path, value, mode):
+    fd, temporary = tempfile.mkstemp(prefix=".look-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            os.fchmod(output.fileno(), mode)
+            output.write(value)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+EXTENSION_FILES = ("manifest.json", "worker.js", "popup.html", "popup.js")
+
+
+def install(*, directory=None, manifests=None):
+    """Stage fixed-path assets and an exact-origin host; refresh only our owned install."""
+    directory = private_directory(Path(directory or install_directory()).absolute())
+    manifests = Path(manifests or manifest_directory()).absolute()
+    manifests.mkdir(parents=True, exist_ok=True)
+    manifest = manifests / (NAME + ".json")
+    source = Path(__file__).resolve()
+    assets = source.parents[1] / "extension"
+    key = json.loads((assets / "manifest.json").read_text())["key"]
+    extension_id = "".join(chr(97 + int(c, 16)) for c in hashlib.sha256(base64.b64decode(key)).hexdigest()[:32])
+    with _setup_lock(directory):
+        previous = _owned_install(directory, manifest)
+        if previous is not None and previous != extension_id:
+            raise ValueError("An older Look extension ID is registered. Run /look setup extension uninstall first.")
+        unpacked = private_directory(directory / "unpacked")
+        # Ownership first, Chrome registration last: interrupted setup can be rerun.
+        values = {directory / "config.json": json.dumps({"extension_id": extension_id}).encode()}
+        values.update({unpacked / name: (assets / name).read_bytes() for name in EXTENSION_FILES})
+        values[directory / "host.py"] = source.read_bytes()
+        values[directory / "host"] = ("#!/bin/sh\nexec " + shlex.join(
+            [sys.executable, str(directory / "host.py"), "--config", str(directory / "config.json")]) + ' "$@"\n').encode()
+        values[manifest] = json.dumps(_registration(extension_id, directory)).encode()
+        before = {path: _read_installed(path) for path in values}
+        if previous is None and any(value is not None for value in before.values()):
+            raise ValueError("Look setup found unregistered files; refusing to overwrite them")
+        changed = []
+        try:
+            for path, value in values.items():
+                if before[path] != value or path.stat().st_mode & 0o777 != (0o700 if path == directory / "host" else 0o600):
+                    _replace(path, value, 0o700 if path == directory / "host" else 0o600)
+                    changed.append(path)
+        except BaseException:
+            for path in reversed(changed):
+                if before[path] is None:
+                    path.unlink()
+                else:
+                    _replace(path, before[path], 0o700 if path == directory / "host" else 0o600)
+            raise
+    return manifest
 
 
 def uninstall(*, directory=None, manifests=None):
-    directory = directory or install_directory()
-    manifest = (manifests or manifest_directory()) / (NAME + ".json")
-    # Delete only our exact registration and two launcher files, never any browser directory.
-    if manifest.exists():
-        value = json.loads(manifest.read_text())
-        if value.get("name") != NAME or value.get("path") != str(directory / "host"):
-            raise ValueError("Native registration belongs to a different Look install")
-        manifest.unlink()
-    for name in ("host", "config.json"):
-        (directory / name).unlink(missing_ok=True)
+    directory = Path(directory or install_directory()).absolute()
+    if not directory.exists() and not directory.is_symlink():
+        manifest = Path(manifests or manifest_directory()) / (NAME + ".json")
+        if manifest.exists() or manifest.is_symlink():
+            raise ValueError("Native registration belongs to a different install")
+        return
+    directory = private_directory(directory)
+    manifest = Path(manifests or manifest_directory()) / (NAME + ".json")
+    with _setup_lock(directory):
+        previous = _owned_install(directory, manifest)
+        if previous is None:
+            return
+        unpacked = directory / "unpacked"
+        if unpacked.exists() or unpacked.is_symlink():
+            private_directory(unpacked)
+        paths = [manifest, *(directory / name for name in ("host", "host.py")),
+                 *(unpacked / name for name in EXTENSION_FILES), directory / "config.json"]
+        for path in paths:
+            _read_installed(path)  # Validate all paths before removing any of them.
+        for path in paths:
+            path.unlink(missing_ok=True)
+        # Keep unknown files, directories and the setup lock; never delete browser data.
 
 
 def relay(extension_id, origin, source, destination):
     if origin != f"chrome-extension://{extension_id}/":
         raise ValueError("Chrome extension origin does not match Look's registration")
     first = read_message(source)
+    if first.get("op") == "status":
+        send_message(destination, {"op": "status", "version": 1})
+        return
     ticket = TICKET.fullmatch(first.get("ticket", ""))
     if first.get("op") != "pair" or not ticket:
         raise ValueError("Start Look in Hermes and enter its current pairing ticket")
@@ -172,18 +271,8 @@ def relay(extension_id, origin, source, destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action_or_origin", nargs="?")
-    parser.add_argument("--extension-id")
     parser.add_argument("--config", type=Path)
     args = parser.parse_args()
-    if args.action_or_origin in ("install", "uninstall"):
-        if sys.platform != "darwin":
-            parser.error("The development installer supports Google Chrome on macOS only")
-        if args.action_or_origin == "install":
-            print(install(args.extension_id or ""))
-        else:
-            uninstall()
-            print("Look native host removed. Remove the unpacked extension in chrome://extensions.")
-        return
     try:
         config = configuration(args.config.parent if args.config else None)
         relay(config["extension_id"], args.action_or_origin, sys.stdin.buffer, sys.stdout.buffer)
