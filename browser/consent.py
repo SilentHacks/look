@@ -15,12 +15,6 @@ import threading
 
 from .ownership import OwnershipError, acquire_runtime_lease, companion_profile
 
-DISCLOSURE = (
-    "Chrome gives Look broad debugging access, including signed-in pages and browser data.\n\n"
-    "Look works across web tabs in one supported profile. Answers appear only in the focused tab’s private card. "
-    "Page evidence you ask about goes to your configured model and may stay in Hermes history.\n\n"
-    "Approve only the Chrome request you just started. Stopping Look does not turn off Chrome’s remote debugging."
-)
 PREPARE = "In Chrome 145+, enter chrome://inspect/#remote-debugging and enable remote debugging."
 
 

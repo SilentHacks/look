@@ -138,10 +138,9 @@ still end the connection. If Look disconnects, run `/look stop`, then
 `/look start --extension`, reopen Look on the intended tab and choose
 **Connect this tab**. Inspect the page before repeating an action with unknown outcome.
 
-The alternative without an extension remains `/look start --existing`, then
-`/look start --existing --accept` with native Chrome consent. After Stop,
-`/look start --separate` explicitly selects Look's separate browser. No source is
-substituted silently.
+Use `/look start --separate` to select Look's separate browser.
+The native-consent `/look start --existing` command has been removed.
+No source is substituted silently.
 
 ## Privacy and ownership
 

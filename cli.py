@@ -19,11 +19,11 @@ from .tools import handle_gaze_resolve
 
 
 HELP = """/look · /look start     Start in Chrome
-/look start --existing   Use my Chrome (shows disclosure first)
 /look start --extension  Pair the Look development extension
 /look start --separate   Use separate Look Chrome
 /look stop              Stop Look and keep browser tabs open
 /look status            Show current state
+/look actions [confirm|allow-all]  Choose Look approval prompts
 /look calibrate         Set up eye tracking
 /look cursor            Turn off the camera and use the pointer
 /look setup             Prepare local speech recognition
@@ -185,27 +185,14 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
                 "/look stop cancels. "
                 "Chrome grants broad debugging access. Question evidence goes to your model and may stay in Hermes history.")
 
-    if sub in ("start", "connect") and (tail or session.cdp.source == "existing"):
-        from .browser.consent import DISCLOSURE, PREPARE
-        if tail == ["--separate"]:
-            try:
-                session.cdp.use_owned()
-            except OSError as exc:
-                return str(exc)
-            return _handle_slash_command("start")
-        if tail not in ([], ["--existing"], ["--existing", "--accept"]):
-            return "Usage: /look start --existing [--accept] | --separate"
-        if platform.system() != "Darwin" or platform.machine() != "arm64":
-            return "Existing Chrome is supported on Apple Silicon Mac only."
-        if tail != ["--existing", "--accept"]:
-            if session.cdp.source == "existing" and session.cdp.is_connected:
-                return "Look is ready in your Chrome."
-            return DISCLOSURE + "\n" + PREPARE + "\nTo connect: /look start --existing --accept"
+    if sub in ("start", "connect") and tail:
+        if tail != ["--separate"]:
+            return "Usage: /look start [--extension|--separate]"
         try:
-            session.cdp.start_existing(on_ready=on_ready, on_error=on_error)
+            session.cdp.use_owned()
         except OSError as exc:
             return str(exc)
-        return _existing_status(session)
+        return _handle_slash_command("start")
 
     if sub in ("start", "connect") and not tail:
         if platform.system() not in ("Darwin", "Linux"):
@@ -317,7 +304,7 @@ def _existing_status(session) -> str:
         return "Waiting for Chrome approval (up to 120 seconds). Approve only your request. /look stop to cancel."
     if status["state"] in ("connecting", "connected"):
         return "Connecting to Chrome. Open a web page, then run /look status to check. Run /look stop to cancel."
-    return status["error"] or "Chrome disconnected. Run /look start --existing to connect again."
+    return status["error"] or "Chrome disconnected. Run /look start --extension to connect again."
 
 
 def _setup_cli(subparser: argparse.ArgumentParser) -> None:

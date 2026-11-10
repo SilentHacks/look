@@ -39,7 +39,7 @@ never advertises direct tools absent from Hermes's executable set.
 | `gaze_navigate` | Same arguments; navigates the task tab and returns fresh structure. |
 | `gaze_scroll` | `resolution_id`, bounded `pixels`, optional captured container `handle`. |
 | `gaze_wait` | Bounded `seconds`; waits and returns fresh structure. |
-| `gaze_request_commit` | `resolution_id`, actual commit-control `handle`; opens review, never approves or commits. |
+| `gaze_request_commit` | `resolution_id`, actual commit-control `handle`. Opens review by default, executes directly in explicit allow-all mode. |
 
 Every mutation uses the latest integer epoch and real captured identities, never
 model selectors or coordinates. A stale epoch returns fresh structure without
@@ -77,10 +77,10 @@ serialization and rejected again before writes. Personal details come from
 Hermes's normal USER.md/memory/context, not a plugin profile file; unknown details
 must be asked for.
 
-Submit, Send, Buy, Delete, publish, form submissions and ambiguous controls require
-the user's trusted primary mouse click in the protected confirmation card.
-`gaze_request_commit` is appropriate even for “prepare, but do not send”: it opens
-review only. The card shows nonsensitive field content and destination in plain
+By default Submit, Send, Buy, Delete, publish, form submissions and ambiguous
+controls require a trusted primary mouse click in the protected confirmation card.
+`gaze_request_commit` opens review, including for “prepare, but do not send”.
+The card shows nonsensitive field content and destination in plain
 words. Approval binds the identity, epoch, owner, destination and content.
 Observed input/DOM edits invalidate it, including edit-and-restore; the final
 single DOM evaluation rechecks the content and consumes approval before the click.
@@ -91,6 +91,16 @@ The bound draft includes relevant form/dialog fields and bounded non-field text
 (such as recipient chips); unrelated page activity does not invalidate a scoped
 form. The summary can shorten long text, but approval binds its complete bounded
 value. Larger drafts fail honestly and require manual review/commit.
+
+`/look actions allow-all` opts the connected conversation into skipping Look's
+approval cards. Consequential clicks and `gaze_request_commit` then execute
+directly, so prepare-only requests must not call them. This can send, buy or delete
+without review. Page instructions can mislead the model.
+`/look actions` shows the mode and `/look actions confirm` restores prompts.
+Changing the mode stops the active task. Reconnecting, changing conversations or
+stopping restores confirmation. No setting is persisted.
+This does not bypass Chrome, OS, native-input or external permissions, grant raw
+browser code, expose secrets, transfer source ownership or permit replay.
 
 **A rare site may act on typing alone.** GET navigation may also have side effects.
 This is not a guarantee about arbitrary application JavaScript or hidden server
@@ -345,6 +355,12 @@ Structured scores and provenance: [`browser_actions_compare_summary.json`](../be
 The previous typed-only experiment remains reproducible as `tests/browser_actions/browser_actions_trial.py`, `.js`, and `browser_actions_page.html`; scores and provenance are in [`browser_actions_summary.json`](../benchmark/browser_actions_summary.json). Its primary results were 5/5 nine-field forms (10.897s median, 22 calls), 5/5 new-tab emails (13.792s median, 24 calls), 10/10 zero commits before approval and 10/10 trusted one-shot commits. Four turns initially omitted a commit handle and recovered. It used utterance-supplied personal details, specialized `open_mail`/`request_commit`, one page and Nous `reflection/beam-1.0-501b-a23b:free`; it was not an A/B or generality result. Its typing-side-effect counterexample remains an explicit warning, not a reason to require adapters under the newly agreed policy.
 
 ## Required verification
+
+Approval-mode regression: `python tests/browser_actions_chrome.py --approval-only --out /tmp/look-approvals`
+runs private Chrome with fake audio and no provider or stock-host browser tool.
+It covers protected review, opted-in clicks/commit/Enter, exact ownership,
+secret exclusions, lost replies and restoring prompts. Results are in `security.json`.
+
 
 - `.venv/bin/python -m unittest discover -s tests -t .`: **169 tests, OK**, exit 0.
 - `node tests/cursor_context_dom.js`: **24 passed, 0 failed**, exit 0.

@@ -745,7 +745,7 @@ class GazeSession:
             with turns.lock:
                 turns._disconnect()
         else:
-            self.tasks.stop()
+            self.tasks.set_approval_mode()
             self.clear_hover_snapshot()
             self.revoke_webcam()
 
@@ -1095,7 +1095,7 @@ class GazeSession:
 
     def close(self) -> None:
         TIMINGS.stop()
-        self.tasks.stop()
+        self.tasks.set_approval_mode()
         self.revoke_webcam()  # Revoke before transport teardown can block.
         # Remove the input source first. A start already inside the microphone lock
         # is then cancelled below; a later start sees its captured tab is closed.

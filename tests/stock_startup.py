@@ -135,7 +135,7 @@ def child(args):
         browser_calls = []
         def start_browser(raw, **kw):
             browser_calls.append(raw)
-            if raw.startswith("start --existing"):
+            if raw.startswith("start --extension"):
                 return cli._handle_slash_command(raw, **kw)
             if raw == "stop":
                 return "Look stopped."
@@ -199,7 +199,7 @@ def child(args):
                         else:
                             entry["allow_gateway_injection"] = grant
                         config_path.write_text(json.dumps(blocked))
-                        response = await look(sid, "start --existing")
+                        response = await look(sid, "start --extension")
                         assert "gateway_injection_not_granted" in str(response), response
                         assert not turns.connected and len(browser_calls) == before
                         assert not calls and not hooks
@@ -207,18 +207,12 @@ def child(args):
                         config_path.write_text(json.dumps(config))
                     output["permission_refusals_before_browser"] = denied
 
-                    # Real registered command and CLI disclosure; only Chrome attachment is fake.
-                    def attach_existing(*, on_ready, on_error):
-                        browser.cdp.source = "existing"
+                    # Real registered extension command with synthetic Chrome attachment.
+                    def attach_extension(*, on_ready, on_error):
+                        browser.cdp.source = "extension"
                         assert on_ready()
-                    with patch.object(browser.cdp, "start_existing", side_effect=attach_existing) as attach, \
-                            patch.object(type(browser.cdp), "connection_status",
-                                property(lambda _: dict(source="existing", state="connected", error=""))):
-                        disclosure = await look(sid, "start --existing")
-                        assert "/look start --existing --accept" in str(disclosure), disclosure
-                        assert not turns.connected and not calls and not hooks
-                        attach.assert_not_called()
-                        initial = await look(sid, "start --existing --accept")
+                    with patch.object(browser.cdp, "start_extension", side_effect=attach_extension) as attach:
+                        initial = await look(sid, "start --extension")
                         assert turns.connected and turns.native_input is not None, initial
                         attach.assert_called_once()
                     assert not calls and not hooks

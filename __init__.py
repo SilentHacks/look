@@ -156,6 +156,23 @@ def register(ctx: Any) -> None:
                 if callable(post):
                     context.run(post, text)
             return _first_run_guide(session, report=report)
+        if command.split()[:1] == ["actions"]:
+            parts = command.split()[1:]
+            if parts not in ([], ["confirm"], ["allow-all"]):
+                return "Usage: /look actions [confirm|allow-all]"
+            with turns.lock:
+                binding = turns.binding
+                if (not turns.connected or not binding or
+                        (binding["session_id"], binding["session_key"]) !=
+                        (kwargs.get("session_id"), kwargs.get("session_key"))):
+                    return "Run /look start in this conversation first."
+                if parts:
+                    session.tasks.set_approval_mode(binding["session_id"], allow_all=parts == ["allow-all"])
+                if session.tasks.approval_session == binding["session_id"]:
+                    return ("Look action approvals are off for this connection. Requested actions can send, buy or delete "
+                            "without a Look prompt. Page instructions can mislead the model. "
+                            "Use /look actions confirm to restore prompts. Reconnecting or stopping resets this.")
+                return "Look action approvals are on."
         if command in ("stop", "disconnect"):
             # Resources are machine-scoped, so Stop also releases another session's binding.
             # Keep host admission ownership until its real terminal hook arrives.
@@ -171,7 +188,7 @@ def register(ctx: Any) -> None:
         bind_only = command in ("calibrate", "mode webcam", "setup eyes", "demo")
         if (bind_only or command in ("", "connect", "start") or
                 command.split()[:1] in (["start"], ["connect"]) and
-                command.split()[1:] in (["--existing"], ["--existing", "--accept"], ["--extension"], ["--separate"])):
+                command.split()[1:] in (["--extension"], ["--separate"])):
             if not kwargs.get("session_id") or not kwargs.get("session_key"):
                 return "Run /look start in a live Hermes conversation."
             secret_context = copy_context()
@@ -229,8 +246,7 @@ def register(ctx: Any) -> None:
                             native.close()
                     if native.receipt_admission:
                         return "Checking the saved question. Restore this profile’s Look input permission before starting again."
-            requested_source = ("existing" if "--existing" in command else
-                                "extension" if "--extension" in command else
+            requested_source = ("extension" if "--extension" in command else
                                 "owned" if "--separate" in command else session.cdp.source)
             def ready():
                 with turns.lock:
@@ -273,8 +289,8 @@ def register(ctx: Any) -> None:
                         return "Look start was cancelled."
                     return _handle_slash_command(raw_args)
                 result = (_handle_slash_command(command, on_ready=ready, on_error=failed)
-                          if "--existing" in command or "--extension" in command else _handle_slash_command(command or "start"))
-            if (command.endswith(("--existing", "--extension")) or session.cdp.source != requested_source
+                          if "--extension" in command else _handle_slash_command(command or "start"))
+            if (command.endswith("--extension") or session.cdp.source != requested_source
                     or not session.cdp.is_connected):
                 return result  # Disclosure/refused source changes never bind the old browser.
             ready()
@@ -291,6 +307,8 @@ def register(ctx: Any) -> None:
                     result += "\n/look start to connect this conversation."
                 elif turns.binding["session_id"] != kwargs.get("session_id"):
                     result += "\nConnected to another conversation. /look start to use this one."
+                elif session.tasks.approval_session == turns.binding["session_id"]:
+                    result += "\nLook action approvals are off. /look actions confirm to restore prompts."
         return result
 
     # Restrict the connected companion session, not unrelated Hermes sessions.

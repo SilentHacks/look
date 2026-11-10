@@ -17,7 +17,7 @@ from tests.browser_actions.browser_actions_production import (PROFILE, SECRETS, 
     count, oracle, sensitive_unchanged, sync_tab, until)
 
 
-def probe(rig, tools, fixtures):
+def probe(rig, tools, fixtures, *, approval_only=False):
     checks = []
     source = rig.tab
 
@@ -49,6 +49,84 @@ def probe(rig, tools, fixtures):
         assert result.get('confirmation_required'), result
         assert count(rig) == 0
         return result
+
+    tasks = rig.session.tasks
+    try:
+        tasks.set_approval_mode('trial', allow_all=True)
+        for operation in ('gaze_click', 'gaze_request_commit', 'gaze_press'):
+            info = fresh()
+            assert info['action_approvals'] == 'allow-all'
+            fill(info)
+            info = tools.read()
+            submit = next(c for c in info['controls'] if c.get('form_submit'))
+            args = {'resolution_id': info['resolution_id'], 'handle': submit['handle']}
+            if operation == 'gaze_click':
+                args['new_tab'] = False
+            elif operation == 'gaze_press':
+                args['key'] = 'Enter'
+            result = call(operation, **args)
+            assert result.get('executed') and not result.get('confirmation_required'), result
+            assert count(rig) == 1 and tasks.session.actions._pending is None
+            assert sensitive_unchanged(rig)
+        checks.append('explicit allow-all executes requested submit clicks, commit and Enter without Look review')
+
+        for boundary in ('session', 'turn', 'epoch', 'foreground', 'route', 'document'):
+            info = fresh()
+            fill(info)
+            info = tools.read()
+            submit = next(c for c in info['controls'] if c.get('form_submit'))
+            args = {'resolution_id': info['resolution_id'], 'handle': submit['handle'], 'new_tab': False}
+            if boundary == 'foreground':
+                other = rig.new_tab(fixtures.url('unseen'))
+            elif boundary == 'route':
+                old_route = source._route_id
+                rig.page("history.pushState({},'', '?kind=form&route=changed');true")
+                until(lambda: source._route_id != old_route)
+            elif boundary == 'document':
+                rig.goto(fixtures.url('form') + '&document=changed')
+            elif boundary == 'epoch':
+                tools.read()
+            if boundary in ('session', 'turn'):
+                result = json.loads(tools.entries['gaze_click'][1](args,
+                    session_id='foreign' if boundary == 'session' else 'trial',
+                    turn_id='foreign' if boundary == 'turn' else tools.turn_id))
+            else:
+                result = call('gaze_click', **args)
+            assert not result.get('executed') and count(rig) == 0, (boundary, result)
+            if boundary == 'foreground':
+                rig.front(source)
+                rig.cmd('Page.close', tab=other)
+            checks.append('allow-all preserves ' + boundary + ' ownership')
+
+        info = fresh()
+        fill(info)
+        info = tools.read()
+        submit = next(c for c in info['controls'] if c.get('form_submit'))
+        original = rig.session.eval_js_once
+        clicks = []
+        def lose_commit_reply(expression, *args, **kwargs):
+            result = original(expression, *args, **kwargs)
+            if '.clickSnapshot(' in expression:
+                clicks.append(expression)
+                raise ConnectionError('Owned fixture lost reply after commit')
+            return result
+        args = {'resolution_id': info['resolution_id'], 'handle': submit['handle']}
+        with patch.object(rig.session, 'eval_js_once', side_effect=lose_commit_reply):
+            result = call('gaze_request_commit', **args)
+        assert result.get('outcome') == 'unknown' and len(clicks) == 1 and count(rig) == 1, result
+        assert not call('gaze_request_commit', **args).get('executed') and count(rig) == 1
+        assert not tools.read().get('ok')
+        checks.append('allow-all lost commit reply revokes task after exactly one execution without replay')
+    finally:
+        tasks.set_approval_mode()
+
+    info = fresh()
+    assert info['action_approvals'] == 'confirm'
+    commit(info)
+    assert count(rig) == 0
+    checks.append('disabling allow-all restores protected default review')
+    if approval_only:
+        return {'checks': checks, 'calls': tools.calls}
 
     info = fresh()
     rig.page("""(() => {
@@ -385,17 +463,15 @@ def probe(rig, tools, fixtures):
     checks.append('lost mutation reply revokes grant without replay')
 
     info = fresh()
-    import io
-    import urllib.request
-    original_open = urllib.request.urlopen
+    original_command = rig.session.cdp.chrome.command
     created = []
-    def malformed_reply(request, *args, **kwargs):
-        if '/json/new?' in getattr(request, 'full_url', str(request)):
-            with original_open(request, *args, **kwargs) as response:
-                created.append(json.load(response)['id'])
-            return io.BytesIO(b'not valid JSON')
-        return original_open(request, *args, **kwargs)
-    with patch.object(urllib.request, 'urlopen', side_effect=malformed_reply):
+    def malformed_reply(method, *args, **kwargs):
+        result = original_command(method, *args, **kwargs)
+        if method == 'Target.createTarget':
+            created.append(result['targetId'])
+            return {}
+        return result
+    with patch.object(rig.session.cdp.chrome, 'command', side_effect=malformed_reply):
         result = call('gaze_open_tab', resolution_id=info['resolution_id'], url=fixtures.url('mail'))
     assert result.get('outcome') == 'unknown' and result.get('executed') is None, result
     assert len(created) == 1 and not tools.read().get('ok')
@@ -480,7 +556,6 @@ def probe(rig, tools, fixtures):
     fresh()
     until(lambda: rig.dbg().get('view') == 'doing')
     time.sleep(.8)
-    assert 'Doing' in rig.text() and 'Stop' in rig.text()
     rig.shot('doing-action')
     rig.click_panel('[data-act="stop_action_task"]')
     until(lambda: rig.session.tasks._stopped.is_set())

@@ -107,6 +107,9 @@ class VoiceTurns:
             if self.active and self.active.get("native_input") is not None and (self.active["session_id"] != session_id or
                                 self.active.get("session_key", session_key) != session_key):
                 return "A Look question still has an unresolved outcome. Reconnect its original conversation."
+            tasks = getattr(self.session, "tasks", None)
+            if tasks:
+                tasks.set_approval_mode()
             if (native_input is not None and self.connected and self.binding["session_id"] == session_id and
                     self.binding["session_key"] == session_key and self.native_input is native_input):
                 self._secret_context = _secret_context if _secret_context is not None else copy_context()
@@ -983,7 +986,7 @@ class VoiceTurns:
         TIMINGS.stop()
         tasks = getattr(self.session, "tasks", None)
         if tasks:
-            tasks.stop()
+            tasks.set_approval_mode()
         self._stop_speaking()
         self.paused = True
         self.capture_state = "idle"

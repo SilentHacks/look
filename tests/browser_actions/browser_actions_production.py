@@ -395,6 +395,7 @@ def runtime_credentials(provider):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--offline', action='store_true')
+    parser.add_argument('--approval-only', action='store_true', help='Check approval mode without host browser tools or providers')
     parser.add_argument('--provider', choices=MODELS, default='nous')
     parser.add_argument('--model', choices=tuple(MODELS.values()))
     parser.add_argument('--runs', type=int, default=5)
@@ -402,6 +403,8 @@ def main():
     parser.add_argument('--fixtures', nargs='+', choices=KINDS, default=list(KINDS))
     parser.add_argument('--resume', type=Path)
     args = parser.parse_args()
+    if args.approval_only:
+        args.offline = True
     if args.runs < 1:
         parser.error('--runs must be positive')
     args.model = args.model or MODELS[args.provider]
@@ -430,8 +433,9 @@ def main():
             rig.tab = until(lambda: next((t for t in rig.session.cdp._tabs.values() if t.is_connected and t._ui_frames), None))
             rig.front(rig.tab)
             tools = ProductionTools(rig)
-            security = probe(rig, tools, fixtures)
-            security['browser_exec_defaults'] = default_browser_check(rig)
+            security = probe(rig, tools, fixtures, approval_only=args.approval_only)
+            if not args.approval_only:
+                security['browser_exec_defaults'] = default_browser_check(rig)
             args.out.joinpath('security.json').write_text(json.dumps(security, indent=2))
             if args.offline:
                 return

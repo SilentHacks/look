@@ -85,23 +85,42 @@ class FirstRunTests(unittest.TestCase):
             command("start --existing --accept", session_key="other", session_id="other")
             self.assertIs(ctx.turns.binding, binding)
 
+    def test_action_approval_opt_in_is_connection_owned_and_resets(self):
+        plugin, session, ctx, command, _ = self.register(None)
+        ctx.turns.bind(session_key="key", session_id="owner")
+        def run(text, owner="owner", key="key"):
+            return command(text, session_id=owner, session_key=key)
+        self.assertIn("on", run("actions"))
+        self.assertIn("off", run("actions allow-all"))
+        self.assertEqual(session.tasks.approval_session, "owner")
+        run("actions confirm", key="foreign")
+        self.assertEqual(session.tasks.approval_session, "owner")
+        ctx.turns.bind(session_key="key", session_id="owner")
+        self.assertEqual(session.tasks.approval_session, "")
+        run("actions allow-all")
+        self.assertIn("on", run("actions confirm"))
+        self.assertEqual(session.tasks.approval_session, "")
+        run("actions allow-all")
+        ctx.turns._disconnect()
+        self.assertEqual(session.tasks.approval_session, "")
+
     def test_late_ready_cannot_replace_newer_binding_or_revive_stop(self):
         plugin, session, ctx, command, _ = self.register(None)
         callbacks = []
         def pending(raw, *, on_ready=None, on_error=None):
-            session.cdp.source = "existing"
+            session.cdp.source = "extension"
             if on_ready:
                 callbacks.append(on_ready)
             return "Waiting"
         with patch.object(plugin, "_handle_slash_command", side_effect=pending):
-            command("start --existing --accept", session_key="old", session_id="old")
+            command("start --extension", session_key="old", session_id="old")
             ctx.turns.bind(session_key="new", session_id="new")
             binding = ctx.turns.binding
             ctx.turns.pending.append({"request_id": "retained"})
             callbacks.pop()()
             self.assertIs(ctx.turns.binding, binding)
             self.assertEqual(ctx.turns.pending, [{"request_id": "retained"}])
-            command("start --existing --accept", session_key="new", session_id="new")
+            command("start --extension", session_key="new", session_id="new")
             command("stop", session_key="new", session_id="new")
             callbacks.pop()()
             self.assertIsNone(ctx.turns.binding)
@@ -115,14 +134,14 @@ class FirstRunTests(unittest.TestCase):
                 callbacks, messages = [], []
                 ctx.post_message = lambda text: messages.append((destination.get(), text))
                 def pending(raw, *, on_ready=None, on_error=None):
-                    session.cdp.source = "existing"
+                    session.cdp.source = "extension"
                     if on_error:
                         callbacks.append(on_error)
                     return "Looking for Chrome"
                 token = destination.set("original")
                 try:
                     with patch.object(plugin, "_handle_slash_command", side_effect=pending):
-                        command("start --existing --accept", session_key="key", session_id="owner")
+                        command("start --extension", session_key="key", session_id="owner")
                         if outcome == "stopped":
                             command("stop", session_key="key", session_id="owner")
                         elif outcome == "rebound":

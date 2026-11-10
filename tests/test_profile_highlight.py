@@ -1,18 +1,14 @@
-"""Stock registered commands, fake Chrome consent and synthetic profile secrets only."""
+"""Deferred extension binding and synthetic profile secrets only."""
 from contextvars import ContextVar
 import json
-from pathlib import Path
-import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze import cli
 from hermes_gaze.runtime import service
-from hermes_gaze.browser.consent import ConsentChrome
-from tests.test_chrome_consent import FakeChrome, until
 from tests import test_first_run
+from tests.test_chrome_consent import until
 
 
 class ProfileHighlight(unittest.TestCase):
@@ -20,42 +16,19 @@ class ProfileHighlight(unittest.TestCase):
     setUp = test_first_run.FirstRunTests.setUp
 
     def connection(self):
-        directory = self.enterContext(tempfile.TemporaryDirectory())
-        fake = FakeChrome(directory, allow=False)
-        self.addCleanup(fake.close)
         plugin, session, ctx, command, _ = self.register(None)
-        session.cdp._owned_chrome.profile = Path(directory) / 'look'
-        original = ConsentChrome.__init__
-        def initialize(root, **kwargs):
-            original(root, **dict(kwargs, metadata_path=fake.metadata))
-        self.enterContext(patch.object(ConsentChrome, '__init__', initialize))
-        self.enterContext(patch.object(plugin, '_handle_slash_command', wraps=cli._handle_slash_command))
-        self.enterContext(patch.object(cli, 'get_shared_session', return_value=session))
-        self.enterContext(patch.object(cli, 'get_shared_server', return_value=Mock()))
-        self.enterContext(patch.object(cli.platform, 'system', return_value='Darwin'))
-        self.enterContext(patch.object(cli.platform, 'machine', return_value='arm64'))
+        callbacks = []
+        def pending(raw, *, on_ready=None, on_error=None):
+            session.cdp.source = 'extension'
+            callbacks.append(on_ready)
+            return 'Waiting'
+        self.enterContext(patch.object(plugin, '_handle_slash_command', side_effect=pending))
         self.enterContext(patch.object(service, '_VOICE_TURNS', ctx.turns))
         self.enterContext(patch.object(service, '_CONFIG', None))
         def run(text, owner='session'):
             return command(text, session_id=owner, session_key=owner + '-key')
+        fake = SimpleNamespace(allow=SimpleNamespace(set=lambda: callbacks.pop()()))
         return fake, session, ctx.turns, run
-
-    def test_stop_restart_pending_consent_cannot_bind_old_attempt(self):
-        fake, session, turns, run = self.connection()
-        run('start --existing --accept')
-        self.assertTrue(fake.requested.wait(2))
-        old_root, old_worker = session.cdp.chrome, session.cdp._consent_worker
-        run('stop')
-        run('start --existing --accept')
-        until(lambda: fake.upgrades == 2)
-        self.assertFalse(old_root.live)
-        old_worker.join(3)
-        self.assertFalse(old_worker.is_alive())
-        fake.allow.set()
-        until(lambda: turns.connected)
-        self.assertIsNot(session.cdp.chrome, old_root)
-        self.assertEqual(turns.binding['session_id'], 'session')
-        self.assertEqual(fake.upgrades, 2)
 
     def test_profile_rotation_rebind_and_revoked_delayed_asr(self):
         profile = ContextVar('synthetic_profile', default={})
@@ -79,7 +52,7 @@ class ProfileHighlight(unittest.TestCase):
             own = {'TYPESAFE_API_KEY': 'synthetic-owner'}
             token = profile.set(own)
             try:
-                run('start --existing --accept')
+                run('start --extension')
             finally:
                 profile.reset(token)
             self.assertEqual(reads, [])

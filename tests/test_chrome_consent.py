@@ -422,14 +422,15 @@ class ConsentWire(unittest.IsolatedAsyncioTestCase):
 
 
 class Integration(unittest.TestCase):
-    def test_disclosure_does_not_read_discovery_and_source_change_is_explicit(self):
+    def test_removed_command_does_not_read_discovery_or_change_source(self):
         session = GazeSession("http://127.0.0.1:1")
         self.addCleanup(session.close)
         with patch.object(cli, "get_shared_session", return_value=session), \
              patch.object(cli.platform, "system", return_value="Darwin"), \
              patch.object(cli.platform, "machine", return_value="arm64"), \
              patch("hermes_gaze.browser.consent.discovery_port", side_effect=AssertionError("personal read")):
-            cli._handle_slash_command("start --existing")
+            result = cli._handle_slash_command("start --existing")
+            self.assertIn("--extension", result)
             self.assertEqual(session.cdp.source, "owned")
             self.assertFalse(session.cdp._tabs)
 

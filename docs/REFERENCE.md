@@ -32,43 +32,10 @@ auxiliary inference. Questions/evidence may persist in Hermes history.
 
 ### Use my existing Chrome
 
-1. In your ordinary stable Chrome 145+, enter `chrome://inspect/#remote-debugging`
-   and enable **Allow remote debugging for this browser instance**. Look never
-   launches, restarts or navigates your existing browser during setup.
-2. Run `/look start --existing`, read the disclosure, then
-   `/look start --existing --accept`. Approve only the Chrome request you just
-   initiated. One connection serves all supported tabs. Approval can take up to
-   120 seconds. `/look stop` cancels. Cancel any remaining native prompt too.
-3. `/look status` distinguishes discovery, approval waiting, connecting, ready
-   and failure. Startup failures also appear as Hermes notices when supported
-   by the frontend. Open an ordinary HTTP(S) tab in the authorized profile.
-   No local-file tabs, private/guest contexts or unidentifiable profiles.
-   Look requires `Target.getBrowserContexts.defaultBrowserContextId`, introduced
-   in [Chrome 145.0.7578.0](https://github.com/chromium/chromium/commit/48591f824fad6d80f621b3f2905c12b6f5a75d1b).
-   Chrome's native approval feature starts at 144, but 144 is insufficient for
-   Look. If Chrome cannot provide a safe regular-profile identity, Look refuses
-   the connection. Update Chrome. Look never guesses the context.
-4. `/look stop` removes Look's overlays/scripts/sessions and cancels capture,
-   output and action approvals. Chrome, tabs and data remain. Remote debugging
-   may still be enabled: turn it off in Chrome at the address above. Root loss,
-   denial and timeout never trigger background consent retries.
-
-Chrome grants **broad debugger authority**, including signed-in pages and browser
-data, not a read-only/pointed-element permission or authenticated Look identity.
-Look instruments supported background web tabs to follow focus, but only the
-foreground protected frame receives inbox content. Bounded question evidence
-goes to your configured model and may remain in Hermes history (see Privacy).
-Other authorized debuggers/local software are outside the website isolation
-boundary. This native-consent option adds no extension, relay, MCP, copied profile,
-dependency or raw debugger tools. Only Chrome's narrowly validated discovery file is
-read, after explicit acceptance. No personal profile stores are read by discovery.
-
-Support lane: stable Chrome at its standard macOS location, one provable regular
-context. Multiple signed-in profiles, incognito/guest, custom data roots and
-managed policy behavior are not verified. Unknown/different contexts are
-excluded. New-tab operations pin and validate the source context or fail.
-There is no silent fallback to separate Chrome. After Stop, use
-`/look start --separate` explicitly to change source.
+Use `/look setup extension`, then `/look start --extension` and connect the
+selected tab from Chrome's Extensions menu. See [extension setup](CHROME_EXTENSION.md).
+The native-consent `/look start --existing` command has been removed.
+Use `/look start --separate` for Look's separate browser.
 
 Verification: fake-server consent/denial/cancellation/routing and disposable
 Chrome 156.0.8078.81 flattened renderer/Stop/context-navigation checks pass.
@@ -343,12 +310,24 @@ general vocabulary. No per-site adapters or arbitrary model code. New tabs retur
 their own structure and become the task target. Stale epochs return fresh
 structure without replaying the rejected operation.
 
-`gaze_request_commit` shows the existing glass confirmation card, including safe
-field content and destination. Submit, Send, Buy, Delete, publish and ambiguous
-controls require a trusted primary click. Approval is content-bound and single
-use. Synthetic events, page/answer text, raw model calls, speech and keys cannot
-approve. Esc or the visible Stop cancels further task steps. Unknown mutation
-outcomes revoke the task and must not be retried automatically.
+By default `gaze_request_commit` shows the glass confirmation card with safe field
+content and destination. Submit, Send, Buy, Delete, publish and ambiguous controls
+require a trusted primary click. Approval is content-bound and single-use.
+
+In the connected conversation, `/look actions allow-all` explicitly turns off
+Look's action approval prompts. Requested consequential clicks and
+`gaze_request_commit` then execute directly. This can send, buy or delete without
+review, including if page instructions mislead the model. `/look actions` and
+`/look status` show when prompts are off. `/look actions confirm` restores them.
+Changing the mode stops the current task. Ask again to continue.
+Reconnecting, switching conversations or stopping resets the mode to confirmation.
+It is not saved to configuration.
+
+This skips only Look's approval cards. Chrome, OS, native-input and external
+permissions remain unchanged, as do exact session/turn/tab/document/route/epoch
+ownership, secret-field exclusions and the ban on raw model browser code.
+Esc or Stop cancels further steps. Unknown mutation outcomes revoke the task and
+must not be retried automatically.
 
 Hermes uses its own memory/context for personal details and asks for missing ones.
 Password, payment and similar secret fields are never read or written. **A rare

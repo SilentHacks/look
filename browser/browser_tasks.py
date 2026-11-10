@@ -40,6 +40,13 @@ class BrowserTasks:
         self.grant = None
         self.snapshot = None
         self.running = False
+        self.approval_session = ""
+
+    def set_approval_mode(self, session_id="", *, allow_all=False):
+        """Trusted slash command only. Changes revoke any in-flight task."""
+        with self._lock:
+            self.stop()
+            self.approval_session = session_id if allow_all else ""
 
     def begin(self, session_id, turn_id, owner=None):
         """Only trusted user-turn hooks call this; never a model tool or page intent."""
@@ -57,6 +64,7 @@ class BrowserTasks:
                 return failure("No captured browser owner")
             grant = {key: owner.get(key) for key in ('browser_target', 'browser_document', 'browser_route')}
             grant.update(session_id=session_id, turn_id=turn_id, stop_event=threading.Event())
+            grant['allow_all'] = self.approval_session == session_id
             self.grant = grant
             self.snapshot = None
             self._stopped = grant['stop_event']
@@ -143,7 +151,8 @@ class BrowserTasks:
         for control in result.get('controls', []):
             if 'url' in control:
                 control['url'] = safe_url(control['url'])
-        return {**result, 'resolution_id': self.snapshot['resolution_id']}
+        return {**result, 'resolution_id': self.snapshot['resolution_id'],
+                'action_approvals': 'allow-all' if self.grant['allow_all'] else 'confirm'}
 
     def _current(self, resolution_id):
         self._check_owner()
@@ -173,7 +182,7 @@ class BrowserTasks:
         self._display('doing')
         return {**self._read(), 'opened_new_tab': new_tab}
 
-    def _click(self, handle, *, new_tab=False):
+    def _click(self, handle, *, new_tab=False, force_confirmation=False):
         rid = self.snapshot['resolution_id']
         live = self.session.actions._inspect(self.snapshot, handle, rid)
         if not live.get('ok'):
@@ -184,10 +193,11 @@ class BrowserTasks:
             destination = self._dom('actionLinkUrl', handle, live['fingerprint'])
             if not destination.get('ok'):
                 return destination
-            if new_tab or live.get('new_tab'):
+            if not force_confirmation and (new_tab or live.get('new_tab')):
                 return {**self._navigate(destination['url'], new_tab=True), 'executed': True}
             self._destination(destination['url'])
-        result = self.session.actions.click(handle, rid)
+        result = self.session.actions.click(handle, rid, force_confirmation=force_confirmation,
+                                            skip_confirmation=self.grant['allow_all'])
         if result.get('executed'):
             capture = self.session.cdp.action_after_click(
                 same_document=live.get('tag') != 'a' or bool(live.get('same_document')), **self._owner())
@@ -241,7 +251,7 @@ class BrowserTasks:
                         return failure('Choose new_tab:true for a requested new-tab link, false for buttons or same-tab links')
                     result = self._click(args.get('handle'), new_tab=args['new_tab'])
                 elif op == 'request_commit':
-                    result = self.session.actions.request_commit(args.get('handle'), args.get('resolution_id'))
+                    result = self._click(args.get('handle'), force_confirmation=True)
                 elif op == 'press':
                     key, handle = args.get('key'), args.get('handle')
                     if key in ('Enter', 'Space'):

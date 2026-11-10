@@ -94,9 +94,9 @@ GAZE_HIGHLIGHT_SCHEMA = _schema(
 
 GAZE_CLICK_SCHEMA = _schema(
     "gaze_click",
-    "Click a captured non-consequential control. Use the current resolution_id from gaze_read. "
-    "Consequential or ambiguous controls open trusted confirmation instead; gaze_request_commit explicitly "
-    "requests review. Never claim execution unless executed is true. On stale resolution use the returned "
+    "Click a captured control requested by the user. Use the current resolution_id from gaze_read. "
+    "Consequential or ambiguous controls open trusted confirmation by default. With action_approvals=allow-all "
+    "they execute without a Look prompt. Never claim execution unless executed is true. On stale resolution use the returned "
     "fresh structure and retry with its epoch; never retry an unknown outcome. Explicitly choose new_tab: "
     "true for a link when the user requests a NEW tab; false for buttons and same-tab links. "
     "Executed clicks return fresh structure and epoch; use that epoch for the next step.",
@@ -180,9 +180,9 @@ GAZE_SCROLL_SCHEMA = _schema("gaze_scroll",
 GAZE_WAIT_SCHEMA = _schema("gaze_wait", "Wait briefly for page changes, then return fresh structure and epoch.",
     {"seconds": {"type": "number", "minimum": 0, "maximum": 2}}, ["seconds"])
 GAZE_REQUEST_COMMIT_SCHEMA = _schema("gaze_request_commit",
-    "Show the user's protected confirmation card for one captured Submit/Send/Buy/Delete/publish or ambiguous control. "
-    "Required to finish preparing a draft for review even if the user says 'do not send/submit'. "
-    "This NEVER approves or executes the commit. Pass its exact control handle and latest epoch, then stop and ask the user to click.",
+    "Request a captured Submit/Send/Buy/Delete/publish or ambiguous action. By default this opens protected review. "
+    "When gaze_read reports action_approvals=allow-all, this executes without a Look prompt. "
+    "Never call for 'prepare only' or 'do not send/submit' in allow-all mode. Stop on confirmation_required and ask the user to click.",
     {"resolution_id": _EPOCH_ARG, "handle": _HANDLE_ARG}, ["resolution_id", "handle"])
 
 

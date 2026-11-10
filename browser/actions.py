@@ -129,7 +129,8 @@ class SnapshotActions:
     def request_commit(self, handle: str, resolution_id: int) -> dict[str, Any]:
         return self.click(handle, resolution_id, force_confirmation=True)
 
-    def click(self, handle: str, resolution_id: int, *, force_confirmation: bool = False) -> dict[str, Any]:
+    def click(self, handle: str, resolution_id: int, *, force_confirmation: bool = False,
+              skip_confirmation: bool = False) -> dict[str, Any]:
         with self._lock:
             self.invalidate()
             snapshot, error = self._current(resolution_id, [handle])
@@ -138,7 +139,7 @@ class SnapshotActions:
             live = self._inspect(snapshot, handle, resolution_id)
             if not live.get("ok"):
                 return live
-            if not force_confirmation and not control_requires_confirmation(live):
+            if skip_confirmation or not force_confirmation and not control_requires_confirmation(live):
                 return self._execute(snapshot, handle, resolution_id, live["fingerprint"])
             action_id = secrets.token_urlsafe(24)
             label = str(live.get("label") or handle)

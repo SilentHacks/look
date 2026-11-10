@@ -30,6 +30,34 @@ class BrowserTaskTests(unittest.TestCase):
         self.assertTrue(self.tasks.begin('session', 'next-turn', self.owner)['ok'])
         self.assertNotEqual(self.tasks._authorized('session'), '')
 
+    def test_approval_mode_is_explicit_session_owned_and_revokes_current_task(self):
+        self.assertFalse(self.tasks.grant['allow_all'])
+        self.tasks.set_approval_mode('session', allow_all=True)
+        self.assertFalse(self.tasks.handle('read', {}, session_id='session', turn_id='turn')['ok'])
+        self.tasks.begin('session', 'next', self.owner)
+        self.assertTrue(self.tasks.grant['allow_all'])
+        self.tasks.begin('foreign', 'next', self.owner)
+        self.assertFalse(self.tasks.grant['allow_all'])
+        self.tasks.set_approval_mode()
+        self.tasks.begin('session', 'again', self.owner)
+        self.assertFalse(self.tasks.grant['allow_all'])
+
+    def test_commit_cannot_navigate_to_debugger_in_either_approval_mode(self):
+        for allow_all in (False, True):
+            self.tasks.set_approval_mode('session', allow_all=allow_all)
+            turn = str(allow_all)
+            self.tasks.begin('session', turn, self.owner)
+            self.tasks.snapshot = {'resolution_id': 1}
+            self.tasks._current = lambda epoch: None
+            self.session.actions._inspect.return_value = {
+                'ok': True, 'tag': 'a', 'url': 'http://127.0.0.1:9333/json',
+                'fingerprint': 'captured'}
+            self.tasks._dom = Mock(return_value={'ok': True, 'url': 'http://127.0.0.1:9333/json'})
+            result = self.tasks.handle('request_commit', {'resolution_id': 1, 'handle': '@link'},
+                                       session_id='session', turn_id=turn)
+            self.assertFalse(result['ok'])
+            self.session.actions.click.assert_not_called()
+
     def test_request_stop_does_not_revoke_another_turn(self):
         self.assertFalse(self.tasks.stop("foreign", "turn")["ok"])
         self.assertFalse(self.tasks._stopped.is_set())
