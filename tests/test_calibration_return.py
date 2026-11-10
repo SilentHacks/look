@@ -220,6 +220,7 @@ class SetupConnection(unittest.TestCase):
         host = WebcamHost(lambda *_: False)
         session.webcam = host
         returned = []
+        session.cdp.chrome._ws = Mock()
         with patch.object(service, "_VOICE_TURNS", turns), \
              patch.object(type(session.cdp), "is_connected", new_callable=PropertyMock, return_value=True), \
              patch.object(session.cdp, "capture_return_owner", return_value=source), \
@@ -231,13 +232,49 @@ class SetupConnection(unittest.TestCase):
             self.assertTrue(turns.coach["greeted"])
             self.assertTrue(host.on_return(False, lambda: True)["ok"])
             self.assertEqual(returned, [source])
+            # No attached page is not a disconnected approved browser.
+            with patch.object(type(session.cdp), "is_connected", new_callable=PropertyMock, return_value=False):
+                self.assertTrue(host._setup_valid())
+            fallback = dict(browser_target="fallback", browser_document="start", browser_route=0)
+            with patch.object(session.cdp, "open_start_page", return_value=fallback):
+                self.assertTrue(host.on_return(True, lambda: True)["ok"])
+            self.assertTrue(host.on_return(False, lambda: True)["ok"])
+            self.assertEqual(returned[-2:], [fallback, fallback])
             turns.bind(session_key="key", session_id="session")  # New connection, even to the same session.
             self.assertFalse(host.on_return(False, lambda: True)["ok"])
-            self.assertEqual(len(returned), 1)
+            self.assertEqual(len(returned), 3)
             turns.coach["rehearsed"] = False
             host.on_rehearsed()
             self.assertFalse(turns.coach["rehearsed"])
             self.assertIsNone(session.microphone._stream)
+
+    def test_browser_replacement_loss_and_stop_revoke_setup_without_page_dependency(self):
+        session = GazeSession("http://127.0.0.1:1")
+        self.addCleanup(session.close)
+        turns = VoiceTurns(SimpleNamespace(), session)
+        turns.bind(session_key="key", session_id="session")
+        session.configure(mode="webcam")
+        host = WebcamHost(lambda *_: False)
+        session.webcam = host
+        browser = session.cdp.chrome
+        connection = browser._ws = object()
+        with patch.object(service, "_VOICE_TURNS", turns), \
+             patch.object(session.cdp, "capture_return_owner", return_value=None), \
+             patch.object(host, "start", return_value=host.status()):
+            session.start_webcam()
+            self.assertTrue(host._setup_valid())
+            browser._ws = object()
+            self.assertFalse(host._setup_valid())
+            browser._ws = None
+            self.assertFalse(host._setup_valid())
+            browser._ws = connection
+            self.assertTrue(host._setup_valid())
+            session.cdp.chrome = SimpleNamespace(_ws=connection, live=True)
+            self.assertFalse(host._setup_valid())
+            session.cdp.chrome = browser
+            session.cdp._stop.set()
+            self.assertFalse(host._setup_valid())
+        browser._ws = None  # The synthetic identity is not a socket to close.
 
 
 if __name__ == "__main__":

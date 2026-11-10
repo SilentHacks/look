@@ -854,6 +854,8 @@ class GazeSession:
         from ..runtime import service
         turns = service._VOICE_TURNS
         binding = turns.binding if turns is not None else None
+        browser = self._cdp.chrome
+        connection = browser._ws
         destination = None
         def publish_tracker():
             if turns is not None and service._VOICE_TURNS is turns:
@@ -871,15 +873,20 @@ class GazeSession:
             if host.state not in ("running", "failed"):
                 return host.status()
         def connected():
+            # Page attachment/foreground is not the lifetime of the approved browser.
             return (self.webcam is host and self.tracker.mode == "webcam" and binding is not None
                     and service._VOICE_TURNS is turns and turns.binding is binding
-                    and not turns.closed and self._cdp.is_connected)
+                    and not turns.closed and not self._cdp._stop.is_set()
+                    and self._cdp.chrome is browser and connection is not None
+                    and browser._ws is connection and getattr(browser, "live", True))
         def return_to_browser(start_page, valid):
+            nonlocal destination
             owned = lambda: valid() and connected()
             if not owned():
                 return {"ok": False, "error": "Setup connection changed. Run /look calibrate in Hermes again."}
-            owner = self._cdp.open_start_page(owned) if start_page else destination
-            return self._cdp.return_to_document(owner, owned)
+            if start_page:
+                destination = self._cdp.open_start_page(owned)
+            return self._cdp.return_to_document(destination, owned)
         def rehearsed():
             if connected():
                 with turns.lock:

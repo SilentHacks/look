@@ -4,6 +4,11 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Eye tracking now stays in its owned camera window when browsing destinations
+  disappear or reattach, while the approved browser connection remains live.
+  An explicit separate-browser start-page fallback becomes the next return target.
+  Disconnect, browser replacement, Stop and Use cursor still revoke the camera.
+
 - Removed the native-consent start command. Use the extension for your usual
   Chrome or `start --separate` for Look's browser.
 - Added connection-scoped `/look actions allow-all` to execute requested actions

@@ -98,11 +98,19 @@ your face out of view interrupts practice. No question is sent to Hermes.
 Choose **Return to browsing** or **Skip practice** to return to the page where you
 started setup. The camera keeps running in its own window.
 If that page has closed, changed or can’t be brought forward, choose **Try again**
-to check it again or **Open start page** to open Look’s local page instead.
+to check it again. In Look’s separate browser, **Open start page** opens Look’s
+local page and makes it the next return destination. The extension refuses this
+local-file fallback in your browser; open an ordinary web page there and run
+`/look calibrate` again to capture that destination.
 Look does not navigate an unrelated tab or reopen the missing page by its URL.
 
 The same camera process, document and video stream stay live behind browsing.
 Its retained **Eye tracking** page offers return, recalibration and **Use cursor**.
+Closing the last supported browsing tab or waiting for a page to reattach does not
+stop the camera while the same approved browser connection remains live. There is
+no fixation delivery until a supported foreground page has a measured viewport.
+Stop, disconnect, browser-connection replacement and **Use cursor** still revoke
+the camera; a later connection cannot inherit it.
 In the companion, press **Q** before the first answer, or choose **Eye tracking**
 in an answer's footer, to open camera controls and **Use cursor**. Camera/session
 loss revokes setup return and stops the corresponding runtime without joining

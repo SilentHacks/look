@@ -293,6 +293,62 @@ def scenario(chrome, mode, out=None):
                 time.sleep(.15)
                 check(name + '_timers_disabled', evaluate('!window.fixtureTimer', context))
             check('website_cannot_access_isolated_api', evaluate('typeof window.__HERMES_GAZE_OVERLAY__ === "undefined"'))
+            if mode == 'webcam':
+                from tests.calibration_chrome import HEADLESS, Scripted, Window, fixture as camera_fixture
+                from tests.test_webcam import appearance_observations
+                from hermes_gaze.browser.webcam import WebcamHost
+                from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
+                camera_out = out or directory
+                camera_out.mkdir(parents=True, exist_ok=True)
+                video = camera_fixture(directory)
+                screen = evaluate('({left:screen.availLeft,top:screen.availTop,width:screen.availWidth,height:screen.availHeight,screen_width:screen.width,screen_height:screen.height,screen_left:screen.availLeft,screen_top:screen.availTop,dpr:devicePixelRatio})')
+                session.configure(mode='webcam')
+                host = WebcamHost(session._accept_webcam_point, estimator=Scripted(), fake_video=video,
+                    profile_path=directory / 'calibration.json', chrome_args=HEADLESS,
+                    on_use_cursor=lambda: session.configure(mode='hover'))
+                host._save(AppearanceEstimator().calibrate(appearance_observations(), screen))
+                Scripted.script = lambda f, t: ScreenPoint(screen['left'] + screen['width'] / 2,
+                                                         screen['top'] + screen['height'] / 2, t)
+                session.webcam = host
+                window = None
+                try:
+                    session.start_webcam()
+                    until(lambda: host.state in ('running', 'failed'), 25)
+                    window = Window(host, camera_out)
+                    until(lambda: window.state()['face'])
+                    host._ui('checkResult', host._result_words('good', False)); window.wait('result')
+                    identity = (host._process.pid, host._context)
+                    window.click('done'); window.wait('tracking', 15)
+                    check('webcam_return_observes_exact_extension_document', session.cdp._last_foreground == owner and evaluate('document.hasFocus() && !document.hidden'))
+                    raw('Input.dispatchMouseEvent', dict(type='mouseMoved', x=300, y=240))
+                    delivered = host.delivered
+                    until(lambda: host.delivered > delivered + 3, 15)
+                    check('extension_receives_post_handoff_fake_camera_predictions', session.ring_buffer.latest().source == 'webcam')
+                    # Lose only the saved document, not the approved native connection.
+                    raw('Page.navigate', {'url': url + 'replacement'})
+                    until(lambda: tab._context_unique_id and tab._context_unique_id != owner['browser_document'])
+                    window.click('return'); window.wait('return-error')
+                    check('extension_missing_destination_never_reports_focus', 'That page is no longer available' in window.text())
+                    window.click('start-page'); window.wait('return-error')
+                    check('extension_fallback_never_opens_local_file_in_borrowed_browser', 'ordinary web page' in window.text())
+                    count = host.samples
+                    until(lambda: host.samples > count + 4)
+                    check('extension_recovery_retains_owned_tracker_inference', host.state == 'running' and window.state()['active'] and (host._process.pid, host._context) == identity)
+                    window.click('return'); window.wait('return-error')
+                    check('extension_retry_does_not_retarget_replacement', 'That page is no longer available' in window.text())
+                    try:
+                        window.click('cursor')
+                    except TimeoutError:
+                        assert host._stop.is_set()  # Stop may close CDP before replying; never replay it.
+                    until(lambda: host.state == 'stopped' and host._process.poll() is not None)
+                    check('explicit_camera_stop_preserves_extension_browser_and_connection', process.poll() is None and root.live and session.tracker.mode == 'hover')
+                finally:
+                    Scripted.script = None
+                    if window:
+                        window.close()
+                    else:
+                        host.stop()
+                return checks
             if mode == 'navigation':
                 generation = root.generation
                 def question(number):
@@ -502,7 +558,7 @@ if __name__ == '__main__':
     parser.add_argument('--chrome', required=True)
     parser.add_argument('--out', type=Path)
     parser.add_argument('--mode', action='append', choices=(
-        'navigation', 'navigation-mutation', 'debugger-loss', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))
+        'webcam', 'navigation', 'navigation-mutation', 'debugger-loss', 'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale'))
     args = parser.parse_args()
     if args.out: args.out.mkdir(parents=True, exist_ok=True)
     results = {mode: scenario(args.chrome, mode, args.out) for mode in (args.mode or (
