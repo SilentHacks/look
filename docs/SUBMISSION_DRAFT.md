@@ -1,12 +1,10 @@
 # Look catalog submission draft
 
-Historical pre-publication draft. Owner authorization now covers source
-publication and the upstream catalog PR. The actual one-file submission entry is
-[catalog/hermes-gaze.yaml](catalog/hermes-gaze.yaml), pinned to public source
-`6ff0a462d29adb8056e144d677b5e839e541409e`.
-See [the publication update](CATALOG_READINESS.md#publication-update--2026-11-10)
-for exercised checks and unresolved policy questions. The body below is retained
-as preparation context, not the final PR text.
+Historical preparation copy, not the current PR description. The product no longer
+downloads or runs CoreML/MLX v2. Explicit base.en/tiny.en now selects Whisper directly,
+and NVIDIA v3 uses only cached Whisper fallback. Old caches remain untouched.
+See [catalog readiness](CATALOG_READINESS.md) and the current upstream PR for final
+pin, validation and review status. The original disclosures below describe a prior pin.
 
 ## PR title
 

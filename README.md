@@ -125,19 +125,17 @@ Screen-reader compatibility is unverified.
   compressed) from GitHub. A local Python/native worker uses private pipes, not
   a network listener or temporary recording.
   [Selection, setup, benchmarks and provenance](docs/PARAKEET_V3.md).
-  Existing explicit `base.en` / `tiny.en` choices retain the prior macOS chain:
-  FluidInference CoreML v2 (465 MB), mlx-community MLX v2 (2.47 GB), then SYSTRAN
-  Whisper (148 MB / 78.1 MB). V3 uses these fallbacks only if already cached;
-  Linux/Intel/Rosetta defaults use Whisper. Converter-owned CoreML/MLX catalog
-  source-policy acceptance remains unresolved.
+  Explicit `base.en` / `tiny.en` now selects SYSTRAN Whisper directly (148 MB /
+  78.1 MB). Linux/Intel/Rosetta defaults use Whisper. V3 falls back only to cached
+  Whisper. Parakeet v2 CoreML and MLX support has been removed, including setup,
+  startup and cached fallbacks. Existing configuration files are not rewritten.
   Read-aloud setup fetches Gradium Phonon (65 MB plus about 0.26 MB per voice).
   Eye setup fetches Google's MediaPipe runtime from npm (6.6 MB compressed) and
   Face Landmarker from Google storage (3.76 MB). These are downloads, not hosted inference.
 - Local storage includes shared model caches, sensitive biometric calibration,
   extension/native-host files and the separate Chrome profile with any sign-ins.
-  The MLX fallback uses a temporary WAV, deleted after transcription where
-  possible. A crash or deletion failure can leave it behind. Development-only
-  `record_trials`, off by default, writes page evidence to local replay logs.
+  Old v2 caches and any temporary WAV left by an older MLX release are not erased.
+  Development-only `record_trials`, off by default, writes page evidence to local replay logs.
   Removing the plugin does not erase these files, Hermes history or provider
   records.
 

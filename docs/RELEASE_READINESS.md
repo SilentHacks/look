@@ -4,6 +4,11 @@
 Store/catalogue submission, announcement or external message was made. The owner
 reserves approval for each of those actions. Submission copy is
 [local and unsubmitted](SUBMISSION_DRAFT.md).
+This is a historical preparation record. V2 CoreML/MLX support and the vendored
+runner were subsequently removed. Current runtime sources and removal guidance
+are in [REFERENCE.md](REFERENCE.md), with publication updates in
+[CATALOG_READINESS.md](CATALOG_READINESS.md).
+
 
 ## Scope and integration contract
 

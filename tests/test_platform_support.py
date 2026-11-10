@@ -1,12 +1,9 @@
 """Platform decisions only: no host, network, native model or device loading."""
 from contextlib import ExitStack
-from pathlib import Path
 from types import SimpleNamespace
-import tomllib
 import unittest
 from unittest.mock import Mock, patch
 
-from packaging.requirements import Requirement
 from hermes_gaze import cli, platform_support
 from hermes_gaze.audio import voice
 
@@ -18,10 +15,7 @@ class PlatformSupport(unittest.TestCase):
         stack.enter_context(patch.object(platform_support.platform, "machine", return_value=machine))
         return stack
 
-    def test_beta_classification_matches_apple_dependency_eligibility(self):
-        dependencies = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]["dependencies"]
-        apple_deps = [Requirement(dep) for dep in dependencies
-                      if Requirement(dep).name in ("parakeet-mlx", "pyobjc-framework-CoreML")]
+    def test_beta_classification(self):
         for system, machine, sys_platform, beta in (
             ("Darwin", "arm64", "darwin", True),
             ("Darwin", "x86_64", "darwin", False),  # Intel or Rosetta Python
@@ -32,13 +26,6 @@ class PlatformSupport(unittest.TestCase):
             with self.subTest(system=system, machine=machine), self.platform(system, machine):
                 self.assertEqual(platform_support.apple_silicon_mac(), beta)
                 self.assertEqual(bool(platform_support.platform_notice()), not beta)
-                for dep in apple_deps:
-                    self.assertEqual(dep.marker.evaluate({"sys_platform": sys_platform, "platform_machine": machine}), beta)
-                if not beta:
-                    with patch.object(voice, "prepare") as prepare:
-                        self.assertIsNone(voice._get_coreml_runner())
-                        self.assertIsNone(voice._get_parakeet_model())
-                        prepare.assert_not_called()
 
     def test_setup_fences_unverified_platforms_without_disabling_whisper(self):
         for system in ("Darwin", "Linux", "Windows"):

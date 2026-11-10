@@ -89,14 +89,12 @@ copy must be updated first. Editing another checkout does not update it.
 No host patch or new manifest command field is needed: slash/CLI names register
 through Hermes's public APIs. Under host isolation, shell plugin commands are unavailable.
 
-Plugin registration **never downloads models**. Supported cached models are
-checksum-verified and loaded asynchronously in preference order: CoreML → MLX →
-configured faster-whisper on native Apple Silicon Mac. Other platforms use configured
-faster-whisper. CoreML also runs a silent warmup prediction. Explicit recognition setup tries every usable
-verified cache before downloading missing assets, so an offline cached fallback
-does not require a preferred-backend download. Integrity failures stop setup
-without fallback. Only explicit `/look setup` permits missing downloads
-when no cached backend works and shows **Preparing local speech recognition**.
+Plugin registration **never downloads models**. It asynchronously verifies and loads
+the selected cached backend. NVIDIA v3 silently warms before publishing readiness,
+with cached Whisper as its only fallback. Explicit base.en/tiny.en selects Whisper
+directly on every supported recognition platform. Integrity failures stop preparation.
+Only explicit `/look setup` permits missing downloads. V3 setup downloads only NVIDIA
+assets, never a fallback. The page shows **Preparing local speech recognition**.
 Preparation can compile models. There is no fixed wait guarantee. The connected
 page shows a typed-input hint while recognition prepares and announces readiness
 when a verified backend finishes loading, including registration's cache-only warmup.
@@ -177,9 +175,7 @@ recorded immutable Git blob IDs. Weight checksums come from publisher LFS metada
 
 | Download / publisher | Trigger | Immutable revision / integrity | Approximate size | Cache / licences |
 |---|---|---|---|---|
-| Parakeet v2 CoreML, FluidInference conversion of NVIDIA | Explicit legacy base.en/tiny.en setup on native Apple Silicon; cache-only fallback for v3 | [`ee09c569f73759e6d44c9bd16766f477b2b36d39`](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39). SHA-256 manifest | 465 MB, 21 selected files | Shared HF hub. Weights CC-BY-4.0, vendored runner MIT |
-| Parakeet v2 MLX, mlx-community conversion of NVIDIA | Legacy setup if CoreML unavailable; cache-only fallback for v3 | [`8ae155301e23d820d82aa60d24817c900e69e487`](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/tree/8ae155301e23d820d82aa60d24817c900e69e487). SHA-256 manifest | 2.47 GB | Shared HF hub. Weights CC-BY-4.0, runtime Apache-2.0 |
-| faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit setup on Linux/Intel/Rosetta, or after both Apple Silicon backends unavailable | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba). SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub. Converted weights/runtime MIT |
+| faster-whisper base.en / tiny.en, SYSTRAN conversion of OpenAI | Explicit base.en/tiny.en setup on macOS/Linux, or cached fallback for v3 | base.en [`3d3d5dee26484f91867d81cb899cfcf72b96be6c`](https://huggingface.co/Systran/faster-whisper-base.en/tree/3d3d5dee26484f91867d81cb899cfcf72b96be6c), tiny.en [`0d3d19a32d3338f10357c0889762bd8d64bbdeba`](https://huggingface.co/Systran/faster-whisper-tiny.en/tree/0d3d19a32d3338f10357c0889762bd8d64bbdeba). SHA-256 manifest including required tokenizer | 148 MB / 78.1 MB | Shared HF hub. Converted weights/runtime MIT |
 | Default Apple Silicon Parakeet v3 Q8 + NeMo-Speech.cpp, NVIDIA | Explicit recognition setup with auto/parakeet-v3 on native Apple Silicon | GGUF revision `541d1f99c6b0c3cd0b11a95167540bb8edefd82b`; runtime v0.3.0; archive and extracted-file SHA-256 pins | 714 MB weights + 7.24 MB runtime archive | Shared HF + `~/Library/Caches/Look/nemo-speech/0.3.0`. Weights CC-BY-4.0, runtime Apache-2.0 with retained third-party notices. [Evidence and setup](PARAKEET_V3.md) |
 | Phonon-31M English q8, Gradium | Explicit `hermes look setup-speech` only | [`8c64b55ec301728e2d1695bfea87a08a267d0c2d`](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d). SHA-256 manifest | 65 MB | Plugin phonon cache. Assets Apache-2.0, ptts MIT OR Apache-2.0 |
 | Russell / selected English catalogue voice, Gradium | Same explicit read-aloud setup | [`0ee17205f254b5abc43b266c8a0f215565c352f7`](https://huggingface.co/gradium/phonon-voices/tree/0ee17205f254b5abc43b266c8a0f215565c352f7). SHA-256 manifest and pinned English embeddings | 0.26 MB each plus metadata | Plugin phonon cache. Apache-2.0 |
@@ -197,24 +193,22 @@ Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
 `auto` resolves to NVIDIA v3 on native Apple Silicon macOS, otherwise base.en.
 Existing explicit choices are not rewritten. Select `parakeet-v3` or `auto`,
 restart Hermes and run `/look setup` to migrate an existing Apple Silicon install.
-Explicit base.en/tiny.en retains CoreML v2 → MLX v2 → selected Whisper on Apple
-Silicon, or selected Whisper on Linux/Intel/Rosetta. V3 setup downloads only its
-vendor assets, before attempting any cached fallback; runtime fallback is cache-only.
-Other aliases, arbitrary repositories and local custom models are unsupported.
+Explicit base.en/tiny.en now selects the named Whisper model directly. V2 CoreML
+and MLX loaders, setup assets and dependencies were removed. Their existing caches
+are ignored and left intact. Unsupported v2 names report an error, not a substitute.
+V3 setup downloads only its vendor assets, with cached Whisper fallback on ordinary
+runtime failure. Other aliases, arbitrary repositories and custom models are unsupported.
 Whisper models include a verified local tokenizer: there is no OpenAI tokenizer
 fallback download. Recognition never downloads while holding or releasing Space.
 See [v3 benchmarks and limitations](PARAKEET_V3.md).
 
-FluidInference's **CoreML v3 conversion** is unsupported:
-its publisher card labels CC-BY-4.0 in frontmatter but says Apache 2.0 in its body.
-That contradiction is unresolved; no license is asserted for that conversion.
-FluidInference publishes the
-conversion and references it in FluidAudio. It is not NVIDIA-hosted or evidence of
-NVIDIA endorsement. Catalog acceptance of converter-owned CoreML/MLX distributions
-still needs a maintainer ruling. See the [source-policy investigation](CATALOG_READINESS.md#rule-17-source-policy-finding)
-and [third-party notices](../THIRD_PARTY_NOTICES.md).
+Old v2 caches can be removed individually from the shared HF hub:
+`models--FluidInference--parakeet-tdt-0.6b-v2-coreml` and
+`models--mlx-community--parakeet-tdt-0.6b-v2`. Do not remove unrelated shared models.
+Historical CoreML benchmark results are retained, but that backend no longer runs.
+See [third-party notices](../THIRD_PARTY_NOTICES.md) for supported asset terms.
 
-Chrome, ffmpeg, CoreML and installed macOS voices are existing local tools, not
+Chrome, ffmpeg and installed macOS voices are existing local tools, not
 installed by this downloader. Python/native dependencies are prepared separately by
 Hermes PM. Transitive wheel licences and dependency-internal network behavior have
 not been audited. The catalog entry PR must repeat these download/network disclosures.

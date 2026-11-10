@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 
 ASSETS = json.loads(Path(__file__).with_name("assets.json").read_text())
-COREML = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
-MLX = "mlx-community/parakeet-tdt-0.6b-v2"
 WHISPER = {name: f"Systran/faster-whisper-{name}" for name in ("base.en", "tiny.en")}
 
 
@@ -31,6 +29,8 @@ def verify(path, expected):
 
 def prepare(repo, *, download=False, names=None, local_dir=None):
     """Reuse and verify cached bytes first; fetch only missing, pinned files at setup."""
+    if repo not in ASSETS:
+        raise ValueError("Unsupported speech asset source. Parakeet v2 was removed. Select parakeet-v3 or Whisper base.en/tiny.en.")
     from huggingface_hub import hf_hub_download, try_to_load_from_cache
 
     asset = ASSETS[repo]

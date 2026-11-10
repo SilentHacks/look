@@ -70,7 +70,7 @@ config_schema:
   whisper_model:
     type: str
     default: "auto"
-    description: "Local recognition: auto selects NVIDIA Parakeet v3 on native Apple Silicon, otherwise Whisper base.en. Explicit base.en or tiny.en preserves the prior macOS v2 chain with Whisper fallback. Run /look setup after changing this setting and restarting Hermes."
+    description: "Local recognition: auto selects NVIDIA Parakeet v3 on native Apple Silicon, otherwise Whisper base.en. Explicit base.en or tiny.en selects Whisper directly. Restart Hermes and run /look setup after changing this setting."
   tts_voice:
     type: str
     default: "Russell"

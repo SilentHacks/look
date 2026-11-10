@@ -25,8 +25,7 @@ known_issues:
   - "Eye tracking is experimental. Real-camera accuracy and screen-reader compatibility are unverified. English-first voice and UI."
   - "Questions and page evidence reach the configured model. Optional TypeSafe scope requests can add costs."
   - "Explicit allow-all skips Look action review for requested actions. Chrome sign-ins, model caches, calibration and Hermes/provider history survive plugin removal."
-  - "Converter-owned CoreML/MLX source acceptance under catalog rule 17 remains unresolved."
-  - "Gallery shows fixture-backed UI captured before v3 integration: scripted answers, no provider inference; not native Chrome consent or a fresh install."
+  - "Gallery shows fixture-backed UI captured before v3 integration, with scripted answers and no provider inference. Not native Chrome consent or a fresh install."
 capabilities:
   provides_tools:
     - gaze_resolve

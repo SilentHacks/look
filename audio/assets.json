@@ -1,93 +1,4 @@
 {
-  "FluidInference/parakeet-tdt-0.6b-v2-coreml": {
-    "files": {
-      "Decoder.mlmodelc/analytics/coremldata.bin": {
-        "sha256": "46de1a6fe2e49d19a2125bc91acf020df7f2aea84ba821532aade8427a440b05",
-        "size": 243
-      },
-      "Decoder.mlmodelc/coremldata.bin": {
-        "sha256": "d200ca07694a347f6d02a3886a062ae839831e094e443222f2e48a14945966a8",
-        "size": 554
-      },
-      "Decoder.mlmodelc/metadata.json": {
-        "sha256": "90a279b822496316458febc0ce761ab05954fadd9d66aa97bea077a35fc8f2b2",
-        "size": 3427
-      },
-      "Decoder.mlmodelc/model.mil": {
-        "sha256": "7b95a5a6b672c652000348a67b6d4d92bb8e176b978c6666fe73c28a4d7ec579",
-        "size": 13106
-      },
-      "Decoder.mlmodelc/weights/weight.bin": {
-        "sha256": "27d26890221d82322c1092fd99d7b40578e435d5cf4b83c887c42603caf97aba",
-        "size": 14429952
-      },
-      "Encoder.mlmodelc/analytics/coremldata.bin": {
-        "sha256": "42e638870d73f26b332918a3496ce36793fbb413a81cbd3d16ba01328637a105",
-        "size": 243
-      },
-      "Encoder.mlmodelc/coremldata.bin": {
-        "sha256": "4def7aa848599ad0e17a8b9a982edcdbf33cf92e1f4b798de32e2ca0bc74b030",
-        "size": 485
-      },
-      "Encoder.mlmodelc/metadata.json": {
-        "sha256": "58222fbc48c13c49d9715567803cd50cb9c23e4360462e0f8ffcea59a2c73c63",
-        "size": 2926
-      },
-      "Encoder.mlmodelc/model.mil": {
-        "sha256": "ed7b19156ca29fa7dfd6891deb9fda4b0e8893f68597c985d135736546a43808",
-        "size": 959769
-      },
-      "Encoder.mlmodelc/weights/weight.bin": {
-        "sha256": "4adc7ad44f9d05e1bffeb2b06d3bb02861a5c7602dff63a6b494aed3bf8a6c3e",
-        "size": 445187200
-      },
-      "JointDecision.mlmodelc/analytics/coremldata.bin": {
-        "sha256": "f1183ba213bb94a918c8d2cad19ab045320618f97f6ca662245b3936d7b090f7",
-        "size": 243
-      },
-      "JointDecision.mlmodelc/coremldata.bin": {
-        "sha256": "e2c6752f1c8cf2d3f6f26ec93195c9bfa759ad59edf9f806696a138154f96f11",
-        "size": 534
-      },
-      "JointDecision.mlmodelc/metadata.json": {
-        "sha256": "ba8d309417b9acd4a175fdb15687de6a941db2f5b06666a60e7cf3cc8e2d3c3c",
-        "size": 2936
-      },
-      "JointDecision.mlmodelc/model.mil": {
-        "sha256": "93bf82042235127cb81ab537dcae47a1c2e7e242ce4ffdaf772981b45eedc4f0",
-        "size": 9722
-      },
-      "JointDecision.mlmodelc/weights/weight.bin": {
-        "sha256": "ca22a65903a05e64137677da608077578a8606090a598abf4875fa6199aaa19d",
-        "size": 3453388
-      },
-      "Melspectrogram_v2.mlmodelc/analytics/coremldata.bin": {
-        "sha256": "4300d03c3fc52901866a5f578d2673ec12c95deaf86b2131c83848339212d218",
-        "size": 243
-      },
-      "Melspectrogram_v2.mlmodelc/coremldata.bin": {
-        "sha256": "96c3a2e963dbc871fda545e9ed452173f58be0d995d2d91693361069b7189ee1",
-        "size": 402
-      },
-      "Melspectrogram_v2.mlmodelc/metadata.json": {
-        "sha256": "2dab72769d3e346f908e99f6bec14a82c6f135615ac057733a491002f0909106",
-        "size": 2846
-      },
-      "Melspectrogram_v2.mlmodelc/model.mil": {
-        "sha256": "bd63e64197b7761e4cf2a45a81bf64ee2867130dfa97195e2a99b25bfadb134b",
-        "size": 27085
-      },
-      "Melspectrogram_v2.mlmodelc/weights/weight.bin": {
-        "sha256": "023c2303b7c3a1fafed92fc6ec46c1d43a48c0bbcdf33d6441d383a61747734c",
-        "size": 592384
-      },
-      "parakeet_vocab.json": {
-        "sha256": "57019fe3c745772ca83a1b048a4bb951cd51329504ea33d4d83316b96e279a97",
-        "size": 18762
-      }
-    },
-    "revision": "ee09c569f73759e6d44c9bd16766f477b2b36d39"
-  },
   "Systran/faster-whisper-base.en": {
     "files": {
       "config.json": {
@@ -315,19 +226,6 @@
       }
     },
     "revision": "0ee17205f254b5abc43b266c8a0f215565c352f7"
-  },
-  "mlx-community/parakeet-tdt-0.6b-v2": {
-    "files": {
-      "config.json": {
-        "sha256": "9bd323e60afe2615c983a5d9fc3a2c0470df2a03edf90c0f861bd59509d07264",
-        "size": 36176
-      },
-      "model.safetensors": {
-        "sha256": "b958c37a6baa6874a279108755c8f2818e27bf647d72d54800a234a421341dfe",
-        "size": 2471559904
-      }
-    },
-    "revision": "8ae155301e23d820d82aa60d24817c900e69e487"
   },
   "nvidia/parakeet-tdt-0.6b-v3": {
     "revision": "541d1f99c6b0c3cd0b11a95167540bb8edefd82b",

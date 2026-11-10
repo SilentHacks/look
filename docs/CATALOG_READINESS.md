@@ -3,6 +3,15 @@
 Preparation record from 2026-11-10. The sections below retain the original
 pre-publication findings; the publication update supersedes their authorization,
 public-pin and screenshot status. Catalog acceptance remains a maintainer decision.
+## V2 removal
+
+CoreML/MLX v2 loaders, setup assets, Python dependencies and benchmark execution
+were removed. Old explicit base.en/tiny.en settings now select named Whisper
+directly. V3 remains the Apple Silicon default, with cache-only Whisper fallback.
+Old v2 caches are ignored and not deleted. Research results below remain historical.
+This removes those converted sources from the product, not a catalog approval claim.
+The earlier policy investigation and publication receipts below describe prior pins.
+
 
 ## Publication update — 2026-11-10
 

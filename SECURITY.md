@@ -52,8 +52,8 @@ History cleanup requires a separately approved plan.
   Saved calibration is sensitive. No real-device proof follows from fakes.
 - **Local does not mean no retention.** Questions/page evidence reach the configured
   Hermes provider and can remain in Hermes history. Optional TypeSafe highlighting
-  has its own disclosure. Failed audio stays in memory for retry. MLX's temporary
-  WAV can survive a crash/deletion failure. Development recording is separate and
+  has its own disclosure. Failed audio stays in memory for retry. Older releases
+  could leave an MLX temporary WAV after a crash. Development recording is separate and
   must never be enabled silently.
 - **Downloads and removal are separate.** Explicit setup verifies pinned assets.
   Dependency preparation can fetch packages/native wheels. Plugin removal does not

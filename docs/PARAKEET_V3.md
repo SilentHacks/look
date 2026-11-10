@@ -10,14 +10,17 @@ One fewer word error out of 200 from one speaker does not establish better accur
 The startup advantage and vendor distribution justify the new-install default;
 this small warm-recognition difference does not override that choice.
 
+The v2 measurements below are historical. The current product and benchmark CLI
+no longer load or download CoreML/MLX v2. Raw research results remain unchanged.
+
 ## Select and prepare
 
 Look's `whisper_model` setting defaults to `auto`: NVIDIA `parakeet-v3` on native
 Apple Silicon macOS, otherwise the existing `base.en` selection. Restart Hermes
 after changing it, then run `/look setup`. No configuration file is rewritten.
-An existing explicit `base.en` or `tiny.en` retains the prior CoreML v2 → MLX v2 →
-selected faster-whisper chain on Apple Silicon, or selected Whisper elsewhere.
-Set `parakeet-v3` explicitly to migrate an existing Mac, or `auto` for platform defaults.
+Explicit `base.en` or `tiny.en` now selects that Whisper model directly, including
+on Apple Silicon. V2 CoreML/MLX setup, loaders and cached fallbacks were removed.
+Select `parakeet-v3` or `auto` for NVIDIA v3. Existing settings are not rewritten.
 
 V3 currently supports native Apple Silicon macOS only. No new Python product
 dependency, Hermes patch, tool, listener, browser permission or microphone owner is
@@ -36,12 +39,10 @@ The same worker/model stays loaded across questions. Readiness checks use cached
 state and process liveness, not disk/model-loader locks. The worker warms one
 second of silence before publishing readiness. Failed native loading is cached;
 a dead worker does not silently restart/replay its failed request. Explicit setup
-may restart it. Ordinary availability/inference failures can use the existing
-cache-only v2/Whisper chain; integrity failures propagate and do not fall through.
-On a fresh process, cache-only warmup tries CoreML, MLX and Whisper after ordinary
-v3 startup failure. Explicit v3 setup prepares the selected vendor backend before
-loading any legacy fallback, even when an old cache is present; it never downloads
-fallback models. This avoids a slow v2 initialization before installing v3.
+may restart it. Ordinary availability/inference failures can use cached Whisper
+base.en. Integrity failures propagate and do not fall through. Explicit v3 setup
+prepares the selected vendor backend before trying cached Whisper and never
+downloads fallback models.
 A warmed fallback remains capture-ready after v3 failure. Logs identify native
 failure and `_LAST_BACKEND` identifies the backend that returned the transcript.
 
@@ -187,10 +188,9 @@ assets and explicitly requested public fixtures.
 python3 -m venv /tmp/look-v3-venv
 P=/tmp/look-v3-venv/bin/python
 $P -m pip install 'numpy>=1.26,<3' 'huggingface_hub>=0.23,<2' \
-  'faster-whisper>=1,<2' 'pyobjc-framework-CoreML>=13,<14' \
-  'websockets>=15,<16' pyarrow soundfile
-# Explicitly prepare the current comparison assets (no microphone).
-$P -c 'import tests; from hermes_gaze.audio.asset_cache import prepare,COREML,WHISPER; prepare(COREML,download=True); prepare(WHISPER["base.en"],download=True)'
+  'faster-whisper>=1,<2' 'websockets>=15,<16' pyarrow soundfile
+# Explicitly prepare Whisper for comparison (no microphone).
+$P -c 'import tests; from hermes_gaze.audio.asset_cache import prepare,WHISPER; prepare(WHISPER["base.en"],download=True)'
 # Isolated v3 product setup, without importing plugin registration.
 V3_HOME=/tmp/look-v3-home
 V3_HF=/tmp/look-v3-hf
@@ -201,9 +201,7 @@ M="$V3_HF/hub/models--nvidia--parakeet-tdt-0.6b-v3/snapshots/541d1f99c6b0c3cd0b1
 $P -c 'import tests; from hermes_gaze.benchmark.asr_compare import main; main()' \
   --fetch --fixtures /tmp/look-reference.parquet --backend v3 --runtime "$R" \
   --model "$M" --out /tmp/look-v3.json
-# Run these two commands serially against the original current-model caches.
-$P -c 'import tests; from hermes_gaze.benchmark.asr_compare import main; main()' \
-  --fixtures /tmp/look-reference.parquet --backend coreml --out /tmp/look-v2.json
+# Run serially against the existing Whisper cache.
 $P -c 'import tests; from hermes_gaze.benchmark.asr_compare import main; main()' \
   --fixtures /tmp/look-reference.parquet --backend whisper --out /tmp/look-whisper.json
 $P -m unittest tests.test_parakeet_v3 tests.test_pinned_downloads \
@@ -233,7 +231,7 @@ Backend-branch verification (2026-11-10, before the new default integration):
 - Device-free regressions exercise a live non-reading child with 30-second PCM,
   a child consuming PCM but withholding its reply, and delayed writes/reads that
   must share one deadline. Each timeout kills/reaps the child and prevents implicit
-  restart. Startup timeout and fresh empty-singleton CoreML/MLX/Whisper cached
+  restart. Startup timeout and fresh empty-singleton cached Whisper
   fallback preparation are covered, including explicit setup and terminal integrity
   failure.
 - Called the actual setup guide with each selection and mocked preparation:

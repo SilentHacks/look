@@ -39,7 +39,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixtures", type=Path, required=True)
     parser.add_argument("--fetch", action="store_true")
-    parser.add_argument("--backend", choices=("v3", "coreml", "whisper"), required=True)
+    parser.add_argument("--backend", choices=("v3", "whisper"), required=True)
     parser.add_argument("--runtime", type=Path)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--count", type=int, default=8)
@@ -74,12 +74,6 @@ def main():
         runner = Runner(args.runtime, args.model)
         transcribe = lambda audio, rate: runner.transcribe(audio, rate, 1700000000.0)
         pid = runner.process.pid
-    elif args.backend == "coreml":
-        runner = voice._get_coreml_runner()
-        if runner is None:
-            raise RuntimeError("CoreML is unavailable; benchmark refuses a fallback")
-        transcribe = lambda audio, rate: voice._transcribe_coreml(audio, rate, 1700000000.0)
-        pid = None
     else:
         runner = voice.get_whisper_model()
         warm_segments, _ = runner.transcribe(np.zeros(16000, dtype=np.float32))

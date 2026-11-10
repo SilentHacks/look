@@ -19,9 +19,8 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `runtime/native_input.py` | Stock canonical local input: same-user private control socket, one-use profile ticket, stable submission ID and terminal receipts/events. Never starts a host or exposes auth to Chrome. |
 | `browser/actions.py` | `SnapshotActions`: current handle/epoch ownership, live control risk policy, single-use fingerprint-bound confirmations and unknown-outcome handling. |
 | `config.py` | `GazeConfig` dataclass + `GazeConfig.from_ctx(ctx)` — plugin settings only. |
-| `audio/voice.py` | Configured NVIDIA v3 or legacy CoreML/ANE → MLX → Whisper recognition; only Whisper on Linux/Intel/Rosetta. Registration warms verified caches asynchronously; explicit setup alone downloads. `record_microphone`, `MAX_AUDIO_BYTES`. See `docs/REFERENCE.md`. |
-| `audio/asr/` | `coreml_model.py` — pyobjc `CompiledMLModel` replacement (coremltools ships no cp314 wheels); `parakeet_coreml.py` — TDT greedy decode vendored from silicon-asr (MIT). |
-| `audio/asr/parakeet_v3.py`, `parakeet_v3_worker.py` | New-install Apple Silicon default (`whisper_model: auto` → `parakeet-v3`): NVIDIA NeMo-Speech.cpp v0.3.0 Metal C ABI and official v3 Q8 GGUF. Explicit setup only, pinned archive/extracted bytes, warm isolated pipe worker, no microphone/listener. Explicit base.en/tiny.en retain the prior v2 chain; v3 fallbacks are cache-only. See `docs/PARAKEET_V3.md`. |
+| `audio/voice.py` | NVIDIA v3 or explicitly selected Whisper recognition. V3 falls back only to cached Whisper. CoreML/MLX v2 is removed. Registration warms verified caches asynchronously, explicit setup alone downloads. `record_microphone`, `MAX_AUDIO_BYTES`. See `docs/REFERENCE.md`. |
+| `audio/asr/parakeet_v3.py`, `parakeet_v3_worker.py` | Apple Silicon default (`whisper_model: auto` → `parakeet-v3`): NVIDIA NeMo-Speech.cpp v0.3.0 Metal C ABI and official v3 Q8 GGUF. Pinned archive/extracted bytes, warm isolated pipe worker, no microphone/listener. Explicit base.en/tiny.en selects Whisper directly on macOS/Linux. See `docs/PARAKEET_V3.md`. |
 | `runtime/server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
 | `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
 | `browser/webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
@@ -171,14 +170,6 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   every turn; returning `False` when Chrome is down would mutate the tool surface
   mid-conversation and break the cached prompt prefix (see Hermes's per-conversation
   prompt-caching invariant). Chrome health is reported in-band (`chrome_connected`).
-- **`MLMultiArray` conversions live only in `audio/asr/coreml_model.py`.** Two CoreML
-  traps already bit once: input arrays must be tagged with the real
-  `MLMultiArrayDataType*` constants — a hand-coded wrong code makes CoreML read
-  the buffer at half width (the fp32-as-fp16 NaN bug) — and outputs must be
-  read via `getBytesWithHandler` + `strides`, never `dataPointer` + `shape`:
-  `dataType` need not match storage dtype, and dynamic outputs under-report
-  `shape`/`count` (Encoder claims 188 frames, stores 192). `strides[0]*shape[0]`
-  is the true element count.
 - **No fabricated fallbacks.** When candidates or fixations are missing, return
   `{"ok": false, "error": ...}` — never inject synthetic dashboard candidates or a
   fake center fixation. A wrong confident answer is worse than an honest failure.

@@ -23,8 +23,6 @@ class PinnedDownloadsTests(unittest.TestCase):
         __import__("numpy")
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.files = {
-            cache.COREML: {"Decoder.mlmodelc/weights/weight.bin": b"coreml"},
-            cache.MLX: {"config.json": b"{}", "model.safetensors": b"mlx"},
             cache.WHISPER["base.en"]: {"config.json": b"{}", "model.bin": b"whisper", "tokenizer.json": b"{}"},
             cache.WHISPER["tiny.en"]: {"config.json": b"{}", "model.bin": b"tiny", "tokenizer.json": b"{}"},
             speech.MODEL_REPO: {name: name.encode() for name in speech.MODEL_FILES},
@@ -36,14 +34,11 @@ class PinnedDownloadsTests(unittest.TestCase):
             for name, data in files.items()}} for i, (repo, files) in enumerate(self.files.items(), 1)}
         self.enterContext(patch.object(cache, "ASSETS", manifests))
         self.enterContext(patch.object(speech, "ASSETS", manifests))
-        self.enterContext(patch.object(voice, "_COREML_RUNNER", None))
-        self.enterContext(patch.object(voice, "_PARAKEET_MODEL", None))
         self.enterContext(patch.object(voice, "_WHISPER_MODELS", {}))
         self.enterContext(patch.object(voice, "_PREPARING", False))
         self.enterContext(patch.object(voice, "_PREPARATION_ERROR", ""))
         self.enterContext(patch.object(voice, "_PREPARE_DOWNLOAD", False))
         self.enterContext(patch.object(voice, "_PREPARE_REPORT", None))
-        self.enterContext(patch.object(voice, "apple_silicon_mac", return_value=True))
         self.enterContext(patch("huggingface_hub.try_to_load_from_cache", side_effect=self.cached))
         self.download = self.enterContext(patch("huggingface_hub.hf_hub_download", side_effect=self.fetch))
         self.enterContext(patch("socket.create_connection", side_effect=AssertionError("network forbidden")))
@@ -103,7 +98,7 @@ class PinnedDownloadsTests(unittest.TestCase):
                 with self.subTest(repo=repo):
                     cache.prepare(repo, download=True)
 
-    def test_restart_uses_cached_fallbacks_before_any_download_and_keeps_preference(self):
+    def test_restart_uses_cached_whisper_without_downloads(self):
         coreml, mlx, whisper = self.fake_loaders()
         self.populate(cache.WHISPER["base.en"])
         voice.prewarm()
@@ -113,26 +108,68 @@ class PinnedDownloadsTests(unittest.TestCase):
         mlx.assert_not_called()
         whisper.assert_called_once()
         self.download.assert_not_called()
-        # A fresh process with both preferred and fallback caches keeps CoreML.
-        voice._WHISPER_MODELS.clear()
-        self.populate(cache.COREML)
-        voice.prewarm()
-        self.finish_warmup()
-        self.assertIs(voice._COREML_RUNNER, coreml.return_value)
-        coreml.return_value.transcribe_array.assert_called_once()
-        self.assertEqual(whisper.call_count, 1)
-        # An installed but unusable preferred runtime must not strand MLX.
-        voice._COREML_RUNNER = None
-        coreml.side_effect = ImportError("CoreML unavailable")
-        self.populate(cache.MLX)
-        voice.prepare_recognition()
-        self.finish_warmup()
-        self.assertIs(voice._PARAKEET_MODEL, mlx.return_value)
+
+    def test_old_explicit_choices_and_v3_fallback_ignore_installed_v2_and_caches(self):
+        from hermes_gaze import config
+        from hermes_gaze.audio.asr import parakeet_v3 as v3
+        # Make both removed loaders and their old cache files available.
+        coreml, mlx, whisper = self.fake_loaders()
+        coreml.side_effect = mlx.side_effect = AssertionError("removed backend executed")
+        old_repos = ("FluidInference/parakeet-tdt-0.6b-v2-coreml",
+                     "mlx-community/parakeet-tdt-0.6b-v2")
+        for repo in old_repos:
+            root = self.root / repo.replace("/", "--")
+            root.mkdir()
+            (root / "model.safetensors").write_bytes(b"old cached model")
+        segment = SimpleNamespace(text="hello", words=[
+            SimpleNamespace(word="hello", start=0.2, end=0.6)])
+        whisper.return_value.transcribe.return_value = ([segment], {})
+        self.populate(cache.WHISPER["base.en"])
+        self.populate(cache.WHISPER["tiny.en"])
+        for system, machine in (("Darwin", "arm64"), ("Darwin", "x86_64"),
+                                ("Linux", "x86_64"), ("Linux", "aarch64")):
+            for selected in ("auto", "base.en", "tiny.en", "parakeet-v3"):
+                for start in (voice.prewarm, voice.prepare_recognition):
+                    with self.subTest(system=system, machine=machine, selected=selected, start=start.__name__), \
+                            patch("platform.system", return_value=system), \
+                            patch("platform.machine", return_value=machine), \
+                            patch.object(v3, "get_runner", side_effect=RuntimeError("native unavailable")), \
+                            patch.object(v3, "ready", return_value=False), \
+                            patch("huggingface_hub.try_to_load_from_cache", side_effect=self.cached) as lookup:
+                        voice._WHISPER_MODELS.clear()
+                        model = config.GazeConfig(whisper_model=selected).whisper_model
+                        start(model)
+                        self.finish_warmup()
+                        self.assertTrue(voice.recognition_ready(model))
+                        text, words = voice.transcribe_audio_buffer(
+                            b"\xff\x7f" * 1600, model_name=model, audio_epoch=100.0)
+                        self.assertEqual(text, "hello")
+                        self.assertEqual(words, [{"word": "hello", "start": 100.2, "end": 100.6}])
+                        self.assertTrue(all(call.args[0] not in old_repos for call in lookup.call_args_list))
+        coreml.assert_not_called()
+        mlx.assert_not_called()
+        self.download.assert_not_called()
+
+    def test_removed_sources_and_backend_names_fail_before_fetch_or_execution(self):
+        for repo in ("FluidInference/parakeet-tdt-0.6b-v2-coreml",
+                     "mlx-community/parakeet-tdt-0.6b-v2"):
+            for download in (False, True):
+                with self.assertRaisesRegex(ValueError, "v2 was removed"):
+                    cache.prepare(repo, download=download, local_dir=self.root)
+        for backend in ("parakeet", "coreml", "mlx", "parakeet-v2"):
+            with self.assertRaisesRegex(ValueError, "no longer supported"):
+                voice.transcribe_audio_buffer(b"\xff\x7f" * 1600, backend=backend)
+        for selected in ("parakeet-v2", "coreml", "mlx"):
+            for start in (voice.prewarm, voice.prepare_recognition):
+                start(selected)
+                self.finish_warmup()
+                self.assertFalse(voice.recognition_ready(selected))
+                self.assertIn("Supported speech models", voice.recognition_status(selected))
         self.download.assert_not_called()
 
     def test_non_apple_setup_never_prepares_apple_assets(self):
         coreml, mlx, whisper = self.fake_loaders()
-        with patch.object(voice, "apple_silicon_mac", return_value=False):
+        with patch.object(cli, "apple_silicon_mac", return_value=False):
             voice.prepare_recognition()
             self.finish_warmup()
             self.assertTrue(voice.recognition_ready())
@@ -176,9 +213,8 @@ class PinnedDownloadsTests(unittest.TestCase):
 
     def test_cache_integrity_failure_blocks_restart_and_setup_fallback(self):
         coreml, mlx, whisper = self.fake_loaders()
-        self.populate(cache.COREML)
         self.populate(cache.WHISPER["base.en"])
-        self.path(cache.COREML, "Decoder.mlmodelc/weights/weight.bin").write_bytes(b"broken")
+        self.path(cache.WHISPER["base.en"], "model.bin").write_bytes(b"broken")
         for start in (voice.prewarm, voice.prepare_recognition):
             start()
             self.finish_warmup()
@@ -190,11 +226,11 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.download.assert_not_called()
 
     def test_setup_overlapping_restart_is_single_flight_and_explicitly_allows_fetch(self):
-        coreml, _, _ = self.fake_loaders()
+        _, _, whisper = self.fake_loaders()
         entered, release, done = threading.Event(), threading.Event(), threading.Event()
         original = voice.prepare
         def blocked(repo, **kwargs):
-            if repo == cache.COREML and not kwargs.get("download"):
+            if repo == cache.WHISPER["base.en"] and not kwargs.get("download"):
                 entered.set()
                 self.assertTrue(release.wait(2))
             return original(repo, **kwargs)
@@ -210,7 +246,7 @@ class PinnedDownloadsTests(unittest.TestCase):
                 self.assertTrue(done.wait(2))
                 self.finish_warmup()
                 self.assertTrue(voice.recognition_ready())
-                coreml.assert_called_once()
+                whisper.assert_called_once()
                 count = self.download.call_count
                 voice.prepare_recognition()
                 voice.prewarm()
@@ -222,7 +258,7 @@ class PinnedDownloadsTests(unittest.TestCase):
     def test_linux_restart_loads_configured_whisper_and_first_hold_sees_ready(self):
         _, _, whisper = self.fake_loaders()
         self.populate(cache.WHISPER["tiny.en"])
-        with patch.object(voice, "apple_silicon_mac", return_value=False):
+        with patch.object(cli, "apple_silicon_mac", return_value=False):
             voice.prewarm("tiny.en")
             self.finish_warmup()
             self.assertTrue(voice.recognition_ready("tiny.en"))
@@ -241,11 +277,11 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.download.assert_not_called()
 
     def test_changed_cached_and_downloaded_artifacts_fail_closed(self):
-        repo = cache.MLX
+        repo = cache.WHISPER["base.en"]
         self.populate(repo)
         changed = self.path(repo, "config.json")
         changed.write_bytes(b"[]")  # Same size: size checks alone are not integrity checks.
-        self.path(repo, "model.safetensors").unlink()
+        self.path(repo, "model.bin").unlink()
         with self.assertRaises(cache.AssetIntegrityError):
             cache.prepare(repo, download=True)
         self.download.assert_not_called()  # Never fetch another file after detecting corruption.
@@ -259,9 +295,9 @@ class PinnedDownloadsTests(unittest.TestCase):
                 cache.prepare(repo, download=True)
 
     def test_explicit_preparation_pins_missing_files_and_warm_cache_is_offline(self):
-        repo = cache.MLX
+        repo = cache.WHISPER["base.en"]
         root = cache.prepare(repo, download=True)
-        self.assertEqual((root / "model.safetensors").read_bytes(), b"mlx")
+        self.assertEqual((root / "model.bin").read_bytes(), b"whisper")
         self.download.reset_mock()
         self.download.side_effect = AssertionError("warm cache must not download")
         self.assertEqual(cache.prepare(repo, download=True), root)
@@ -311,48 +347,42 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.download.assert_not_called()
 
     def test_registration_never_downloads_and_cached_primary_warms_offline(self):
-        class Runner:
-            def __init__(self, **_):
-                cache.prepare(cache.COREML)
-            transcribe_array = Mock()
-        module = SimpleNamespace(ParakeetCoreML=Runner)
+        _, _, whisper = self.fake_loaders()
+        from hermes_gaze import config
         for cached in (False, True):
-            with self.subTest(cached=cached):
+            with self.subTest(cached=cached), patch.object(config, "apple_silicon_mac", return_value=False):
                 if cached:
-                    self.populate(cache.COREML)
-                voice._COREML_RUNNER = None
-                Runner.transcribe_array.reset_mock()
+                    self.populate(cache.WHISPER["base.en"])
+                voice._WHISPER_MODELS.clear()
                 fixture = test_first_run.FirstRunTests()
                 self.addCleanup(fixture.doCleanups)
-                with patch.dict(sys.modules, {"hermes_gaze.audio.asr.parakeet_coreml": module}):
-                    fixture.register(None, warm=True)
-                    for thread in threading.enumerate():
-                        if thread.name == "gaze-asr-prewarm":
-                            thread.join(2)
-                            self.assertFalse(thread.is_alive())
+                fixture.register(None, warm=True)
+                self.finish_warmup()
                 self.assertEqual(voice.recognition_ready(), cached)
-                self.assertEqual(Runner.transcribe_array.call_count, int(cached))
+                self.assertEqual(whisper.call_count, int(cached))
         self.download.assert_not_called()
 
     def test_delayed_registration_readiness_follows_binding_and_respects_stop_unload_failure(self):
         for outcome in ("rebound", "stopped", "unloaded", "failed"):
             with self.subTest(outcome=outcome):
                 entered, release = threading.Event(), threading.Event()
-                voice._COREML_RUNNER = None
+                voice._WHISPER_MODELS.clear()
 
-                def load():
+                def load(_):
                     entered.set()
                     release.wait(3)
                     if outcome == "failed":
                         raise cache.AssetIntegrityError("Downloaded speech file changed")
-                    voice._COREML_RUNNER = object()
-                    return voice._COREML_RUNNER
+                    voice._WHISPER_MODELS["base.en"] = object()
+                    return voice._WHISPER_MODELS["base.en"]
 
                 fixture = test_first_run.FirstRunTests()
                 self.addCleanup(fixture.doCleanups)
                 events = []
                 try:
-                    with patch.object(voice, "prepare"), patch.object(voice, "_get_coreml_runner", side_effect=load):
+                    from hermes_gaze import config
+                    with patch.object(config, "apple_silicon_mac", return_value=False), \
+                            patch.object(voice, "prepare"), patch.object(voice, "get_whisper_model", side_effect=load):
                         _, session, ctx, _, _ = fixture.register(None, warm=True)
                         self.assertTrue(entered.wait(1))
                         session.display_session_event = lambda event: events.append(event)
@@ -384,14 +414,10 @@ class PinnedDownloadsTests(unittest.TestCase):
     def test_integrity_failure_stops_preparation_without_fallback(self):
         done = threading.Event()
         with patch.object(voice, "prepare", side_effect=cache.AssetIntegrityError("Downloaded speech file changed")) as prepare, \
-                patch.object(voice, "_get_coreml_runner") as coreml, \
-                patch.object(voice, "_get_parakeet_model") as mlx, \
                 patch.object(voice, "get_whisper_model") as whisper:
             voice.prepare_recognition(report=lambda _: done.set())
             self.assertTrue(done.wait(2))
             self.assertEqual(prepare.call_count, 1)
-            coreml.assert_not_called()
-            mlx.assert_not_called()
             whisper.assert_not_called()
             self.assertFalse(voice.recognition_ready())
             self.assertIn("changed", voice.recognition_status())
@@ -403,14 +429,15 @@ class PinnedDownloadsTests(unittest.TestCase):
         def prepare(*_, **__):
             entered.set()
             release.wait(3)
-        def loaded():
-            voice._COREML_RUNNER = object()
-            return voice._COREML_RUNNER
+        def loaded(_):
+            voice._WHISPER_MODELS["base.en"] = object()
+            return voice._WHISPER_MODELS["base.en"]
         try:
             with patch.object(voice, "prepare", side_effect=prepare), \
-                    patch.object(voice, "_get_coreml_runner", side_effect=loaded), \
+                    patch.object(voice, "get_whisper_model", side_effect=loaded), \
                     patch.object(service, "get_shared_session", return_value=session), \
-                    patch.object(service, "_VOICE_TURNS", None):
+                    patch.object(service, "_VOICE_TURNS", None), \
+                    patch.object(service, "_CONFIG", SimpleNamespace(whisper_model="base.en")):
                 reports = []
                 guide = cli._first_run_guide(session, report=lambda text: (reports.append(text), done.set()))
                 self.assertIn("Preparing local speech recognition", guide)
@@ -419,7 +446,7 @@ class PinnedDownloadsTests(unittest.TestCase):
                 replies = []
                 intent = dict(type="record_start", nonce=session._intent_nonce,
                               _browser_target="tab", _browser_document="doc")
-                with voice._COREML_LOCK, patch.object(session.microphone, "start") as start:
+                with voice._MODEL_LOCK, patch.object(session.microphone, "start") as start:
                     request = threading.Thread(target=service.handle_intent, args=(intent, replies.append))
                     request.start()
                     request.join(1)

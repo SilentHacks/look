@@ -1,24 +1,7 @@
-"""Local speech recognition helpers for hermes-gaze.
+"""Local NVIDIA Parakeet v3 and faster-whisper recognition.
 
-Configured NVIDIA v3 and the legacy three-backend chain share one contract (``transcribe_audio_buffer``
-— ``(text, [{word, start, end}])`` with audio-relative times shifted by
-``audio_epoch``):
-
-- Parakeet TDT on CoreML/ANE **in-process** via ``asr.parakeet_coreml``
-  (native Apple Silicon Mac only, ~65-75ms for a 3s clip). coremltools ships no cp314 wheels, so
-  ``asr.coreml_model`` drives ``.mlmodelc`` models through pyobjc instead.
-  SentencePiece tokens with start times are grouped on ``▁`` boundaries into
-  words.
-- ``parakeet-mlx`` Parakeet TDT 0.6B on Apple-silicon MLX (native arm64 macOS only,
-  ~180ms for a 3s clip) — in-process middle tier when the CoreML runner
-  cannot load. Downloads happen only during explicit preparation.
-- ``faster-whisper`` (tiny.en / base.en) — used on Linux, Intel/Rosetta Macs,
-  or when both Parakeet paths fail to load.
-
-Plus sounddevice microphone capture from the default OS audio input. Optional
-dependencies (numpy, faster-whisper, parakeet-mlx, pyobjc, sounddevice) are
-imported lazily inside each function so importing this module never requires
-them.
+Returns text and word timestamps shifted by the native capture's audio epoch.
+Only explicit setup downloads assets. Registration and transcription use caches.
 """
 
 from __future__ import annotations
@@ -26,14 +9,12 @@ from __future__ import annotations
 import io
 import logging
 import os
-import tempfile
 import threading
 import time
 import wave
 from typing import Any, Dict, List, Optional, Tuple
 
-from .asset_cache import AssetIntegrityError, AssetsMissing, COREML, MLX, WHISPER, prepare
-from ..platform_support import apple_silicon_mac
+from .asset_cache import AssetIntegrityError, AssetsMissing, WHISPER, prepare
 
 
 logger = logging.getLogger(__name__)
@@ -42,25 +23,13 @@ _DEFAULT_MODEL = "base.en"
 _WHISPER_MODELS: Dict[str, Any] = {}  # per-name cache — config may switch models mid-session
 _MODEL_LOCK = threading.Lock()
 
-# English-only Parakeet TDT 0.6B v2 on MLX — best English WER of the
-# parakeet family; v3 trades a little English accuracy for 24 languages.
-_PARAKEET_MODEL_REPO = MLX
-_PARAKEET_MODEL: Any = None  # model | False (load attempted and failed)
-_PARAKEET_LOCK = threading.Lock()
-
-# CoreML/ANE runner — in-process via asr.parakeet_coreml (pyobjc). Same TDT
-# 0.6B v2 checkpoints as the MLX backend, converted for the Neural Engine.
-_COREML_RUNNER: Any = None  # ParakeetCoreML | False (load attempted and failed)
-_COREML_LOCK = threading.Lock()
 _PREPARE_LOCK = threading.Lock()
 _PREPARING = False
 _PREPARATION_ERROR = ""
 _PREPARE_DOWNLOAD = False
 _PREPARE_REPORT = None
 
-# Which backend served the most recent transcribe_audio_buffer call — the
-# overlay labels itself "local Whisper" otherwise, which lies whenever ANE
-# or MLX actually did the work.
+# Backend used by the latest transcription, for diagnostics.
 _LAST_BACKEND: Optional[str] = None
 
 # Base64 audio payloads from the overlay's transcribe intent are bounded before decode.
@@ -83,52 +52,6 @@ def get_whisper_model(model_name: str = _DEFAULT_MODEL) -> Any:
         return model
 
 
-def _get_parakeet_model() -> Any:
-    """Lazy singleton for the parakeet-mlx model; None when unavailable."""
-    global _PARAKEET_MODEL
-    if not apple_silicon_mac():
-        return None
-    with _PARAKEET_LOCK:
-        if _PARAKEET_MODEL is None:
-            try:
-                from parakeet_mlx import from_pretrained
-
-                logger.info("Loading parakeet-mlx model '%s'...", _PARAKEET_MODEL_REPO)
-                _PARAKEET_MODEL = from_pretrained(str(prepare(MLX)))
-            except AssetIntegrityError:
-                raise
-            except AssetsMissing:
-                return None
-            except Exception as exc:
-                logger.warning("parakeet-mlx unavailable (%s); using faster-whisper", exc)
-                _PARAKEET_MODEL = False
-        return _PARAKEET_MODEL or None
-
-
-def _get_coreml_runner() -> Any:
-    """Lazy singleton for the in-process CoreML/ANE runner; None when unavailable."""
-    global _COREML_RUNNER
-    if not apple_silicon_mac():
-        return None
-    with _COREML_LOCK:
-        if _COREML_RUNNER is None:
-            try:
-                from .asr.parakeet_coreml import ParakeetCoreML
-                import numpy as np
-
-                logger.info("Loading Parakeet TDT on CoreML/ANE...")
-                runner = ParakeetCoreML(variant="v2", compute_units="ane")
-                # Loading alone leaves the first encoder/decoder prediction cold.
-                runner.transcribe_array(np.zeros(16000, dtype=np.float32))
-                _COREML_RUNNER = runner
-            except AssetIntegrityError:
-                raise
-            except AssetsMissing:
-                return None
-            except Exception as exc:
-                logger.warning("CoreML parakeet unavailable (%s); using parakeet-mlx", exc)
-                _COREML_RUNNER = False
-        return _COREML_RUNNER or None
 
 
 def recognition_ready(model_name=_DEFAULT_MODEL):
@@ -138,16 +61,13 @@ def recognition_ready(model_name=_DEFAULT_MODEL):
         if ready():
             return True
         model_name = _DEFAULT_MODEL
-    return (apple_silicon_mac() and (
-        _COREML_RUNNER is not None and _COREML_RUNNER is not False or
-        _PARAKEET_MODEL is not None and _PARAKEET_MODEL is not False)
-        or model_name in _WHISPER_MODELS)
+    return model_name in _WHISPER_MODELS
 
 
 def recognition_status(model_name=_DEFAULT_MODEL):
     if recognition_ready(model_name):
         return "Local speech recognition is ready."
-    if _PREPARING or _COREML_LOCK.locked():
+    if _PREPARING:
         return "Preparing local speech recognition. You can type with Right Option while you wait."
     if _PREPARATION_ERROR:
         return _PREPARATION_ERROR
@@ -175,7 +95,7 @@ def _prepare_recognition(model_name, *, download, report=None):
         _PREPARATION_ERROR = ""
 
     def work():
-        global _PREPARING, _PREPARATION_ERROR, _COREML_RUNNER, _PARAKEET_MODEL, _PREPARE_REPORT
+        global _PREPARING, _PREPARATION_ERROR, _PREPARE_REPORT
         missing, error, unavailable = [], "", False
 
         def try_load(repo, load, *, fetch=False):
@@ -211,18 +131,8 @@ def _prepare_recognition(model_name, *, download, report=None):
         try:
             if model_name not in (*WHISPER, "parakeet-v3"):
                 raise ValueError("Supported speech models are base.en, tiny.en and parakeet-v3.")
-            # Explicit retries may repair unavailable runtimes, never bypass integrity.
-            if download:
-                with _COREML_LOCK:
-                    if _COREML_RUNNER is False:
-                        _COREML_RUNNER = None
-                with _PARAKEET_LOCK:
-                    if _PARAKEET_MODEL is False:
-                        _PARAKEET_MODEL = None
-            loaders = ([(COREML, _get_coreml_runner), (MLX, _get_parakeet_model)]
-                       if apple_silicon_mac() else [])
             fallback_model = _DEFAULT_MODEL if model_name == "parakeet-v3" else model_name
-            loaders.append((WHISPER[fallback_model], lambda: get_whisper_model(fallback_model)))
+            loaders = [(WHISPER[fallback_model], lambda: get_whisper_model(fallback_model))]
             if model_name == "parakeet-v3":
                 loaders.insert(0, ("parakeet-v3", None))
             for repo, load in loaders:
@@ -270,95 +180,6 @@ def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
 def prewarm(model_name=_DEFAULT_MODEL, *, report=None) -> None:
     """Registration warms supported verified caches asynchronously, without devices."""
     _prepare_recognition(model_name, download=False, report=report)
-
-
-def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[Dict[str, object]]:
-    """Group SentencePiece tokens (``▁`` = word boundary) into word dicts; uses token ``end`` when present."""
-    # Subword tokens mark each word start with a leading space or the
-    # SentencePiece ▁ marker (parakeet-mlx does the former). When a model
-    # already emits word-level tokens there are no markers and every token
-    # stays its own word.
-    has_boundary = any(
-        (getattr(t, "text", "") or "")[:1] in (" ", "▁") for t in tokens)
-    groups: List[List[Any]] = []
-    for tok in tokens:
-        text = getattr(tok, "text", "") or ""
-        if not text.strip():
-            continue
-        if not has_boundary or text[:1] in (" ", "▁") or not groups:
-            groups.append([])
-        groups[-1].append(tok)
-    words: List[Dict[str, object]] = []
-    for i, group in enumerate(groups):
-        text = "".join(t.text for t in group).replace("▁", " ").strip()
-        if not text:
-            continue
-        last_end = getattr(group[-1], "end", None)
-        end = float(last_end) if last_end is not None else (
-            float(groups[i + 1][0].start) if i + 1 < len(groups) else end_s)
-        words.append({"word": text, "start": float(group[0].start) + epoch_off,
-                      "end": end + epoch_off})
-    return words
-
-
-def _transcribe_coreml(audio_np: Any, sample_rate: int, epoch_off: float, timing=None) -> Optional[Tuple[str, List[Dict[str, object]]]]:
-    """CoreML/ANE path: feed the float32 array straight to the in-process runner."""
-    runner = _get_coreml_runner()
-    if runner is None:
-        return None
-    if timing is not None:
-        timing.mark("asr_model_ready")
-        timing.mark("asr_inference_start")
-    try:
-        res = runner.transcribe_array(audio_np)
-        if timing is not None:
-            timing.mark("asr_inference_done")
-    except Exception as exc:
-        logger.warning("coreml parakeet transcription failed (%s); using parakeet-mlx", exc)
-        return None
-    tokens = list(getattr(res, "tokens", None) or [])
-    segs = getattr(res, "segments", None) or []
-    end_s = float(segs[-1].end) if segs else (tokens[-1].start + 0.3 if tokens else 0.0)
-    return (res.text or "").strip(), _tokens_to_words(tokens, end_s, epoch_off)
-
-
-def _transcribe_parakeet(audio_np: Any, sample_rate: int, epoch_off: float, timing=None) -> Optional[Tuple[str, List[Dict[str, object]]]]:
-    """parakeet-mlx path: write PCM to a temp WAV (the model only takes file paths)."""
-    import numpy as np
-
-    model = _get_parakeet_model()
-    if model is None:
-        return None
-    if timing is not None:
-        timing.mark("asr_model_ready")
-    pcm16 = (np.clip(audio_np, -1.0, 1.0) * 32767.0).astype(np.int16)
-    tmp = ""
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            tmp = f.name
-        with wave.open(tmp, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(pcm16.tobytes())
-        if timing is not None:
-            timing.mark("asr_inference_start")
-        res = model.transcribe(tmp)
-        if timing is not None:
-            timing.mark("asr_inference_done")
-    except Exception as exc:
-        logger.warning("parakeet-mlx transcription failed (%s); using faster-whisper", exc)
-        return None
-    finally:
-        if tmp:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-    tokens = [t for s in (getattr(res, "sentences", None) or []) for t in getattr(s, "tokens", [])]
-    end_s = float(tokens[-1].end) if tokens and getattr(tokens[-1], "end", None) is not None else (
-        float(tokens[-1].start) + 0.3 if tokens else 0.0)
-    return (res.text or "").strip(), _tokens_to_words(tokens, end_s, epoch_off)
 
 
 def _looks_like_container(raw_bytes: bytes) -> bool:
@@ -440,9 +261,11 @@ def transcribe_audio_buffer(
     given, the audio-relative word times are shifted to wall-clock epochs so
     the temporal aligner can weight them against real fixations.
 
-    ``backend`` selects the existing auto/parakeet/whisper chain. Selecting
-    ``parakeet-v3`` here or as ``model_name`` tries the NVIDIA worker,
-    then the existing cache-only chain on ordinary runtime failure."""
+    ``base.en`` and ``tiny.en`` select Whisper directly. ``parakeet-v3``
+    tries the NVIDIA worker, then cached Whisper on ordinary runtime failure.
+    Removed v2 backend names fail with migration guidance."""
+    if backend not in ("auto", "whisper", "parakeet-v3"):
+        raise ValueError("Parakeet v2 backends are no longer supported. Select parakeet-v3, or Whisper base.en/tiny.en.")
     import numpy as np
 
     audio_np = decode_audio_to_float32(audio_bytes, sample_rate=sample_rate, mime_type=mime_type)
@@ -478,15 +301,6 @@ def transcribe_audio_buffer(
             return result
     if model_name == "parakeet-v3":
         model_name = _DEFAULT_MODEL
-    if backend in ("auto", "parakeet"):
-        result = _transcribe_coreml(audio_np, sample_rate, float(audio_epoch or 0.0), timing)
-        if result is not None:
-            _LAST_BACKEND = "parakeet-coreml-ane"
-            return result
-        result = _transcribe_parakeet(audio_np, sample_rate, float(audio_epoch or 0.0), timing)
-        if result is not None:
-            _LAST_BACKEND = "parakeet-mlx"
-            return result
 
     _LAST_BACKEND = "whisper"
     try:

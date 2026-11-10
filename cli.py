@@ -62,9 +62,8 @@ def _first_run_guide(session, *, report=None) -> str:
                      "from Hugging Face and the official NeMo-Speech.cpp native runtime from GitHub. "
                      "Fallback models use existing caches only. Your camera and microphone stay off.")
     else:
-        lines.append("Local speech setup may download " + (
-            "~465 MB (fallbacks up to 2.47 GB)." if apple_silicon_mac() else
-            "~148 MB for base.en (~78 MB for tiny.en).") + " Your camera and microphone stay off.")
+        lines.append("Local speech setup may download SYSTRAN Whisper: "
+                     "~148 MB for base.en or ~78 MB for tiny.en. Your camera and microphone stay off.")
     if platform.system() == "Darwin" and not Path(
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file():
         lines.append("Install Google Chrome in Applications.")
@@ -82,8 +81,6 @@ def _first_run_guide(session, *, report=None) -> str:
 
 def _missing_modules() -> list[str]:
     modules = ["websockets", "numpy", "sounddevice", "faster_whisper", "ptts", "huggingface_hub"]
-    if apple_silicon_mac():
-        modules.extend(("parakeet_mlx", "CoreML"))
     return [name for name in modules if importlib.util.find_spec(name) is None]
 
 

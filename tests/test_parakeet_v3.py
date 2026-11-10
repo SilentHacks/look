@@ -16,7 +16,7 @@ from hermes_gaze.audio.asr import parakeet_v3 as v3
 class ParakeetV3Tests(unittest.TestCase):
     def setUp(self):
         for name, value in {
-            "_COREML_RUNNER": None, "_PARAKEET_MODEL": None, "_WHISPER_MODELS": {},
+            "_WHISPER_MODELS": {},
             "_PREPARING": False, "_PREPARATION_ERROR": "",
             "_PREPARE_DOWNLOAD": False, "_PREPARE_REPORT": None,
         }.items():
@@ -63,15 +63,13 @@ class ParakeetV3Tests(unittest.TestCase):
 
     def test_integrity_failure_does_not_fall_back(self):
         with patch.object(v3, "get_runner", side_effect=AssetIntegrityError("changed")), \
-                patch.object(voice, "_transcribe_coreml") as fallback:
+                patch.object(voice, "get_whisper_model") as fallback:
             with self.assertRaises(AssetIntegrityError):
                 voice.transcribe_audio_buffer(b"\xff\x7f" * 1600, model_name="parakeet-v3")
             fallback.assert_not_called()
 
     def test_runtime_failure_uses_only_existing_cached_chain(self):
         with patch.object(v3, "get_runner", side_effect=RuntimeError("native worker died")), \
-                patch.object(voice, "_transcribe_coreml", return_value=None), \
-                patch.object(voice, "_transcribe_parakeet", return_value=None), \
                 patch.object(voice, "get_whisper_model", side_effect=AssetsMissing("not installed")), \
                 patch("huggingface_hub.hf_hub_download", side_effect=AssertionError("network")):
             with self.assertRaises(RuntimeError) as caught:
@@ -160,40 +158,26 @@ class ParakeetV3Tests(unittest.TestCase):
                 process.kill()
             process.wait()
 
-    def test_fresh_start_prepares_cached_fallback_after_v3_failure(self):
-        for backend in ("coreml", "mlx", "whisper"):
-            for start in (voice.prewarm, voice.prepare_recognition):
-                with self.subTest(backend=backend, explicit=start is voice.prepare_recognition):
-                    voice._COREML_RUNNER = voice._PARAKEET_MODEL = None
-                    voice._WHISPER_MODELS.clear()
-                    repo = {"coreml": voice.COREML, "mlx": voice.MLX,
-                            "whisper": voice.WHISPER["base.en"]}[backend]
-                    def cached(selected, *, download=False):
-                        self.assertFalse(download, "fallback must remain cache-only")
-                        if selected != repo:
-                            raise AssetsMissing("not cached")
-                    def coreml():
-                        voice._COREML_RUNNER = object()
-                        return voice._COREML_RUNNER
-                    def mlx():
-                        voice._PARAKEET_MODEL = object()
-                        return voice._PARAKEET_MODEL
-                    def whisper(_):
-                        voice._WHISPER_MODELS["base.en"] = object()
-                        return voice._WHISPER_MODELS["base.en"]
-                    done = threading.Event()
-                    with patch.object(v3, "ready", return_value=False), \
-                            patch.object(v3, "get_runner", side_effect=RuntimeError("native unavailable")), \
-                            patch.object(voice, "apple_silicon_mac", return_value=True), \
-                            patch.object(voice, "prepare", side_effect=cached), \
-                            patch.object(voice, "_get_coreml_runner", side_effect=coreml), \
-                            patch.object(voice, "_get_parakeet_model", side_effect=mlx), \
-                            patch.object(voice, "get_whisper_model", side_effect=whisper):
-                        self.assertFalse(voice.recognition_ready("parakeet-v3"))
-                        start("parakeet-v3", report=lambda _: done.set())
-                        self.assertTrue(done.wait(2))
-                        self.assertTrue(voice.recognition_ready("parakeet-v3"))
-                        self.assertEqual(voice._PREPARATION_ERROR, "")
+    def test_fresh_start_prepares_cached_whisper_after_v3_failure(self):
+        for start in (voice.prewarm, voice.prepare_recognition):
+            with self.subTest(explicit=start is voice.prepare_recognition):
+                voice._WHISPER_MODELS.clear()
+                def cached(selected, *, download=False):
+                    self.assertFalse(download, "fallback must remain cache-only")
+                    self.assertEqual(selected, voice.WHISPER["base.en"])
+                def whisper(_):
+                    voice._WHISPER_MODELS["base.en"] = object()
+                    return voice._WHISPER_MODELS["base.en"]
+                done = threading.Event()
+                with patch.object(v3, "ready", return_value=False), \
+                        patch.object(v3, "get_runner", side_effect=RuntimeError("native unavailable")), \
+                        patch.object(voice, "prepare", side_effect=cached), \
+                        patch.object(voice, "get_whisper_model", side_effect=whisper):
+                    self.assertFalse(voice.recognition_ready("parakeet-v3"))
+                    start("parakeet-v3", report=lambda _: done.set())
+                    self.assertTrue(done.wait(2))
+                    self.assertTrue(voice.recognition_ready("parakeet-v3"))
+                    self.assertEqual(voice._PREPARATION_ERROR, "")
 
     def test_v3_preparation_integrity_failure_stops_before_fallback(self):
         done = threading.Event()
