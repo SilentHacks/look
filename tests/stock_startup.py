@@ -317,6 +317,7 @@ def child(args):
                     (home / "config.yaml").write_text(json.dumps(config))
 
                     # Stop does not pretend to cancel a handed-off input or transfer its owner.
+                    barrier.clear()
                     turns.control("resume")
                     held = await asyncio.to_thread(question, "Hold fixture: explain this rate")
                     await until(lambda: held["turn_id"] and len(calls) > before)

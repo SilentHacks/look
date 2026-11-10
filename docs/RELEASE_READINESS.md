@@ -141,8 +141,8 @@ described below. This verifies plugin installation, not a fresh Hermes applicati
 install or a working browser/provider/device session.
 
 **Pin limit:** this public commit predates the local card-sizing, exact cancellation
-and navigation changes. Integrate and publish those changes separately, then
-anonymously fetch and repeat installation/doctor before updating the README pin.
+and navigation changes. Publish the integrated fixes separately, then anonymously
+fetch and repeat installation/doctor before updating the README pin.
 A local commit, including this documentation change, is not a public install pin.
 
 ### Earlier local-source installation
@@ -258,7 +258,8 @@ without conflicts, retaining measured card growth and request-specific Stop.
   pauses the remaining FIFO and resumes it without replay.
   Initial fixture failures exposed a finish-before-interrupt race and the wrong
   expected receipt name; the fixture now waits for stock's actual interrupt.
-- **Navigation browser acceptance is not green.** CfT 157.0.8103.50 reached a
+- **Before classified recovery, navigation browser acceptance failed.** CfT
+  157.0.8103.50 reached a
   concurrent `Runtime.evaluate` rejection, `Cannot find context with specified id`,
   during redirect/rearm and ended the generation. The first run rearmed one
   redirect and answered its question before failing on the next; diagnostic
@@ -312,6 +313,43 @@ intermediate fixture diagnostics are recorded in the implementation handoff.
 No personal browser/profile, account, physical device, live provider or Hermes
 host modification was used. Stock-facing first-run contracts pass; the full
 stock-startup acceptance from the preceding integration was not rerun.
+
+### Master integration of navigation repair
+
+Integrated `ef53a3741430bc15ccb44a44d2224ba6dab4cd3b` onto
+`5497fe5025e25a8cc7d79dcf483fbaa702cb2281` as `2d1cbc7`, without conflicts.
+Public `SilentHacks/look` install instructions and their verified older pin,
+card sizing, exact cancellation and untracked `docs/research/` were preserved.
+
+- Full Python discovery ran once: **365 tests PASS**, 17.788 seconds. The repair
+  removes one obsolete forwarding-only test; this is not a narrowed suite.
+- Node syntax checks passed for extension worker/popup and browser
+  overlay/panel/markdown. Worker ownership/classification harness and all
+  **27** collector/parser/action contracts passed.
+- Targeted disposable CfT **157.0.8103.50** navigation, navigation-mutation,
+  lost-reply and host-loss scenarios passed **83 checks**. Five redirects and
+  six scripted answers retain one generation; stale owners, side-effecting reads
+  and background rendering are refused. In-flight/lost-reply mutations execute
+  once, terminate and never replay. Evidence:
+  `/tmp/look-navigation-master-integration/results.json`.
+- Focused stock startup passed against the unchanged disposable stock host,
+  using isolated state, prepared dependency imports and fake inference/browser.
+  Cold startup, exact cancellation/receipts, lost-ACK reconciliation, owner
+  retention and auth/reset/retirement guards passed. The initial run exposed a
+  fixture barrier left set by the preceding cancellation scenario; resetting it
+  before the next held request fixes the fixture. No product guard changed.
+
+No installed Hermes, personal profile, physical device, real provider, live
+gateway or staged extension was changed; no push/PR or Claude was used.
+Use the stopped update procedure in [the extension guide](CHROME_EXTENSION.md#update-move-or-remove):
+restart all Hermes processes on the updated plugin, open a new conversation,
+rerun `/look setup extension`, Reload Look in `chrome://extensions`, then
+`/look start --extension` and **Connect this tab**. Cancel unwanted processing
+before `/look stop`; disconnect alone does not cancel an admitted model turn.
+Real signed-in Amazon navigation/recording remains unverified. Concurrent real
+mutations can still intentionally end a generation; inspect unknown outcomes
+before another action and reconnect explicitly.
+
 
 
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.

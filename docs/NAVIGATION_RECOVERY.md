@@ -12,7 +12,7 @@ concurrent focus/render evaluations nor decoded this wrapper.
 
 Only trusted Python assigns `_look_operation` on the private native channel. The
 worker removes it before calling Chrome. Page text, model output and renderer
-messages cannot supply this authority. Missing/unknown classification defaults to
+messages cannot supply this authority. Missing classification defaults to
 `mutation`; invalid classification is refused. No expression-text heuristic exists.
 
 | Authority | Allowed recovery | Replay |

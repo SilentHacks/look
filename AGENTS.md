@@ -28,7 +28,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `browser/webcam_features.js` | Shared, version-ordered iris/head and normalized eye-appearance extraction for live and offline frames. Live uses the left eye only; saved offline layout remains both eyes then the original eight features. |
 | `benchmark/gaze_eval.py`, `browser/gaze_eval.js` | Offline frame stepping through the same pinned WASM/features and `GazeEstimator`; no capture devices. `gaze_dataset.py` preserves recordings/import/export; `gaze_tuning.py` and `scripts/gaze.py` run local evaluation and tuning. |
 | `benchmark/gaze_record.py`, `browser/gaze_record.js` | Explicit private recorder in the owned tracker window; camera-only video and target timestamps cross its exact-context nonce binding into local 0700/0600 files. Default sessions are 102.6 seconds (72.6 without recalibration), with a settling hold at each reading line start; legacy protocols remain loadable. Never run real devices as an agent. |
-| `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; retriable reads versus non-retrying `eval_js_once` mutations; session snapshot activation/epoch ownership and simulated choose. |
+| `browser/cdp_bridge.py` | Per-tab isolated-world CDP worker; trusted read/presentation/mutation classification, default non-retrying evaluations, pinned document rearm and snapshot epoch ownership. See `docs/NAVIGATION_RECOVERY.md`. |
 | `browser/companion.py` | Follows foreground focus, delivers Python-cached inbox state only to that protected renderer; evidence, actions and non-inbox replies retain captured ownership. Opens validated links and brings a source tab forward. |
 | `browser/overlay.js` | DOM collector and captured identities, plus the companion's input, pointing, motion and placement. Keeps rings and text-free glass plates in a closed shadow. Holds no UI tree; it sends view messages to the frames. |
 | `browser/panel.js` | Card stack and capsule renderer in two script-disabled, opaque-origin sandbox iframes. All words and the voice-level bars live here. Trusted events return only through its CDP context. |
@@ -261,6 +261,13 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   Unknown custom widgets, cross-origin frames and canvas must fail honestly.
 - **Never replay mutations.** `eval_js_once` is mandatory for all DOM mutations.
   Lost replies mean unknown outcome, not \"not executed\"; revoke that task/snapshot.
+  Both evaluation APIs default to mutation. Only trusted Python may classify fixed
+  read predicates or idempotent private presentation work; never infer authority
+  from expression text, page/model content or renderer-supplied classification.
+  Reads use Chrome `throwOnSideEffect`. Explicit missing-context/frame/object
+  rejections may return to bounded rearm for safe operations; the worker never
+  retries commands. Missing replies, debugger/host loss and mutation failures stay
+  terminal. Rearm and publication retain exact document and foreground ownership.
 - **Voice ownership includes item, request, session, exact wire text and turn.**
   `VoiceTurns` owns an in-memory inbox and at most eight waiting requests. Reserve
   capture order at recording stop, before ASR; hand off only the FIFO head.
