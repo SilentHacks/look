@@ -189,6 +189,9 @@ fixed; integrated stock validation reports **zero warnings**.
   native consent, first-run and companion ownership; Node worker ownership guards
   and extension worker/popup syntax checks PASS. Setup refresh/removal checks
   include every manifest icon asset. The long browser suite was not repeated.
+- The combined source archive passed the stock validator with **zero warnings**
+  and a **safe** scan. The stock-startup lifecycle probe also passed against the
+  unmodified host revision above, using disposable homes and fake inference/browser.
 
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes
