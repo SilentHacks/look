@@ -17,11 +17,11 @@ or newer with a model configured. Start with a non-sensitive page.
 Run interactively in a terminal. Review the scanner findings and dependency
 preparation before agreeing:
 
-The immutable pin below includes the catalog-readiness fixes and NVIDIA v3 default.
-Catalog admission and retained v2 converter-source acceptance remain under review.
+The immutable pin below uses NVIDIA v3 by default on Apple Silicon and removes
+Parakeet v2 CoreML/MLX support. Catalog admission remains under review.
 
 ```sh
-hermes plugins install https://github.com/SilentHacks/look.git --ref 6ff0a462d29adb8056e144d677b5e839e541409e --enable
+hermes plugins install https://github.com/SilentHacks/look.git --ref 3d0b8fe246905dfda2573efbced5b477c7f241ef --enable
 hermes config set plugins.isolation in_process
 hermes config set plugins.entries.hermes-gaze.allow_gateway_injection true
 hermes plugins doctor hermes-gaze --ci

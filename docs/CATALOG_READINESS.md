@@ -3,6 +3,7 @@
 Preparation record from 2026-11-10. The sections below retain the original
 pre-publication findings; the publication update supersedes their authorization,
 public-pin and screenshot status. Catalog acceptance remains a maintainer decision.
+
 ## V2 removal
 
 CoreML/MLX v2 loaders, setup assets, Python dependencies and benchmark execution
@@ -11,6 +12,18 @@ directly. V3 remains the Apple Silicon default, with cache-only Whisper fallback
 Old v2 caches are ignored and not deleted. Research results below remain historical.
 This removes those converted sources from the product, not a catalog approval claim.
 The earlier policy investigation and publication receipts below describe prior pins.
+Runtime change `3d0b8fe246905dfda2573efbced5b477c7f241ef` was published by
+fast-forward. This later documentation commit updates the README install pin to
+that v2-free source. The upstream catalog PR pins the final public documentation
+commit, with identical runtime code, rather than trying to self-pin a commit.
+
+Local verification: 106 focused speech, platform, first-run, session, inbox and
+layering tests passed. The native v3 offline probe passed using the public JFK
+fixture and verified existing NVIDIA caches with network denied. Load/warmup was
+1.407 seconds. Epoch shift, silence, 8-kHz input, 30-second bounds, forced worker
+exit, no implicit restart and explicit cached restart passed. No devices or
+provider inference were used. Final public-pin catalog receipts belong in the PR.
+
 
 
 ## Publication update — 2026-11-10
