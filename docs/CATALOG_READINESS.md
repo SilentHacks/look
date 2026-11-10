@@ -1,7 +1,40 @@
 # Catalog readiness
 
-Prepared 2026-11-10. Not ready for public submission. Product fixes and local
-checks do not replace source-policy review, public-pin evidence or UI screenshots.
+Preparation record from 2026-11-10. The sections below retain the original
+pre-publication findings; the publication update supersedes their authorization,
+public-pin and screenshot status. Catalog acceptance remains a maintainer decision.
+
+## Publication update — 2026-11-10
+
+The owner authorized publication and an upstream catalog PR. Public source
+`6ff0a462d29adb8056e144d677b5e839e541409e` was pushed by a normal fast-forward
+and anonymously cloned over HTTPS at that exact commit. It includes the NVIDIA
+v3 default and [six labelled fixture UI images](catalog/screenshots/README.md).
+Their capture source predates v3 integration; they are not v3 setup screenshots.
+No live inference, native Chrome consent or physical-device proof is implied.
+
+The README install command and local catalog entry now reference that separately
+published source. This later documentation commit cannot pin itself. The pinned
+source's README installs its runtime-identical predecessor `a5a9715bbf7d23261b901098283f0f68ab70eb0b`.
+The upstream submission changes only `plugin-catalog/hermes-gaze.yaml`.
+
+Current official catalog requirements were read at Hermes
+`95fc3e668fc1e13ad05d22a4f02fccc6a6d6ce02`; latest release was `v0.23.1`.
+Against the anonymously fetched plugin, current stock validation passed with
+safe scanner status and no warnings; declared capability lists match
+14 tools, 7 hooks and 2 middleware entries. Official schema, canonical-path
+confinement, self-updater and committed-payload gates passed. The 85 focused
+v3/download/voice/first-run/session/inbox tests passed using synthetic fixtures
+and an isolated HOME, without devices or provider inference.
+
+NVIDIA's current release API digest/size and peeled v0.3.0 source tag match the
+committed runtime manifest. This is not a local rebuild or attestation verification.
+Retained converter-owned CoreML/MLX v2 distributions still require the rule 17
+interpretation described below; the PR must ask explicitly, not claim approval.
+Upstream CI, maintainer review and merge are not established by local checks.
+Fresh current-stock `cmd_validate(..., install_deps=True)` also completed
+dependency resolution/installation in isolated state and passed with a safe
+scanner result and no warnings. This did not change installed Hermes.
 
 ## Fixed locally
 

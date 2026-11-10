@@ -1,10 +1,12 @@
 # Look catalog submission draft
 
-Owner review only. Nothing has been posted or submitted. Submit exactly one
-`plugin-catalog/hermes-gaze.yaml` file to NousResearch/hermes-agent after the
-[release gates](CATALOG_READINESS.md) close. The draft entry is
-[catalog/hermes-gaze.yaml](catalog/hermes-gaze.yaml). Its empty SHA deliberately
-blocks submission until a fixed public commit is verified.
+Historical pre-publication draft. Owner authorization now covers source
+publication and the upstream catalog PR. The actual one-file submission entry is
+[catalog/hermes-gaze.yaml](catalog/hermes-gaze.yaml), pinned to public source
+`6ff0a462d29adb8056e144d677b5e839e541409e`.
+See [the publication update](CATALOG_READINESS.md#publication-update--2026-11-10)
+for exercised checks and unresolved policy questions. The body below is retained
+as preparation context, not the final PR text.
 
 ## PR title
 
@@ -89,18 +91,18 @@ inference is not a live provider, physical-device or signed-in-site test.
 
 ### Screenshots
 
-Not captured. The required real UI images and sanitization procedure are listed
-in CATALOG_READINESS.md. Do not submit an icon, mockup or scripted state as a
-live user result. Any fixture-backed image must be labelled as such.
+Six actual fixture-backed UI images are now [published and labelled](catalog/screenshots/README.md).
+They were captured before v3 integration, with scripted answers and no provider
+inference. They do not prove native Chrome consent or a fresh installation.
 
 ## Publication controls
 
 Only the repository owner or a major contributor should submit. Owner approval
-is still required for publishing a commit, opening a PR, contacting maintainers,
-posting or submitting. Catalog updates use a newly reviewed SHA-bump PR and
-Hermes's update mechanism, never a plugin self-updater.
+for source publication and an upstream catalog PR was subsequently granted.
+No approval of catalog admission or asset-source policy is implied.
+Catalog updates use a newly reviewed SHA-bump PR and Hermes's update mechanism,
+never a plugin self-updater.
 
-The README's current published install pin predates these fixes. Align the
-README, catalog SHA, source receipts and any image URLs only after the intended
-fixed commit is publicly reachable. An internal candidate cannot be presented as
-an installable public release.
+The README and catalog entry now pin the separately published fixed source.
+A later documentation commit references that candidate rather than attempting
+an impossible self-pin.

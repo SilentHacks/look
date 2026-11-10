@@ -21,7 +21,7 @@ The immutable pin below includes the catalog-readiness fixes and NVIDIA v3 defau
 Catalog admission and retained v2 converter-source acceptance remain under review.
 
 ```sh
-hermes plugins install https://github.com/SilentHacks/look.git --ref a5a9715bbf7d23261b901098283f0f68ab70eb0b --enable
+hermes plugins install https://github.com/SilentHacks/look.git --ref 6ff0a462d29adb8056e144d677b5e839e541409e --enable
 hermes config set plugins.isolation in_process
 hermes config set plugins.entries.hermes-gaze.allow_gateway_injection true
 hermes plugins doctor hermes-gaze --ci
