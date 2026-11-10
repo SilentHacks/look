@@ -193,6 +193,55 @@ fixed; integrated stock validation reports **zero warnings**.
   and a **safe** scan. The stock-startup lifecycle probe also passed against the
   unmodified host revision above, using disposable homes and fake inference/browser.
 
+### Urgent card/cancellation/navigation integration
+
+On `master`, retained navigation commit `9e833bb`, cherry-picked card commit
+`31a776d` as `33053c5` and cancellation commit `913e856` as `c6857c9`.
+Only the changelog conflicted; both entries were retained. Overlay/panel merged
+without conflicts, retaining measured card growth and request-specific Stop.
+
+- Full unit discovery ran once: **366 tests PASS**, 15.665 seconds.
+- `node --check browser/overlay.js`, `node --check browser/panel.js` and
+  `node tests/extension_worker.cjs` passed. The worker harness covers classified
+  lifecycle reads, terminal arbitrary evaluations and missing replies, with no replay.
+- Private `probe_card_growth.py`, `probe_first_answer.py` and
+  `probe_cancel_request.py` passed. Growth at 1440×900 and 800×700 preserves
+  opening/manual scroll and coarse geometry. Cold readiness, late font metrics,
+  selection/focus, nested code/table scrolling, follow-up/Retry/recall passed.
+  Trusted active/queued Stop, synthetic Stop refusal, partial retention, paused
+  FIFO/resume, website text isolation and the SDK cancellation limit passed.
+- Extended `tests/stock_startup.py` passed against the unchanged disposable stock
+  host with real native auth, admission and receipt APIs, scripted inference and
+  synthetic browser attachment. Running cancellation produces a terminal
+  **`interrupted`** receipt; already-admitted queued cancellation produces
+  **`cancelled`**. Look retains partial text, cancels an exact queued follow-up,
+  pauses the remaining FIFO and resumes it without replay.
+  Initial fixture failures exposed a finish-before-interrupt race and the wrong
+  expected receipt name; the fixture now waits for stock's actual interrupt.
+- **Navigation browser acceptance is not green.** CfT 157.0.8103.50 reached a
+  concurrent `Runtime.evaluate` rejection, `Cannot find context with specified id`,
+  during redirect/rearm and ended the generation. The first run rearmed one
+  redirect and answered its question before failing on the next; diagnostic
+  instrumentation then captured the terminal method/reason on the first redirect.
+  This is outside the intentionally narrow frame-tree/fixed-lease read recovery.
+  Arbitrary evaluation, missing replies and mutation failures remain terminal.
+  Do not claim seamless navigation or an Amazon-specific fix; use the explicit
+  reconnect procedure below. The test-only worker records method/reason, not
+  expressions or ownership data.
+- Separate focused lost-reply/host-loss browser scenarios passed **29 checks**:
+  unknown mutation executes once, no reconnect/replay, input/output/task/approval
+  teardown, synthetic/keyboard approval rejection and page-preserving fail-open.
+
+Evidence: `/tmp/look-urgent-integrated/{growth,first,cancel,navigation-diagnostic}`.
+The old temporary CfT path was missing; a fresh official archive was downloaded
+under that evidence root, SHA256
+`aceb0578a1cc3631358b164dbbef04bf8936f96c690fb78c3ac25b7655e795e8`.
+No personal Chrome/profile, microphone/camera/output device, account or product
+provider was used. No live gateway, staged extension or native registration was
+updated. Actual headed toolbar consent, physical speech and configured-provider
+recording remain user-operated checks, not established by these fixtures.
+
+
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes
 mutation was used. The user trial below is a procedure, not completed acceptance.
@@ -246,12 +295,30 @@ User-operated only; use fictional data and a configured provider you authorize.
 Keep profiles, account names and terminal history out of recordings.
 
 1. Install the final local Git SHA using the README's pinned command, check
-   `hermes plugins list --plain --no-bundled`, merge the injection/in-process
-   configuration, stop the gateway and restart **every** Hermes process.
-2. Run `/look setup extension`. In the intended standard Chrome profile,
-   `chrome://extensions` → Developer mode → Load unpacked →
+   `hermes plugins list --plain --no-bundled`, and merge the injection/in-process
+   configuration. In the old conversation, use **Stop request** for any request
+   you want cancelled, wait for its outcome, then `/look stop`. Disconnect alone
+   does not cancel admitted processing.
+   Quit Hermes clients. From an external terminal in the same Hermes environment
+   and profile, run:
+
+   ```sh
+   hermes gateway status
+   hermes gateway restart
+   hermes gateway status
+   ```
+
+   If using a named profile, prefix each command with `hermes -p NAME` instead of
+   `hermes`. Do not use `--all` or force past a live-session refusal. A foreground
+   replacement may keep the terminal occupied; leave it running. Reopen Hermes
+   and start a new conversation so both plugin code and frozen guidance reload.
+   Restart any other Hermes process using Look before staging the shared helper.
+2. Run `/look setup extension` in that new conversation. In the intended standard
+   Chrome profile, open `chrome://extensions` and **Reload** an existing Look
+   installation. On first installation, enable Developer mode → Load unpacked →
    `~/Library/Application Support/Look/extension/unpacked`; review broad debugger
-   permissions. Setup is not browser consent or Store installation.
+   permissions. Setup does not reload Chrome's worker. Reload the intended web
+   page too, then connect afresh; setup is not browser consent or Store installation.
 3. From this checkout, serve only local fixtures:
    `python3 -m http.server 8765 --bind 127.0.0.1 --directory benchmark`.
    Open `http://127.0.0.1:8765/benchmark_page.html`.
@@ -260,6 +327,16 @@ Keep profiles, account names and terminal history out of recordings.
 4. Point at a table cell, **Right Option**, type “What does this cell measure?”
    Check the private streamed answer refers to that cell. Ask a typed follow-up;
    verify recall with **Q**, selection/scroll and **Esc**.
+   Ask for a longer comparison: the first words must stay at the top while the
+   card grows within the viewport; scrolling up must not jump as text arrives.
+   Queue two follow-ups, click **Stop request** on one, then on the active request.
+   Keep the partial answer; remaining work must wait for **Continue with the rest**.
+   Canonical local stock Hermes cancels the exact admission; other frontends
+   explicitly require stopping processing in Hermes. An in-flight action can finish.
+   Navigate to another local page and ask again. Classified frame/context read
+   failures may rearm on the same connection. A terminal disconnect instead needs
+   `/look stop`, `/look start --extension`, then reopen Look → **Connect this tab**.
+   An unknown mutation outcome requires inspecting the page, never replaying it.
 5. In another terminal, run
    `python3 -m http.server 8766 --bind 127.0.0.1 --directory tests/browser_actions`.
    Open `http://127.0.0.1:8766/browser_actions_page.html?kind=mail`;

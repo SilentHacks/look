@@ -115,7 +115,11 @@ def child(args):
         barrier = threading.Event()
         def inference(agent, kwargs):
             calls.append(dict(agent=id(agent), session_id=agent.session_id, request=kwargs))
-            if "Hold fixture" in json.dumps(kwargs["messages"]):
+            if "Hold fixture: cancel this request" in json.dumps(kwargs["messages"]):
+                while not barrier.wait(.01):
+                    if agent.is_interrupted:
+                        raise InterruptedError("Agent interrupted during fixture API call")
+            elif "Hold fixture" in json.dumps(kwargs["messages"]):
                 barrier.wait(10)
             return ChatCompletion(id="fake-" + str(len(calls)), created=0, model="offline-fixture",
                 object="chat.completion", choices=[dict(index=0, finish_reason="stop", message=dict(
@@ -234,6 +238,38 @@ def child(args):
                     # The explicit setting remains supported for the other admission scenarios.
                     config["plugins"]["isolation"] = "in_process"
                     config_path.write_text(json.dumps(config))
+
+                    # Real stock cancellation, not an invented end hook or receipt.
+                    barrier.clear()
+                    held = await asyncio.to_thread(question, "Hold fixture: cancel this request")
+                    await until(lambda: held.get("admission_id") and held["turn_id"])
+                    turns.delta(session_id=held["session_id"], turn_id=held["turn_id"], delta="Retained partial.")
+                    follow = turns.submit("Explain the queued follow-up", {}, item_id=held["item_id"])
+                    skipped = turns.submit("Cancel the queued follow-up", {}, item_id=held["item_id"])
+                    assert turns.control("cancel_request", held["item_id"], skipped["request_id"])["ok"]
+                    assert turns.runs[-1]["status"] == "cancelled"
+                    # Also exercise stock's already-admitted queued cancellation.
+                    queued = await rpc("prompt.submit", session_id=sid, submission_id="cancel-queued",
+                                       text="Must never reach inference")
+                    await rpc("prompt.cancel", session_id=sid, admission_id=queued["admission_id"])
+                    queued_receipt = await rpc("prompt.receipt", session_id=sid,
+                                               admission_id=queued["admission_id"], include_result=True)
+                    assert queued_receipt["status"] == "terminal" and queued_receipt["outcome"] == "cancelled", queued_receipt
+                    assert turns.control("cancel_request", held["item_id"], held["request_id"])["ok"]
+                    await until(lambda: turns.active is None)
+                    barrier.set()
+                    receipt = await rpc("prompt.receipt", session_id=sid,
+                                        admission_id=held["admission_id"], include_result=True)
+                    assert receipt["status"] == "terminal" and receipt["outcome"] == "interrupted", receipt
+                    assert held["status"] == "cancelled" and held["text"] == "Retained partial.", held
+                    assert turns.paused and turns.pending[0]["request_id"] == follow["request_id"]
+                    assert not any("Must never reach inference" in json.dumps(c["request"]) for c in calls)
+                    turns.control("resume")
+                    await until(lambda: turns.active is None and not turns.pending)
+                    assert turns.runs[-2]["status"] == "complete"
+                    output["exact_request_cancellation"] = dict(
+                        active_receipt=receipt["outcome"], queued_receipt=queued_receipt["outcome"],
+                        partial_retained=True, queued_followup_resumed=True, no_replay=True)
 
                     # An actual stock constructor failure settles before Look's pre hook.
                     await look(sid, "stop")

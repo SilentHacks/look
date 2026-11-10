@@ -4,6 +4,8 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Streamed answer cards reserve viewport-bounded reading room for long answers
+  while keeping short answers compact and preserving top/manual scroll.
 - Extension navigation recovery preserves the connection for explicitly classified
   frame/context rejections of frame-tree reads and the fixed lease ping. Existing
   bounded rearm handles recovery; arbitrary evaluations, missing replies and

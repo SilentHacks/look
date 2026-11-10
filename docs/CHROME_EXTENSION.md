@@ -128,6 +128,12 @@ the connection. The worker never retries commands. Arbitrary `Runtime.evaluate`,
 missing replies and unclassified errors retain terminal handling; lease and rearm
 deadlines are unchanged.
 
+This is not a seamless-navigation guarantee: a concurrent `Runtime.evaluate`
+can still meet a destroyed context and end the connection. If Look disconnects,
+run `/look stop`, then `/look start --extension` in the intended conversation.
+Reopen Look on the intended tab and choose **Connect this tab**. Inspect the page
+before repeating any action whose outcome is unknown.
+
 The alternative without an extension remains `/look start --existing`, then
 `/look start --existing --accept` with native Chrome consent. After Stop,
 `/look start --separate` explicitly selects Look's separate browser. No source is

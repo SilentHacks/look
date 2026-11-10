@@ -187,7 +187,12 @@ def scenario(chrome, mode, out=None):
         manifest['host_permissions'] = [url + '*']  # Only the disposable error reporter needs this.
         (extension / 'manifest.json').write_text(json.dumps(manifest))
         gated = mode in ('competing', 'expiry', 'stop', 'stale')
-        (extension / 'worker.js').write_text((extension / 'worker.js').read_text() + fixture_worker(url, gated=gated))
+        worker = (extension / 'worker.js').read_text()
+        # Fixture-only terminal diagnostics: method/reason, never expression or owner.
+        worker = worker.replace('} catch (_) {\n    // A failed or missing command reply',
+            '} catch (error) {\n    await fetch(' + json.dumps(url + 'error') +
+            ',{method:"POST",body:method+": "+error.message});\n    // A failed or missing command reply')
+        (extension / 'worker.js').write_text(worker + fixture_worker(url, gated=gated))
         args = [chrome, f'--user-data-dir={profile}', '--headless=new', '--no-first-run', '--no-default-browser-check',
                 '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps',
                 '--password-store=basic', '--use-mock-keychain', f'--disable-extensions-except={extension}',
