@@ -160,7 +160,7 @@ fixed; integrated stock validation reports **zero warnings**.
   repeated **actual shell** `hermes look setup-extension` passed in a private home.
   The native registration uses only the fixed extension origin. Final update,
   staged-host relocation/status and scoped-removal receipts accompany the handoff.
-- **Final extension browser acceptance: 66 checks PASS** on the integrated
+- **Pre-no-paste extension browser acceptance: 66 checks PASS** on the integrated
   `0ef0c2dd` runtime with official mac-arm64 Chrome for Testing **157.0.8103.50**,
   the [current stable channel](https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json)
   at verification. All four disposable-profile scenarios completed: private
@@ -180,6 +180,15 @@ fixed; integrated stock validation reports **zero warnings**.
   The native-consent lane's 145 protocol floor is separate from extension acceptance.
 - Relevant follow-up regressions: **56 tests PASS** across extension, native
   consent, first-run and companion ownership; Node worker guards PASS.
+- No-paste pairing was then verified separately: **100 headless checks PASS**
+  across eight disposable-profile scenarios on CfT **157.0.8103.50**, plus
+  **63 Python tests** and the Node worker ownership-race harness. This supersedes
+  the earlier four-scenario pairing evidence, not the headed/device/provider gates.
+  See [extension verification](CHROME_EXTENSION.md#verification-and-remaining-gates).
+- Combined icon/no-paste integration: **64 Python tests PASS** across extension,
+  native consent, first-run and companion ownership; Node worker ownership guards
+  and extension worker/popup syntax checks PASS. Setup refresh/removal checks
+  include every manifest icon asset. The long browser suite was not repeated.
 
 The declared Python/Hermes ranges and these checks are not a compatibility matrix.
 No personal browser, physical device, provider inference or installed Hermes
