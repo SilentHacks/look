@@ -177,11 +177,11 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         if not apple_silicon_mac():
             return "The Look development extension supports Apple Silicon Mac only."
         try:
-            ticket = session.cdp.start_extension(on_ready=on_ready, on_error=on_error)
+            session.cdp.start_extension(on_ready=on_ready, on_error=on_error)
         except (OSError, ValueError):
             return "Extension connection unavailable. /look stop, then /look setup extension; retry /look start --extension."
-        return ("Open Look from Chrome’s Extensions menu on the web tab you want to use. Paste this one-use ticket and choose Connect this tab (expires in 120 seconds):\n"
-                + ticket + "\n/look stop cancels. If it expires: /look stop, then /look start --extension. "
+        return ("Open Look from Chrome’s Extensions menu on the web tab you want to use and choose Connect this tab within 120 seconds. "
+                "/look stop cancels. "
                 "Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
 
     if sub in ("start", "connect") and (tail or session.cdp.source == "existing"):

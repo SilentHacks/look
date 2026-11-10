@@ -50,11 +50,10 @@ change it on updates. There is no Store listing or automatic extension update.
 ## Connect to this conversation
 
 1. Stop any previous connection with `/look stop`. In the intended running Hermes
-   conversation, run **`/look start --extension`**. Its existing Look input
-   permission is still required.
-2. Return to an ordinary web tab. Open **Look** from Chrome's Extensions menu,
-   paste the command's ticket, and choose **Connect this tab**. The popup checks
-   the native host and shows setup or expired-ticket recovery when needed.
+   conversation, run **`/look start --extension`**. This approves one connection
+   for **120 seconds**; the existing Look input permission is still required.
+2. On the desired ordinary web tab, open **Look** from Chrome's Extensions menu
+   and choose **Connect this tab**. No ticket or second Hermes approval is needed.
 3. Return to the page. `/look status` reports readiness. Point and hold Space;
    wait for **Listening** before speaking. The configured compose shortcut opens
    the private typed-input card. Microphone/speech setup is separate.
@@ -62,17 +61,19 @@ change it on updates. There is no Store listing or automatic extension update.
    Unselected tabs are not instrumented. Guarded new tabs retain the exact selected
    source window/profile; there is no all-tabs grant.
 
-A ticket selects the exact running Look instance and issuing Hermes conversation /
-profile. It expires after **120 seconds**, is consumed once and is never saved by
-the extension. Copy only the ticket, not the surrounding explanation; do not share
-it or submit it as a model question. If it expires: `/look stop`, then
-`/look start --extension` for a fresh ticket. Stop before changing conversations
-or runtimes; Look's browser/microphone owner is machine-scoped.
+The command pins the issuing Hermes conversation/profile. Private local discovery
+reveals only that pending generation to the popup; opening a popup cannot attach.
+The click consumes it once and pins that popup's native port and foreground tab.
+If two profiles click, only one can win; the other fails without attaching or
+switching the winner. Stop before changing conversations or runtimes: Look's
+browser/microphone owner is account-wide. An expired, cancelled or stale popup
+cannot use a replacement request. Run `/look stop`, `/look start --extension`,
+then reopen Look to connect again.
 
-The native port pins the Chrome extension-profile instance; the extension ID alone
-is not a Chrome profile identity. No discovery list, auto-pairing, clipboard access,
-URL-carried ticket, cloud relay or background reconnect is used. A same-user
-malicious program/debugger remains outside this website/other-user boundary.
+The extension ID is not a Chrome profile identity. The private capability stays
+in the native transport, never the popup, clipboard, URL or website. There is no
+auto-pairing, cloud relay or background reconnect. Same-user malicious code or a
+debugger remains outside this website/other-user boundary.
 
 ## Update, move or remove
 
@@ -108,7 +109,7 @@ malicious program/debugger remains outside this website/other-user boundary.
 | Problem | Action |
 |---|---|
 | Popup asks for setup / native host unavailable | `/look stop`; rerun `/look setup extension` in the intended Hermes environment, Reload Look, then start and pair again. Use stable Google Chrome's normal user-data location; custom `--user-data-dir`, other channels and managed policies are not this setup command's supported lane. |
-| Ticket refused/expired | Stop and start again in the intended conversation; paste the fresh ticket. Never retry an old generation. |
+| Request used, cancelled or expired | Stop and start again in the intended conversation, then reopen Look on the desired tab. |
 | Chrome refuses debugging | Choose an ordinary HTTP(S) tab in a regular window. Close DevTools/another debugger on that tab. Respect Chrome policy and its Stop banner; Look does not bypass them. |
 | Setup refuses existing registration/files | Keep them intact. If they are your older Look install, use Look's uninstall first. Otherwise resolve the conflicting installation explicitly; do not delete another application's registration. |
 | Setup interrupted / file access error | Stop Look, check access to the two documented user-level directories and rerun setup. Ordinary replacement failures restore previously replaced files; crash/power-loss recovery is rerunning setup. Do not edit Chrome profile preferences. |
@@ -144,18 +145,20 @@ camera/microphone permission is requested by this extension.
 ## Verification and remaining gates
 
 ```sh
-python -m unittest tests.test_extension tests.test_chrome_consent tests.test_profile_highlight tests.test_first_run
+python -m unittest tests.test_extension tests.test_chrome_consent tests.test_first_run tests.test_companion_ownership
 node tests/extension_worker.cjs
 python tests/extension_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --out /tmp/look-extension-evidence
 ```
 
-The browser probe uses only a temporary Chrome for Testing profile, temporary
-native registration, local pages, a test-only worker driver/inspector and fake
-frontend/device objects. It exercises the real plugin registration, setup command,
-staged native host and transport; automatic fixture pairing is not shipped. It is
-not a released-package install or real provider/device trial.
+The browser probe uses disposable Chrome for Testing profiles, temporary native
+registration, local pages, a test-only worker driver/inspector and fake
+frontend/device objects. It exercises real plugin registration, setup, native
+discovery, competing profile clicks, expiry, Stop, stale requests and private
+renderer/keyboard ownership. Automatic fixture pairing is not shipped; the actual
+toolbar popup gesture remains a user-operated gate.
 
-Final integrated headless acceptance: **66 checks PASS** on official mac-arm64
+No-paste headless acceptance: **100 checks PASS** across eight scenarios, plus
+**63 Python tests** and the Node ownership-race harness. Official mac-arm64
 Chrome for Testing **157.0.8103.50** (stable at verification). Chrome 145 is a
 protocol floor, not a verified compatibility matrix: CfT **145.0.7632.6** stalls
 the probe's debugger `mouseMoved` command even without Look installed. That build

@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><title>Look</title>
 <link rel="icon" type="image/png" href="icon-32.png">
-<style>body{font:14px system-ui;width:320px;padding:16px;color:#222;background:#fff}h1{display:flex;align-items:center;gap:10px}button,input{font:inherit;box-sizing:border-box;width:100%;padding:9px;margin-top:10px}p{line-height:1.45}#status{overflow-wrap:anywhere}button:disabled{opacity:.6}</style>
+<style>body{font:14px system-ui;width:320px;padding:16px;color:#222;background:#fff}h1{display:flex;align-items:center;gap:10px}button{font:inherit;box-sizing:border-box;width:100%;padding:9px;margin-top:10px}p{line-height:1.45}#status{overflow-wrap:anywhere}button:disabled{opacity:.6}</style>
 <h1><img src="icon-48.png" width="40" height="40" alt="">Look</h1>
 <p>Chrome gives Look broad debugging access. Page details you ask about go to your configured model and may stay in Hermes history.</p>
-<form id="pair"><label for="ticket">Ticket from Hermes</label><p>Run <code>/look start --extension</code> in the conversation you want to use, then paste its ticket.</p><input id="ticket" aria-label="Pairing ticket" autocomplete="off" spellcheck="false" required><button>Connect this tab</button></form>
+<p id="start">Run <code>/look start --extension</code> in the conversation you want to use.</p>
+<button id="pair" hidden>Connect this tab</button>
 <button id="add" hidden>Use on this tab</button><button id="stop" hidden>Disconnect</button>
 <p id="status" role="status" aria-live="polite"></p><script src="popup.js"></script></html>

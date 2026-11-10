@@ -14,6 +14,7 @@ function fixture() {
       runtime: {id: 'look', getURL: name => 'chrome-extension://look/' + name,
         onMessage: event('popup'), lastError: null},
       tabs: {get: async id => ({id, active, windowId, incognito: false, url: 'https://fixture.test/'}),
+        query: async () => [{id:1,active,windowId,incognito:false,url:'https://fixture.test/'}],
         onRemoved: event('remove'), onDetached: event('move'), onActivated: event('activate')},
       windows: {get: async () => ({type: 'normal', focused}), onFocusChanged: event('focus')},
       debugger: {sendCommand: async (_, method, params) => { commands.push({method, params}); return {}; },
@@ -91,27 +92,83 @@ function fixture() {
   vm.runInContext(`dead=false; port=replacement; generation='b'.repeat(32); tabs.clear()`, f.context);
   finish({targetInfos: []}); await old;
   assert.equal(replacement.length, 0, 'old native generation must not reply to a replacement connection');
-  // Setup health is a ticket-free, read-only one-shot; it never creates a paired port.
+  // Discovery is read-only, and the popup carries a generation/tab snapshot, not a ticket.
   f = fixture();
   await vm.runInContext('stop()', f.context);
   const probes = [];
-  f.context.chrome.runtime.sendNativeMessage = async (...args) => { probes.push(args); return {op:'status',version:1}; };
+  f.context.chrome.runtime.sendNativeMessage = async (...args) => { probes.push(args); return {op:'status',version:1,request:'a'.repeat(32)}; };
   const popup = message => new Promise(resolve => f.listeners.popup(message,
     {id:'look',url:'chrome-extension://look/popup.html'}, resolve));
-  assert.equal((await popup({op:'status'})).ok, true);
+  const offer = await popup({op:'status'});
+  assert.equal(offer.request, 'a'.repeat(32));
   assert.equal(probes.length, 1);
   assert.equal(probes[0][1].op, 'status');
-  assert.equal('ticket' in probes[0][1], false);
-  assert.equal(vm.runInContext('port===null && dead', f.context), true);
+  assert.equal(vm.runInContext('port===null && dead && tabs.size===0', f.context), true);
+  let nativeStarts = 0;
+  f.context.chrome.runtime.connectNative = () => { nativeStarts++; throw Error('must not open'); };
+  f.activate(false); f.activate(true);
+  assert.equal((await popup({op:'pair',request:offer.request,selection:offer.selection})).ok, false);
+  assert.equal(nativeStarts, 0, 'foreground changed and returned: stale popup must not start a port');
+  const beforeStop = await popup({op:'status'});
+  await popup({op:'stop'});
+  assert.equal((await popup({op:'pair',request:beforeStop.request,selection:beforeStop.selection})).ok, false);
+  assert.equal(nativeStarts, 0, 'Stop invalidates popups even before a native port exists');
   f.context.chrome.runtime.sendNativeMessage = async () => { throw Error('private platform failure'); };
   const absent = await popup({op:'status'});
   assert.equal(absent.ok, false);
   assert.equal(absent.error.includes('private platform failure'), false);
   f.context.chrome.tabs.query = async () => [{id:1,active:true,windowId:7,url:'chrome://extensions'}];
-  let nativeStarts = 0;
-  f.context.chrome.runtime.connectNative = () => { nativeStarts++; throw Error('must not open'); };
-  assert.equal((await popup({op:'pair',ticket:'bad'})).ok, false);
-  assert.equal((await popup({op:'pair',ticket:'a'.repeat(24)+'.'+'b'.repeat(64)})).ok, false);
-  assert.equal(nativeStarts, 0, 'malformed tickets/restricted tabs must not start the host or consume a ticket');
+  const epoch = vm.runInContext('connectionRevision', f.context);
+  assert.equal((await popup({op:'pair',request:'a'.repeat(32),selection:{id:1,windowId:7,revision:2,epoch}})).ok, false);
+  assert.equal(nativeStarts, 0, 'restricted tab must not consume the request');
+  // Race every await in an actual no-paste native handshake.
+  async function connecting() {
+    f = fixture();
+    await vm.runInContext('stop()', f.context);
+    const callbacks = {}, requests = [], attached = [];
+    f.context.chrome.runtime.sendNativeMessage = async () => ({op:'status',version:1,request:'a'.repeat(32)});
+    const native = {postMessage: message => requests.push(message), disconnect() {},
+      onMessage:{addListener:fn=>callbacks.message=fn},onDisconnect:{addListener:fn=>callbacks.disconnect=fn}};
+    f.context.chrome.runtime.connectNative = () => native;
+    f.context.chrome.debugger.attach = async tab => { attached.push(tab.tabId); };
+    const currentOffer = await popup({op:'status'});
+    const result = popup({op:'pair',request:currentOffer.request,selection:currentOffer.selection});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requests[0].request, currentOffer.request);
+    assert.equal(attached.length, 0, 'discovery/Connect before native acceptance cannot attach');
+    return {callbacks, requests, attached, result};
+  }
+  let attempt = await connecting();
+  attempt.callbacks.message({op:'paired',request:'a'.repeat(32),generation:'b'.repeat(32)});
+  assert.equal((await attempt.result).ok, false);
+  assert.equal(attempt.attached.length, 0, 'wrong generation cannot attach');
+  attempt = await connecting();
+  f.focus(false); f.focus(true);
+  attempt.callbacks.message({op:'paired',request:'a'.repeat(32),generation:'a'.repeat(32)});
+  assert.equal((await attempt.result).ok, false);
+  assert.equal(attempt.attached.length, 0, 'foreground change while native host starts cannot retarget');
+  attempt = await connecting();
+  await popup({op:'stop'});
+  attempt.callbacks.message({op:'paired',request:'a'.repeat(32),generation:'a'.repeat(32)});
+  assert.equal((await attempt.result).ok, false);
+  assert.equal(attempt.attached.length, 0, 'late acknowledgement after Stop cannot attach');
+  attempt = await connecting();
+  attempt.callbacks.message({op:'paired',request:'a'.repeat(32),generation:'a'.repeat(32)});
+  assert.equal((await attempt.result).connected, true);
+  assert.deepEqual(attempt.attached, [1], 'only the clicked tab is attached');
+  attempt.callbacks.disconnect();
+  await vm.runInContext('closing', f.context);
+  assert.equal(vm.runInContext('dead && tabs.size===0', f.context), true);
+  assert.equal(attempt.requests.length, 1, 'host loss never reconnects');
+  // A queued click must not start after Stop completes prior cleanup.
+  f = fixture(); await vm.runInContext('stop()', f.context);
+  let releaseCleanup;
+  f.context.cleanupWait = new Promise(resolve => { releaseCleanup = resolve; });
+  vm.runInContext('closing=cleanupWait', f.context);
+  const queued = vm.runInContext(`pair('a'.repeat(32),{id:1,windowId:7,url:'https://fixture.test/'})`, f.context);
+  const stopped = vm.runInContext('stop()', f.context);
+  releaseCleanup();
+  await assert.rejects(queued, /Connection or foreground changed/);
+  await stopped;
   console.log('PASS extension foreground/activation races, moved-tab, route, native-focus, stale-creation, forged-popup and stale-port guards');
 })().catch(error => { console.error(error); process.exitCode = 1; });

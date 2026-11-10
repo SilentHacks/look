@@ -17,11 +17,13 @@ import struct
 import sys
 import threading
 import tempfile
+import time
 
 NAME = "org.look.companion"
 MAX_MESSAGE = 768 * 1024  # Below Chrome's 1 MiB native-host output ceiling.
 ID = re.compile(r"[a-p]{32}")
-TICKET = re.compile(r"([0-9a-f]{24})\.([0-9a-f]{64})")
+REQUEST = re.compile(r"[0-9a-f]{32}")
+CAPABILITY = re.compile(r"[0-9a-f]{64}")
 
 
 def private_directory(path):
@@ -89,6 +91,24 @@ def configuration(directory=None):
     if not isinstance(config, dict) or not isinstance(config.get("extension_id"), str) or not ID.fullmatch(config["extension_id"]):
         raise ValueError("Look extension ID is invalid")
     return config
+
+
+def pending_request():
+    """Private discovery only; never inspect Chrome profiles or choose a runtime."""
+    try:
+        raw = _read_installed(runtime_directory() / "pending.json")
+        if raw is None:
+            return None
+        value = json.loads(raw)
+        if (not isinstance(value, dict) or not REQUEST.fullmatch(value.get("request", ""))
+                or not CAPABILITY.fullmatch(value.get("capability", ""))
+                or not re.fullmatch(r"[0-9a-f]{24}\.sock", value.get("socket", ""))
+                or not isinstance(value.get("expires"), (float, int))
+                or not time.monotonic() < value["expires"] <= time.monotonic() + 120):
+            return None
+        return value
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 @contextmanager
@@ -229,26 +249,32 @@ def relay(extension_id, origin, source, destination):
     if origin != f"chrome-extension://{extension_id}/":
         raise ValueError("Chrome extension origin does not match Look's registration")
     first = read_message(source)
-    if first.get("op") == "status":
-        send_message(destination, {"op": "status", "version": 1})
+    pending = pending_request()
+    if first.get("op") == "status" and pending is None:
+        send_message(destination, {"op": "status", "version": 1, "request": None})
         return
-    ticket = TICKET.fullmatch(first.get("ticket", ""))
-    if first.get("op") != "pair" or not ticket:
-        raise ValueError("Start Look in Hermes and enter its current pairing ticket")
-    path = runtime_directory() / (ticket[1] + ".sock")
-    info = path.lstat()
-    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-        raise ValueError("Look session socket is not private")
-    peer = socket.socket(socket.AF_UNIX)
+    if (first.get("op") not in ("status", "pair") or pending is None
+            or first.get("op") == "pair" and first.get("request") != pending["request"]):
+        raise ValueError("Start Look again in the intended Hermes conversation and reopen the popup")
+    peer = None
     try:
-        peer.settimeout(5)
+        path = runtime_directory() / pending["socket"]
+        info = path.lstat()
+        if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+            raise ValueError("Look session socket is not private")
+        peer = socket.socket(socket.AF_UNIX)
+        peer.settimeout(3)
         peer.connect(str(path))
         stream = peer.makefile("rwb", buffering=0)
-        send_message(stream, dict(op="pair", ticket=first["ticket"], extension_id=extension_id))
+        send_message(stream, dict(op=first["op"], request=pending["request"],
+                                 capability=pending["capability"], extension_id=extension_id))
         answer = read_message(stream)
-        if answer.get("op") != "paired" or not isinstance(answer.get("generation"), str):
-            raise ValueError("Look refused pairing; start a fresh connection in Hermes")
+        expected = "status" if first["op"] == "status" else "paired"
+        if answer.get("op") != expected or answer.get("request") != pending["request"]:
+            raise ValueError("Look refused this connection; start again explicitly")
         send_message(destination, answer)
+        if first["op"] == "status":
+            return
         peer.settimeout(None)
         peer.setsockopt(socket.SOL_SOCKET, socket.SO_SNDTIMEO, struct.pack("ll", 3, 0))
         def upstream():
@@ -265,8 +291,13 @@ def relay(extension_id, origin, source, destination):
         threading.Thread(target=upstream, name="look-native-input", daemon=True).start()
         while True:
             send_message(destination, read_message(stream))
+    except (OSError, EOFError, ValueError):
+        if first["op"] != "status":
+            raise
+        send_message(destination, {"op": "status", "version": 1, "request": None})
     finally:
-        peer.close()
+        if peer is not None:
+            peer.close()
 
 
 def main():
@@ -278,7 +309,7 @@ def main():
         config = configuration(args.config.parent if args.config else None)
         relay(config["extension_id"], args.action_or_origin, sys.stdin.buffer, sys.stdout.buffer)
     except (OSError, EOFError, ValueError, TypeError):
-        # Never print tickets, native messages, browser text or protocol error bodies.
+        # Never print capabilities, native messages, browser text or protocol error bodies.
         sys.exit(1)
 
 

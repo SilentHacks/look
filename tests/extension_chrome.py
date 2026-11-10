@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import shutil
 import threading
 import time
 from types import SimpleNamespace
@@ -28,7 +29,7 @@ import tests  # Package shell, not installed Hermes.
 from tests.test_first_run import FirstRunTests
 from tests.test_chrome_consent import until
 from hermes_gaze import cli, service
-from hermes_gaze.browser import extension_host
+from hermes_gaze.browser import extension as extension_transport, extension_host
 from hermes_gaze.config import GazeConfig
 
 HERE = Path(__file__).resolve().parents[1]
@@ -46,6 +47,10 @@ document.querySelector('#delete').onclick=()=>fetch('/mutation',{method:'POST'})
 
 class Page(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == '/gate':
+            self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+            self.wfile.write(json.dumps({'go': self.server.go}).encode())
+            return
         self.send_response(200); self.send_header('Content-Type', 'text/html'); self.end_headers()
         self.wfile.write(PAGE)
 
@@ -57,13 +62,16 @@ class Page(http.server.BaseHTTPRequestHandler):
             self.server.status = json.loads(raw)
         elif self.path == '/error':
             self.server.error = raw.decode()
+        elif self.path in ('/offer', '/result'):
+            value = json.loads(raw)
+            getattr(self.server, 'offers' if self.path == '/offer' else 'results')[value['client']] = value
         self.send_response(204); self.end_headers()
 
     def log_message(self, *_):
         pass
 
 
-def fixture_worker(ticket, url):
+def fixture_worker(url, client='main', gated=False):
     # Test-only raw inspector and gesture driver. Production worker refuses these methods.
     return r'''
 const fixtureRoot = root;
@@ -75,6 +83,7 @@ root = async (method, params) => {
   if (method === 'Test.background') { return {target: (await chrome.tabs.create({url: FIXTURE_URL, active:true})).id}; }
   if (method === 'Test.focus') { await chrome.tabs.update(Number(params.target), {active:true}); return {}; }
   if (method === 'Test.reload') { setTimeout(()=>chrome.runtime.reload(),50); return {}; }
+  if (method === 'Test.client') return {client: FIXTURE_CLIENT};
   try { return await fixtureRoot(method, params); }
   catch(error) { await fetch(FIXTURE_URL+'error',{method:'POST',body:method+': '+error.message}); throw error; }
 };
@@ -83,12 +92,23 @@ chrome.runtime.onInstalled.addListener(async details => {
   try {
     const tab = await chrome.tabs.create({url: FIXTURE_URL, active:true});
     for(let n=0;n<100 && (await chrome.tabs.get(tab.id)).status !== 'complete';n++) await new Promise(r=>setTimeout(r,50));
-    await pair(FIXTURE_TICKET, await chrome.tabs.get(tab.id));
+    const offer = await chrome.runtime.sendNativeMessage('org.look.companion', {op:'status'});
+    if (FIXTURE_GATED) {
+      await fetch(FIXTURE_URL+'offer',{method:'POST',body:JSON.stringify({client:FIXTURE_CLIENT,request:offer.request})});
+      while (!(await (await fetch(FIXTURE_URL+'gate')).json()).go) await new Promise(r=>setTimeout(r,50));
+    }
+    try {
+      await pair(offer.request, await chrome.tabs.get(tab.id));
+      if (FIXTURE_GATED) await fetch(FIXTURE_URL+'result',{method:'POST',body:JSON.stringify({client:FIXTURE_CLIENT,ok:true,attached:tabs.has(tab.id)})});
+    } catch(error) {
+      if (!FIXTURE_GATED) throw error;
+      await fetch(FIXTURE_URL+'result',{method:'POST',body:JSON.stringify({client:FIXTURE_CLIENT,ok:false,attached:tabs.has(tab.id)})});
+    }
   } catch(error) {
     await fetch(FIXTURE_URL+'error',{method:'POST',body:error.stack});
   }
 });
-'''.replace('FIXTURE_TICKET', json.dumps(ticket)).replace('FIXTURE_URL', json.dumps(url))
+'''.replace('FIXTURE_URL', json.dumps(url)).replace('FIXTURE_CLIENT', json.dumps(client)).replace('FIXTURE_GATED', json.dumps(gated))
 
 
 def scenario(chrome, mode, out=None):
@@ -101,6 +121,7 @@ def scenario(chrome, mode, out=None):
         directory = Path(directory)
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page)
         server.mutations, server.status, server.error = 0, {}, ''
+        server.go, server.offers, server.results = False, {}, {}
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
         server_thread.start()
         stack.callback(server.server_close); stack.callback(server.shutdown)
@@ -122,6 +143,10 @@ def scenario(chrome, mode, out=None):
         profile = directory / 'profile'
         stack.enter_context(patch.object(extension_host, 'install_directory', return_value=native))
         stack.enter_context(patch.object(extension_host, 'manifest_directory', return_value=profile / 'NativeMessagingHosts'))
+        transport = directory / 'transport'
+        transport.mkdir(mode=0o700)
+        stack.enter_context(patch.object(extension_host, 'runtime_directory', return_value=transport))
+        stack.enter_context(patch.object(extension_transport, 'runtime_directory', return_value=transport))
         command('setup extension')
         check('setup_stages_native_host_and_fixed_extension_without_binding', (native / 'unpacked/manifest.json').is_file() and not turns.connected)
         command('setup extension')
@@ -130,19 +155,22 @@ def scenario(chrome, mode, out=None):
         wrapper = directory / 'host_entry.py'
         wrapper.write_text('import os,runpy\nfrom pathlib import Path\n'
                            + f'Path({str(directory / "host.pid")!r}).write_text(str(os.getpid()))\n'
-                           + f'runpy.run_path({str(native / "host.py")!r},run_name="__main__")\n')
+                           + f'host=runpy.run_path({str(native / "host.py")!r})\n'
+                           + f'host["main"].__globals__["runtime_directory"]=lambda: Path({str(transport)!r})\n'
+                           + 'host["main"]()\n')
         launcher = native / 'host'
         launcher.write_text(launcher.read_text().replace(str(native / 'host.py'), str(wrapper)))
         result = command('start --extension', session_id='fixture-session', session_key='fixture-key', platform='fixture')
         root = session.cdp.chrome
-        ticket = root._ticket
-        check('registered_plugin_creates_explicit_one_use_pairing', ticket and ticket in result and not turns.connected)
+        check('registered_plugin_creates_explicit_one_use_pairing', root.state == 'waiting' and
+              root.generation not in result and root._capability not in result and not turns.connected)
         check('waiting_generation_refuses_setup_and_uninstall', cli._setup_extension()[0] == 1 and cli._setup_extension(remove=True)[0] == 1)
         extension = native / 'unpacked'
         manifest = json.loads((extension / 'manifest.json').read_text())
         manifest['host_permissions'] = [url + '*']  # Only the disposable error reporter needs this.
         (extension / 'manifest.json').write_text(json.dumps(manifest))
-        (extension / 'worker.js').write_text((extension / 'worker.js').read_text() + fixture_worker(ticket, url))
+        gated = mode in ('competing', 'expiry', 'stop', 'stale')
+        (extension / 'worker.js').write_text((extension / 'worker.js').read_text() + fixture_worker(url, gated=gated))
         args = [chrome, f'--user-data-dir={profile}', '--headless=new', '--no-first-run', '--no-default-browser-check',
                 '--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps',
                 '--password-store=basic', '--use-mock-keychain', f'--disable-extensions-except={extension}',
@@ -150,6 +178,22 @@ def scenario(chrome, mode, out=None):
         check('no_remote_debugging_or_unsafe_extension_flags', not any('remote-debugging' in a or 'unsafe-extension' in a for a in args))
         with (directory / 'chrome.log').open('wb') as log:
             process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+        if mode == 'competing':
+            second_profile, second_extension = directory / 'profile-b', directory / 'extension-b'
+            shutil.copytree(extension, second_extension)
+            (second_extension / 'worker.js').write_text((HERE / 'extension/worker.js').read_text() + fixture_worker(url, client='other', gated=True))
+            second_manifests = second_profile / 'NativeMessagingHosts'
+            second_manifests.mkdir(parents=True)
+            shutil.copyfile(profile / 'NativeMessagingHosts/org.look.companion.json', second_manifests / 'org.look.companion.json')
+            second_args = [arg.replace(str(profile), str(second_profile)).replace(str(extension), str(second_extension)) for arg in args]
+            with (directory / 'chrome-b.log').open('wb') as log:
+                second = subprocess.Popen(second_args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log)
+            def close_second():
+                if second.poll() is None:
+                    second.terminate()
+                    try: second.wait(10)
+                    except subprocess.TimeoutExpired: second.kill(); second.wait(5)
+            stack.callback(close_second)
         def cleanup():
             session.close()
             if process.poll() is None:
@@ -158,6 +202,41 @@ def scenario(chrome, mode, out=None):
                 except subprocess.TimeoutExpired: process.kill(); process.wait(5)
         stack.callback(cleanup)
         try:
+            if gated:
+                until(lambda: len(server.offers) == (2 if mode == 'competing' else 1) or bool(server.error), 25)
+                assert not server.error, server.error
+                check('opening_popups_discovers_only_the_approved_conversation_without_attachment',
+                      all(value['request'] == root.generation for value in server.offers.values()) and not root.live and not turns.connected)
+                replacement = None
+                if mode in ('stop', 'stale'):
+                    command('stop')
+                    if mode == 'stale':
+                        command('start --extension', session_id='replacement-session', session_key='replacement-key', platform='fixture')
+                        replacement = session.cdp.chrome
+                elif mode == 'expiry':
+                    root._expires = time.monotonic() - 1
+                    until(lambda: root.state == 'failed')
+                server.go = True  # Fixture-only Connect clicks; production never auto-pairs.
+                until(lambda: len(server.results) == len(server.offers) or bool(server.error), 15)
+                assert not server.error, server.error
+                if mode == 'competing':
+                    winners = [value for value in server.results.values() if value['ok']]
+                    losers = [value for value in server.results.values() if not value['ok']]
+                    check('competing_profile_clicks_consume_exactly_one_native_port', len(winners) == len(losers) == 1 and not losers[0]['attached'])
+                    until(lambda: turns.connected)
+                    check('winning_profile_port_and_exact_conversation_are_pinned',
+                          root.command('Test.client')['client'] == winners[0]['client'] and turns.binding['session_id'] == 'fixture-session')
+                    command('stop')
+                    until(lambda: not root.live)
+                else:
+                    check(mode + '_rejects_late_click_without_debugger_attachment',
+                          all(not value['ok'] and not value['attached'] for value in server.results.values()) and not root.live and not turns.connected)
+                    if replacement:
+                        check('stale_click_cannot_consume_replacement_conversation', replacement.state == 'waiting' and
+                              extension_host.pending_request()['request'] == replacement.generation)
+                command('stop')
+                check('rejected_or_stopped_generation_does_not_reconnect', not turns.connected and not session.cdp.chrome.live)
+                return checks
             until(lambda: turns.connected or bool(server.error), 25)
             assert not server.error, server.error
             check('real_chrome_native_host_pairs_exact_plugin_conversation', turns.binding['session_id'] == 'fixture-session')
@@ -318,7 +397,8 @@ if __name__ == '__main__':
     parser.add_argument('--out', type=Path)
     args = parser.parse_args()
     if args.out: args.out.mkdir(parents=True, exist_ok=True)
-    results = {mode: scenario(args.chrome, mode, args.out) for mode in ('surface', 'lost-reply', 'host-loss', 'worker-reload')}
+    results = {mode: scenario(args.chrome, mode, args.out) for mode in (
+        'surface', 'lost-reply', 'host-loss', 'worker-reload', 'competing', 'expiry', 'stop', 'stale')}
     if args.out:
         (args.out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(json.dumps(results, indent=2))

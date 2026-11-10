@@ -4,11 +4,11 @@ const WORLD = 'hermes-gaze', BINDING = '__hermesGazeIntent';
 const tabs = new Map();
 let port = null, generation = '', ready = null, pairing = null, dead = true;
 let closing = Promise.resolve(), lastPython = 0;
-let foregroundRevision = 0;
+let foregroundRevision = 0, connectionRevision = 0;
 const safeError = text => Object.assign(Error(text), {look: true});
 const fail = text => { throw safeError(text); };
 const SETUP = 'Run /look setup extension in Hermes, reload Look in chrome://extensions, then try again.';
-const FRESH_TICKET = 'Ticket refused or expired. In Hermes: /look stop, then /look start --extension. Paste the new ticket here.';
+const FRESH_REQUEST = 'Connection used, cancelled or expired. Run /look stop, then /look start --extension in Hermes and reopen Look.';
 const urlAllowed = url => /^https?:\/\//.test(url || '');
 const bounded = promise => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Error('Chrome did not reply. Reconnect explicitly; do not repeat an action.')), 5000))]);
 async function foreground(tab) {
@@ -37,6 +37,7 @@ async function cleanup(tab) {
   try { await bounded(chrome.debugger.detach({tabId: tab.id})); } catch (_) { /* Already detached. */ }
 }
 function stop() {
+  connectionRevision++;
   dead = true;
   const old = port; port = null; generation = '';
   if (pairing) { pairing.reject(Error('Look disconnected. Start a fresh connection in Hermes.')); pairing = null; }
@@ -69,25 +70,29 @@ function post(value, connection = port) {
   if (!port || dead || port !== connection) fail('Look disconnected.');
   connection.postMessage(value);
 }
-async function pair(ticket, tab) {
+async function pair(request, tab, revision = foregroundRevision, epoch = connectionRevision) {
   await closing;
+  if (epoch !== connectionRevision || revision !== foregroundRevision) fail('Connection or foreground changed. Reopen Look on the desired tab.');
   if (port || !dead) fail('Disconnect Look before pairing another session.');
-  if (!/^[0-9a-f]{24}\.[0-9a-f]{64}$/.test(ticket || '')) fail('Paste the complete pairing ticket from /look start --extension.');
+  if (!/^[0-9a-f]{32}$/.test(request || '')) fail(FRESH_REQUEST);
   if (!tab || tab.incognito || !urlAllowed(tab.pendingUrl || tab.url)) fail('Choose an ordinary web tab in a regular Chrome window.');
   dead = false;
-  const current = chrome.runtime.connectNative('org.look.companion');
+  let current;
+  try { current = chrome.runtime.connectNative('org.look.companion'); }
+  catch (_) { await stop(); fail(SETUP); }
   port = current;
   current.onDisconnect.addListener(() => {
     const error = chrome.runtime.lastError?.message || '';
     if (port !== current) return;
-    if (pairing) pairing.reject(safeError(/not found|forbidden|start native/i.test(error) ? SETUP : FRESH_TICKET));
+    if (pairing) pairing.reject(safeError(/not found|forbidden|start native/i.test(error) ? SETUP : FRESH_REQUEST));
     void stop();
   });
   current.onMessage.addListener(message => {
     if (port !== current || dead) return;
     lastPython = Date.now();
     if (message.op === 'paired') {
-      if (!pairing || generation || !/^[0-9a-f]{32}$/.test(message.generation || '')) { void stop(); return; }
+      if (!pairing || generation || message.generation !== request || message.request !== request ||
+          epoch !== connectionRevision || revision !== foregroundRevision) { void stop(); return; }
       generation = message.generation;
       ready = select(tab, current);
       const waiter = pairing; pairing = null;
@@ -98,7 +103,7 @@ async function pair(ticket, tab) {
   });
   try {
     await bounded(new Promise((resolve, reject) => {
-      pairing = {resolve, reject}; current.postMessage({op: 'pair', ticket});
+      pairing = {resolve, reject}; current.postMessage({op: 'pair', request});
     }));
   } catch (error) { if (port === current) await stop(); throw error; }
 }
@@ -227,17 +232,26 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   (async () => {
     if (message.op === 'stop') await stop();
     else if (message.op === 'pair' || message.op === 'add') {
-      const connection = port, revision = foregroundRevision;
+      const connection = port, revision = foregroundRevision, epoch = connectionRevision;
       const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
-      if (revision !== foregroundRevision) fail('Foreground changed before tab selection.');
-      if (message.op === 'pair') await pair(message.ticket, tab);
-      else await select(tab, connection);
+      if (revision !== foregroundRevision || epoch !== connectionRevision) fail('Connection or foreground changed before tab selection.');
+      if (message.op === 'pair') {
+        const selected = message.selection;
+        if (!selected || selected.id !== tab?.id || selected.windowId !== tab.windowId ||
+            selected.revision !== revision || selected.epoch !== epoch) fail('Reopen Look on the tab you want to connect.');
+        await pair(message.request, tab, revision, epoch);
+      } else await select(tab, connection);
     } else if (message.op !== 'status') fail('Unsupported popup action.');
     if (message.op === 'status' && dead) {
+      const revision = foregroundRevision, epoch = connectionRevision;
+      const [tab] = await chrome.tabs.query({active: true, currentWindow: true});
       let host;
       try { host = await bounded(chrome.runtime.sendNativeMessage('org.look.companion', {op: 'status'})); }
       catch (_) { fail(SETUP); }
       if (host?.op !== 'status' || host.version !== 1) fail(SETUP);
+      if (revision !== foregroundRevision || epoch !== connectionRevision || !dead) fail('Connection or foreground changed. Reopen Look.');
+      return {ok: true, connected: false, request: host.request,
+        selection: tab && {id: tab.id, windowId: tab.windowId, revision, epoch}};
     }
     return {ok: true, connected: !dead && !!generation};
   })().then(reply, error => reply({ok: false, error: error.look ? error.message : 'Chrome did not complete the connection. Check debugger access, then /look stop and /look start --extension in Hermes.'}));

@@ -87,19 +87,20 @@ class Companion:
 
             return self._start_borrowed(chrome, stopped, on_ready, on_error, timeout=timeout)
 
-    def start_extension(self, *, on_ready=None, on_error=None) -> str:
+    def start_extension(self, *, on_ready=None, on_error=None) -> dict:
         from .extension import ExtensionChrome
         with self._lifecycle:
-            if self.is_connected or self._consent_worker and self._consent_worker.is_alive():
+            if (self.is_connected or self._consent_worker and self._consent_worker.is_alive()
+                    and self.chrome.state not in ("disconnected", "failed")):
                 raise OwnershipError("Stop Look before starting an extension connection.")
             self.close()
             chrome = ExtensionChrome(lease_dir=self._owned_chrome.profile)
-            ticket = chrome.prepare()
+            chrome.prepare()
             self.source, self.chrome = "extension", chrome
             stopped = self._stop = threading.Event()
             chrome.on_loss = lambda: self._consent_lost(chrome)
             self._start_borrowed(chrome, stopped, on_ready, on_error)
-            return ticket
+            return self.connection_status
 
     def _start_borrowed(self, chrome, stopped, on_ready, on_error, *, timeout=120):
         def run():

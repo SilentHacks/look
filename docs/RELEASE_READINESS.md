@@ -231,7 +231,7 @@ mutation was used. The user trial below is a procedure, not completed acceptance
 ## User trial and recording procedure
 
 User-operated only; use fictional data and a configured provider you authorize.
-Keep pairing tickets, profiles, account names and terminal history out of recordings.
+Keep profiles, account names and terminal history out of recordings.
 
 1. Install the final local Git SHA using the README's pinned command, check
    `hermes plugins list --plain --no-bundled`, merge the injection/in-process
@@ -244,7 +244,7 @@ Keep pairing tickets, profiles, account names and terminal history out of record
    `python3 -m http.server 8765 --bind 127.0.0.1 --directory benchmark`.
    Open `http://127.0.0.1:8765/benchmark_page.html`.
    In the intended new Hermes conversation, `/look start --extension`; open Look
-   on that tab, paste the fresh 120-second ticket, **Connect this tab**.
+   on that tab and choose **Connect this tab** within 120 seconds.
 4. Point at a table cell, **Right Option**, type “What does this cell measure?”
    Check the private streamed answer refers to that cell. Ask a typed follow-up;
    verify recall with **Q**, selection/scroll and **Esc**.
@@ -258,7 +258,7 @@ Keep pairing tickets, profiles, account names and terminal history out of record
    Only “Message sent locally.” should change; no real recipient/network send.
 6. During another local task switch tabs/navigate: no input may target the new
    foreground document, and old approval must expire. `/look stop` must remove
-   Look/stop capture and output while leaving tabs open. Pair with a fresh ticket.
+   Look/stop capture and output while leaving tabs open. Start a fresh connection.
 7. For voice only after explicit `/look setup`: grant the launching app's macOS
    microphone permission, hold Space, **wait for Listening**, speak and release.
    Test focus-loss cancellation and the 30-second cap with the five-second warning.

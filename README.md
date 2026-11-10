@@ -105,8 +105,8 @@ in Chrome if no longer wanted. [Connection, revocation and limits](docs/REFERENC
    **Command–Shift–G** accepts the path in the macOS picker. Review the broad
    **debugger**, **nativeMessaging** and **tabs** permissions; the debugging banner remains.
 3. Run `/look start --extension` in the intended Hermes conversation. On an ordinary
-   HTTP(S) tab, open **Look**, paste its one-use 120-second ticket, and choose
-   **Connect this tab**. Use **Right Option** for private typed input; wait for
+   HTTP(S) tab, open **Look** and choose **Connect this tab** within 120 seconds.
+   No ticket or second Hermes approval. Use **Right Option** for private typed input; wait for
    **Listening** before speaking.
 4. For another tab, open Look there and choose **Use on this tab**.
    `/look stop` disconnects and keeps Chrome/tabs open.

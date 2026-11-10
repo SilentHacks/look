@@ -17,7 +17,7 @@ import unittest
 from unittest.mock import patch
 
 from hermes_gaze import cli
-from hermes_gaze.browser import extension_host
+from hermes_gaze.browser import extension, extension_host
 from hermes_gaze.browser.cdp_bridge import CdpSession
 from hermes_gaze.browser.extension import ExtensionChrome
 from hermes_gaze.browser.extension_host import (MAX_MESSAGE, configuration, install, read_message,
@@ -30,14 +30,14 @@ EXTENSION = ''.join(chr(97 + int(c, 16)) for c in hashlib.sha256(base64.b64decod
 
 
 class Peer:
-    def __init__(self, root, ticket):
-        self.root, self.ticket = root, ticket
+    def __init__(self, root, capability):
+        self.root = root
         self.commands, self.mutations = [], 0
         self.hold_focus = False
         self.socket = socket.socket(socket.AF_UNIX)
         self.socket.connect(str(root._path))
         self.stream = self.socket.makefile('rwb', buffering=0)
-        send_message(self.stream, dict(op='pair', ticket=ticket, extension_id=EXTENSION))
+        send_message(self.stream, dict(op='pair', capability=capability, request=root.generation, extension_id=EXTENSION))
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 
@@ -91,6 +91,12 @@ class Peer:
 
 
 class NativeHostTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch.object(extension_host, 'runtime_directory', return_value=Path(tmp.name)).start()
+
     def test_exact_registration_private_config_and_uninstall(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -156,12 +162,12 @@ class NativeHostTests(unittest.TestCase):
                 result = subprocess.run([str(directory / 'host'), f'chrome-extension://{EXTENSION}/'],
                                         input=request.getvalue(), capture_output=True, timeout=5, check=True)
                 return read_message(io.BytesIO(result.stdout))
-            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            self.assertEqual(status(), {'op': 'status', 'version': 1, 'request': None})
             moved_python = root / 'new python'
             moved_python.symlink_to(sys.executable)
             with patch.object(sys, 'executable', str(moved_python)):
                 install(directory=directory, manifests=manifests)
-            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            self.assertEqual(status(), {'op': 'status', 'version': 1, 'request': None})
             # Simulate a single failed atomic replacement during an update, not a working no-op.
             original = extension_host._replace
             attempts = []
@@ -174,9 +180,9 @@ class NativeHostTests(unittest.TestCase):
             with patch.object(extension_host, '_replace', side_effect=fail_once), self.assertRaises(OSError):
                 install(directory=directory, manifests=manifests)
             self.assertEqual((directory / 'unpacked/popup.html').read_text(), 'previous popup')
-            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            self.assertEqual(status(), {'op': 'status', 'version': 1, 'request': None})
             install(directory=directory, manifests=manifests)
-            self.assertEqual(status(), {'op': 'status', 'version': 1})
+            self.assertEqual(status(), {'op': 'status', 'version': 1, 'request': None})
 
     def test_conflicts_symlinks_and_legacy_id_are_not_overwritten_or_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -293,8 +299,13 @@ class NativeHostTests(unittest.TestCase):
 class PairingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = ExtensionChrome(lease_dir=Path(self.tmp.name) / 'lease', extension_id=EXTENSION)
-        self.ticket = self.root.prepare(timeout=3)
+        directory = Path(self.tmp.name)
+        self.addCleanup(patch.stopall)
+        patch.object(extension_host, 'runtime_directory', return_value=directory).start()
+        patch.object(extension, 'runtime_directory', return_value=directory).start()
+        self.root = ExtensionChrome(lease_dir=directory / 'lease', extension_id=EXTENSION)
+        self.root.prepare(timeout=3)
+        self.capability = self.root._capability
         self.tabs, self.peers = [], []
 
     async def asyncTearDown(self):
@@ -307,7 +318,7 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
 
     async def start(self):
         attempt = asyncio.create_task(asyncio.to_thread(self.root.start))
-        peer = Peer(self.root, self.ticket)
+        peer = Peer(self.root, self.capability)
         self.peers.append(peer)
         await attempt
         return peer
@@ -320,23 +331,26 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await asyncio.to_thread(tab.connect))
         return tab
 
-    async def test_wrong_ticket_or_extension_cannot_consume_pairing_and_ticket_is_one_use(self):
+    async def test_wrong_capability_generation_or_extension_cannot_consume_request(self):
         attempt = asyncio.create_task(asyncio.to_thread(self.root.start))
-        for ticket, extension in ((self.ticket[:-1] + ('0' if self.ticket[-1] != '0' else '1'), EXTENSION),
-                                  (self.ticket, 'b' * 32)):
+        for capability, generation, identity in (
+                ('0' * 64, self.root.generation, EXTENSION),
+                (self.capability, '0' * 32, EXTENSION),
+                (self.capability, self.root.generation, 'b' * 32)):
             peer = socket.socket(socket.AF_UNIX)
             peer.settimeout(1)
             peer.connect(str(self.root._path))
             stream = peer.makefile('rwb', buffering=0)
-            send_message(stream, dict(op='pair', ticket=ticket, extension_id=extension))
+            send_message(stream, dict(op='pair', capability=capability, request=generation, extension_id=identity))
             with self.assertRaises(EOFError):
                 await asyncio.to_thread(read_message, stream)
             stream.close(); peer.close()
         path = self.root._path
-        peer = Peer(self.root, self.ticket)
+        peer = Peer(self.root, self.capability)
         self.peers.append(peer)
         await attempt
-        self.assertEqual(self.root._ticket, '')
+        self.assertEqual(self.root._capability, '')
+        self.assertIsNone(extension_host.pending_request())
         self.assertFalse(path.exists())
         self.assertTrue(self.root.live)
         with self.assertRaises(OwnershipError):
@@ -350,7 +364,120 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(path.exists())
         self.assertFalse(self.root.live)
         self.root.close()
-        self.assertEqual(self.root._ticket, '')
+        self.assertEqual(self.root._capability, '')
+        self.assertIsNone(extension_host.pending_request())
+
+    async def host_status(self):
+        source, output = io.BytesIO(), io.BytesIO()
+        send_message(source, {'op': 'status'})
+        source.seek(0)
+        await asyncio.to_thread(relay, EXTENSION, f'chrome-extension://{EXTENSION}/', source, output)
+        return read_message(io.BytesIO(output.getvalue()))
+
+    async def test_socket_removed_during_discovery_is_no_request_but_pairing_stays_terminal(self):
+        saved = extension_host.pending_request()
+        def cancelled_after_read():
+            self.root.close()
+            return saved
+        with patch.object(extension_host, 'pending_request', side_effect=cancelled_after_read):
+            self.assertIsNone((await self.host_status())['request'])
+        source = io.BytesIO()
+        send_message(source, dict(op='pair', request=self.root.generation))
+        source.seek(0)
+        with patch.object(extension_host, 'pending_request', return_value=saved), self.assertRaises(FileNotFoundError):
+            relay(EXTENSION, f'chrome-extension://{EXTENSION}/', source, io.BytesIO())
+        self.assertFalse(self.root.live)
+
+    async def test_discovery_is_read_only_and_competing_clicks_have_one_port_owner(self):
+        attempt = asyncio.create_task(asyncio.to_thread(self.root.start))
+        for _ in range(2):  # Merely opening either profile's popup cannot win pairing.
+            self.assertEqual((await self.host_status())['request'], self.root.generation)
+            self.assertFalse(self.root.live)
+            self.assertEqual(self.root._capability, self.capability)
+        loser = socket.socket(socket.AF_UNIX)
+        self.addCleanup(loser.close)
+        loser.settimeout(1)
+        winner = Peer(self.root, self.capability)
+        self.peers.append(winner)
+        try:
+            loser.connect(str(self.root._path))
+            send_message(loser.makefile('wb', buffering=0), dict(op='pair', request=self.root.generation,
+                         capability=self.capability, extension_id=EXTENSION))
+        except (FileNotFoundError, ConnectionRefusedError):
+            pass  # The accepted click may already have consumed/unlinked discovery.
+        await attempt
+        with self.assertRaises((OSError, EOFError)):
+            await asyncio.to_thread(read_message, loser.makefile('rb', buffering=0))
+        self.assertIsNone((await self.host_status())['request'])
+        self.assertEqual(await asyncio.to_thread(self.root.command, 'Look.ready'), {})
+        self.assertTrue(winner.commands)
+
+    async def test_stale_popup_cannot_consume_replacement_request_or_remove_its_discovery(self):
+        old = self.root
+        old.close()
+        self.root = ExtensionChrome(lease_dir=old.lease_dir, extension_id=EXTENSION)
+        self.root.prepare(timeout=3)
+        old.close()  # Late cleanup from the prior generation must not unpublish its replacement.
+        self.assertEqual(extension_host.pending_request()['request'], self.root.generation)
+        source = io.BytesIO()
+        send_message(source, dict(op='pair', request=old.generation))
+        source.seek(0)
+        with self.assertRaises(ValueError):
+            relay(EXTENSION, f'chrome-extension://{EXTENSION}/', source, io.BytesIO())
+        self.assertFalse(self.root.live)
+        self.capability = self.root._capability
+        await self.start()
+
+    async def test_crashed_waiting_socket_is_not_discovered_or_retargeted(self):
+        self.root._listener.close()
+        self.root._listener = None
+        self.assertIsNone((await self.host_status())['request'])
+        self.assertFalse(self.root.live)
+
+    async def test_acknowledged_but_lost_connection_is_consumed_not_retryable(self):
+        attempt = asyncio.create_task(asyncio.to_thread(self.root.start))
+        peer = socket.socket(socket.AF_UNIX)
+        peer.connect(str(self.root._path))
+        stream = peer.makefile('rwb', buffering=0)
+        send_message(stream, dict(op='pair', request=self.root.generation,
+                                 capability=self.capability, extension_id=EXTENSION))
+        self.assertEqual((await asyncio.to_thread(read_message, stream))['generation'], self.root.generation)
+        peer.shutdown(socket.SHUT_RDWR)
+        stream.close()
+        peer.close()
+        with self.assertRaises(OwnershipError):
+            await attempt
+        self.assertIsNone(extension_host.pending_request())
+        self.assertFalse(self.root.live)
+
+    async def test_another_runtime_cannot_publish_over_current_conversation(self):
+        competing = ExtensionChrome(lease_dir=self.root.lease_dir, extension_id=EXTENSION)
+        with self.assertRaises(OwnershipError):
+            competing.prepare()
+        self.assertEqual(extension_host.pending_request()['request'], self.root.generation)
+
+    async def test_stop_can_start_fresh_generation_while_cancelled_worker_unwinds(self):
+        from hermes_gaze.browser.companion import Companion
+        self.root.close()
+        companion = Companion('http://127.0.0.1:1', profile_dir=self.root.lease_dir)
+        released, started = threading.Event(), threading.Event()
+        def slow_start(chrome, **_):
+            started.set()
+            released.wait(3)
+        with patch.object(extension, 'configuration', return_value={'extension_id': EXTENSION}), \
+             patch.object(ExtensionChrome, 'start', slow_start):
+            try:
+                companion.start_extension()
+                await asyncio.to_thread(started.wait, 1)
+                old = companion.chrome
+                companion.close()
+                companion.start_extension()
+                self.assertIsNot(companion.chrome, old)
+                self.assertEqual(extension_host.pending_request()['request'], companion.chrome.generation)
+                self.assertFalse(companion.is_connected)
+            finally:
+                released.set()
+                companion.close()
 
     async def test_actual_cdp_worker_uses_private_channel_and_unknown_reply_is_terminal(self):
         peer = await self.start()

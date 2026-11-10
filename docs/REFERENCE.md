@@ -88,7 +88,7 @@ devices or personal browser/account were accessed by these probes.
 |`/look cursor`|Stop the camera and return to the pointer|
 |`/look setup`|Prepare/retry local recognition|
 |`/look setup extension`|Stage the extension/native host for the current Hermes Python|
-|`/look start --extension`|Issue a one-use ticket for selected existing tabs|
+|`/look start --extension`|Approve one extension connection for 120 seconds; choose Connect this tab|
 |`/look setup extension uninstall`|Remove Look's owned native registration and staged files|
 |`/look setup eyes`|Download missing eye-tracking files (~11 MB), then open the camera|
 |`/look diagnostics`|Technical connection, recognition, dependency and tracker details|
