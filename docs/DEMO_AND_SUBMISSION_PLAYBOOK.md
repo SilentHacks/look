@@ -1,5 +1,5 @@
 # Historical demo and catalogue draft — not release instructions
- 
+
 > Superseded planning copy, retained for provenance. The timing, accuracy,
 > hands-free/dwell-action, One-Euro/click-recalibration, catalogue availability,
 > validation and architecture claims below are **not current product claims or
