@@ -36,7 +36,7 @@ Never point a probe at personal Chrome or a live Hermes home.
 | Syntax, changed files only | `node --check browser/overlay.js`; `python -m py_compile PATH.py` | No product execution. |
 | Stock plugin contract | `hermes plugins validate "$LOOK_SOURCE"`; `hermes plugins doctor "$INSTALLED_LOOK"` | Run against a disposable home. Validator/doctor execute registration in isolation; not first-answer proof. |
 | Website boundary | `python tests/trust_boundaries_chrome.py`; `python tests/recording_hold_chrome.py` | Private Chrome, fake native input; inspect each script's prerequisites before launch. |
-| Extension lane | Commands in [CHROME_EXTENSION.md](docs/CHROME_EXTENSION.md#reviewer-checks-and-limits) | Dedicated temporary Chrome for Testing, test-only pairing driver; not ordinary-user installation. |
+| Extension lane | Commands in [CHROME_EXTENSION.md](docs/CHROME_EXTENSION.md#verification-and-remaining-gates) | Dedicated temporary Chrome for Testing, test-only pairing driver; not ordinary-user installation. |
 | Protected UI | Each `tests/ui_review/probe_*.py`, serially | Use `GAZE_REVIEW_LOCAL_ONLY=1 GAZE_REVIEW_OUT="$OUT"` with an existing private absolute output directory; no external-page visits. Fake devices/scripted answers. |
 | Stock host admission | `python tests/stock_startup.py --host "$STOCK_HERMES" --deps "$SITE_PACKAGES" --python "$HERMES_PYTHON"` | Disposable home, real stock lifecycle with fake inference/browser. Read the script before running; no host patch or real provider. |
 | Optional model journey | `benchmark/probe_companion_ui.py` and prompt-only session probes | **Not offline:** configured model/credential copies and retained answers. Require explicit authorization; do not run by default. |
@@ -47,6 +47,29 @@ directory. `$STOCK_HERMES`, `$SITE_PACKAGES` and `$HERMES_PYTHON` belong to a pi
 prepared stock Hermes environment; do not copy a person's profile or `.env`.
 There is no tracked CI workflow; unittest discovery does not run the independent
 Node, Chrome, UI or stock-startup layers.
+
+### Live prompt probes
+
+Use a self-contained virtualenv with Hermes and its dependencies installed.
+The managed store interpreter alone cannot select dependencies from the
+disposable home; the harness does not share or modify host dependency state.
+These commands copy configured credentials, call the configured provider and
+retain answers/browser evidence. They require explicit authorization:
+
+```sh
+python benchmark/probe_sessions.py --prompt-only --trials 10 --sources tui --require-pass --output /tmp/look-prompts-neutral.json
+python benchmark/probe_sessions.py --prompt-only --repo-folder --trials 10 --sources tui --require-pass --output /tmp/look-prompts-repo.json
+```
+
+`--prompt-only` is required. Each question is the first request in a fresh session;
+no dummy warmup or retired open-shadow HUD flow remains. `--repo-folder` loads
+project rules; otherwise the working folder is neutral. `--turn-interval 6` can
+pace free quotas. Provider errors/timeouts are failed trials, not fallback answers.
+The optional protected-UI probe is `benchmark/probe_companion_ui.py`; it uses
+scripted input audio, not a physical microphone. Both probes isolate the account
+runtime profile in their temporary home; prepare needed ASR assets there for
+the audio probe. Neither is part of offline release verification.
+
 
 ## Packaging and review
 

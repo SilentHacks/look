@@ -7,8 +7,10 @@ No public release, catalogue admission, Store listing or release date is asserte
 - Look provides exact cursor evidence, private streamed cards, local voice input,
   guarded captured-control actions and experimental personal eye calibration.
 - Browser lanes: separate Look Chrome, explicit native existing-Chrome consent,
-  and a development extension/native host. Final extension setup is an integration
-  gate, not settled consumer packaging.
+  and an unpacked extension/native host. `/look setup extension` stages fixed
+  source files and the current Python launcher with a stable development ID;
+  stopped update, relocation, scoped removal and cross-profile ownership are covered.
+  Consumer Store packaging remains separate.
 - Release preparation separates onboarding from technical evidence; adds
   contributor/security guidance, local submission copy and a scoped publication
   audit/isolated-install record. Historical pitch/playbook/scoreboard claims are
@@ -16,6 +18,10 @@ No public release, catalogue admission, Store listing or release date is asserte
 - Stock Hermes local-pin validation, declined-preparation recovery, enabled-state
   discovery, isolated doctor registration and scoped removal were exercised on
   the baseline. See [versions, limits and remaining gates](docs/RELEASE_READINESS.md).
+- Retired HUD probe automation and wording/source-spelling tests removed;
+  collector wire contracts exercise the actual JS producer. Live session probes
+  require `--prompt-only` and self-contained Hermes dependencies, without private
+  host dependency-state sharing.
 
 Earlier measurements and design iterations remain in dated docs and Git history;
 they are not current platform, hardware, provider or population-accuracy guarantees.

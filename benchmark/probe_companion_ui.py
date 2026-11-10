@@ -1,8 +1,8 @@
 """The whole companion flow through the real plugin path: real Hermes backend on the configured
 model, real overlay and bridge, private Chrome, real pages, trusted CDP input.
 
-Run with the Hermes environment's Python, because it needs tui_gateway's dependencies:
-  HERMES_DISABLE_LAZY_INSTALLS=1 <hermes venv>/bin/python benchmark/probe_companion_ui.py --out DIR
+Run with a self-contained virtualenv containing Hermes and its dependencies:
+  HERMES_DISABLE_LAZY_INSTALLS=1 <venv>/bin/python benchmark/probe_companion_ui.py --out DIR
 
 Isolated: temporary HERMES_HOME and Chrome profile, own debugging port. Hermes's own auth is
 copied into that temporary home with 0600 and deleted with it. Optional early-highlight
@@ -258,8 +258,6 @@ def run(args):
         (temp / "plugins").mkdir()
         (temp / "skills").mkdir()
         (temp / "plugins" / "hermes-gaze").symlink_to(ROOT, target_is_directory=True)
-        if (home / "installs").is_dir():
-            (temp / "installs").symlink_to(home / "installs", target_is_directory=True)
         shutil.copy2(home / "auth.json", temp / "auth.json")
         (temp / "auth.json").chmod(0o600)
         config = yaml.safe_load((home / "config.yaml").read_text())
@@ -277,12 +275,12 @@ def run(args):
         subprocess.run(["ffmpeg", "-v", "error", "-i", str(temp / "speech.aiff"), "-ar", "16000", "-ac", "1", "-f", "s16le", str(temp / "speech.pcm")], check=True)
         (temp / "stub").mkdir()
         (temp / "stub" / "sounddevice.py").write_text(STUB)
-        env = {**os.environ, "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1", "HERMES_IGNORE_RULES": "1",
+        env = {**os.environ, "HOME": str(temp), "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1", "HERMES_IGNORE_RULES": "1",
                "PYTHONPATH": f"{temp / 'stub'}:{home / 'hermes-agent'}", "GAZE_FAKE_SPEECH": str(temp / "speech.pcm"), "GAZE_CWD": str(temp)}
         sys.path.insert(0, str(ROOT))
         import tests  # Register the plugin package shell without executing registration.
         from tests.owned_chrome import private_session
-        companion = private_session(temp / "plugin-data/hermes-gaze/chrome-profile", port=port,
+        companion = private_session(temp / ".cache/hermes-gaze/chrome-profile", port=port,
             chrome_args=("--window-size=1440,900", *(["--headless=new", "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"] if args.headless else [])))
         chrome = companion.cdp.chrome.process
         companion.close()  # Browser stays warm; the host must acquire its own exclusive runtime lease.

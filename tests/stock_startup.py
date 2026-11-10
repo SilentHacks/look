@@ -195,7 +195,7 @@ def child(args):
                     output["permission_refusals_before_browser"] = denied
 
                     # Real registered command and CLI disclosure; only Chrome attachment is fake.
-                    def attach_existing(*, on_ready):
+                    def attach_existing(*, on_ready, on_error):
                         browser.cdp.source = "existing"
                         assert on_ready()
                     with patch.object(browser.cdp, "start_existing", side_effect=attach_existing) as attach, \

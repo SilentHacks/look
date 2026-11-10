@@ -266,7 +266,7 @@ def run(args) -> dict:
         config["fallback_model"] = None
         (temp / "config.yaml").write_text(yaml.safe_dump(config))
         (temp / "config.yaml").chmod(0o600)
-        env = {**os.environ, "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1"}
+        env = {**os.environ, "HOME": str(temp), "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1"}
         if args.repo_folder:
             env.pop("HERMES_IGNORE_RULES", None)
         else:
@@ -274,7 +274,7 @@ def run(args) -> dict:
         sys.path.insert(0, str(root))
         import tests  # Register the plugin package shell without executing registration.
         from tests.owned_chrome import private_session
-        companion = private_session(temp / "plugin-data/hermes-gaze/chrome-profile", port=args.port,
+        companion = private_session(temp / ".cache/hermes-gaze/chrome-profile", port=args.port,
             executable=args.chrome, chrome_args=("--headless=new", "--window-size=1440,1100"),
             url=(root / "benchmark/benchmark_page.html").as_uri())
         chrome = companion.cdp.chrome.process

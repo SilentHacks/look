@@ -87,6 +87,9 @@ devices or personal browser/account were accessed by these probes.
 |`/look calibrate`|Start optional eye tracking from verified cached files|
 |`/look cursor`|Stop the camera and return to the pointer|
 |`/look setup`|Prepare/retry local recognition|
+|`/look setup extension`|Stage the extension/native host for the current Hermes Python|
+|`/look start --extension`|Issue a one-use ticket for selected existing tabs|
+|`/look setup extension uninstall`|Remove Look's owned native registration and staged files|
 |`/look setup eyes`|Download missing eye-tracking files (~11 MB), then open the camera|
 |`/look diagnostics`|Technical connection, recognition, dependency and tracker details|
 |`/look diagnostics timing`|Save the recent release traces|
@@ -254,7 +257,8 @@ before doing so. Once installed through an accepted catalogue entry,
 start a new conversation after updates. `hermes pm install` repairs/prepares
 Hermes's environment; it is not a plugin updater or a speech-asset downloader.
 
-Disconnect and quit Hermes before removal:
+Stop Look and uninstall its native host with `/look setup extension uninstall`,
+then remove Look in Chrome before quitting Hermes/removing the plugin:
 
 ```bash
 hermes plugins remove hermes-gaze
@@ -264,9 +268,10 @@ Removal is **not forgetting all data**. It does not erase Hermes history, provid
 records, shared Hugging Face recognition-model caches, local calibration
 (`${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`), downloaded
 Gaze assets under `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze`, or the companion's
-Chrome profile/sign-ins under Hermes `plugin-data` (standalone fallback:
-`~/.cache/hermes-gaze/chrome-profile`). Plugin first-run state also lives under
-Hermes `plugin-data`. Remove only the data you intend to forget; shared caches
+account-scoped Chrome profile/sign-ins at `~/.cache/hermes-gaze/chrome-profile`.
+Earlier Hermes-profile Chrome directories stay untouched; restart every Hermes
+process after upgrading the ownership change. Plugin first-run state still lives
+under Hermes `plugin-data`. Remove only the data you intend to forget; shared caches
 may serve other software. Manage Hermes history separately. No automatic purge
 or recursive deletion is performed by this plugin.
 

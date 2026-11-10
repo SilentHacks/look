@@ -62,8 +62,8 @@ voice use; restart the launching app after changing permission.
 
 In the intended new Hermes conversation:
 
-1. Choose a browser connection below. The separate browser is the simplest
-   isolated trial; it does not share your ordinary Chrome sign-ins.
+1. For your existing Chrome, use the extension setup below. For an isolated trial,
+   choose the separate browser; it does not share your ordinary Chrome sign-ins.
 2. Point at ordinary page text and press **Right Option** to type your first
    real question. It initializes Hermes's lazy agent; no dummy question is needed.
 3. For voice, run `/look setup` to explicitly prepare local recognition, then
@@ -93,14 +93,27 @@ pointed element. Use regular HTTP(S) tabs in the authorized profile. Look does
 not silently fall back to another browser. After Stop, turn off remote debugging
 in Chrome if no longer wanted. [Connection, revocation and limits](docs/REFERENCE.md#use-my-existing-chrome).
 
-### Development extension
+### Existing Chrome: extension beta
 
-For explicitly selected existing tabs without the remote-debugging setting,
-follow [extension setup, pairing and removal](docs/CHROME_EXTENSION.md).
-The unpacked extension still has broad `debugger` permission and Chrome's debugging
-banner. This is a development/reviewer route, not a Store installation.
-Use that guide's current setup command; release integration must verify the final
-extension/native-host install and update flow before publishing instructions.
+1. Run `/look setup extension` (shell: `hermes look setup-extension`). No extension
+   ID, Python path or environment variable is needed.
+2. In the intended Chrome profile, open `chrome://extensions`, enable **Developer
+   mode**, choose **Load unpacked**, and select the printed folder:
+   `~/Library/Application Support/Look/extension/unpacked`.
+   **Command–Shift–G** accepts the path in the macOS picker. Review the broad
+   **debugger**, **nativeMessaging** and **tabs** permissions; the debugging banner remains.
+3. Run `/look start --extension` in the intended Hermes conversation. On an ordinary
+   HTTP(S) tab, open **Look**, paste its one-use 120-second ticket, and choose
+   **Connect this tab**. Use **Right Option** for private typed input; wait for
+   **Listening** before speaking.
+4. For another tab, open Look there and choose **Use on this tab**.
+   `/look stop` disconnects and keeps Chrome/tabs open.
+
+Setup does not install/enable the extension or bypass Chrome consent/policy.
+After updating: stop Look, restart every Hermes process, rerun setup, **Reload**
+Look in Chrome and pair afresh. The staged folder/ID stay fixed; rerun setup if
+Hermes's Python moves. Remove with `/look setup extension uninstall`, then remove
+Look in Chrome. [Setup, recovery and acceptance gates](docs/CHROME_EXTENSION.md).
 
 ## Optional eyes and read aloud
 
@@ -153,8 +166,8 @@ installation stays pinned: reinstall the reviewed new SHA with `--force --ref`
 and restart Hermes. `hermes pm install` repairs dependencies; it does not update
 Look or download speech models. Keep dependency/preparation errors if repair fails.
 
-For the extension, follow its guide's stopped update and native-host uninstall
-steps **before** moving/removing its source or Python environment. Then:
+Before removing the plugin or its Python environment, stop Look and uninstall
+its native host with `/look setup extension uninstall`; remove Look in Chrome. Then:
 
 ```sh
 hermes plugins remove hermes-gaze
@@ -169,6 +182,13 @@ The install/config name remains `hermes-gaze`; `/gaze` and `hermes gaze` are ali
 [Contributing and command matrix](CONTRIBUTING.md) · [Change record](CHANGELOG.md) ·
 [Release gates](docs/RELEASE_READINESS.md) · [Local submission draft](docs/SUBMISSION_DRAFT.md) ·
 [Third-party notices](THIRD_PARTY_NOTICES.md) · [Agent architecture guide](AGENTS.md)
+
+Live prompt probes require a self-contained virtualenv with Hermes and its
+dependencies installed; the managed store interpreter alone is insufficient in
+a disposable home. `benchmark/probe_sessions.py` requires `--prompt-only`, uses
+configured inference and private credential copies, and retains answers. It does
+not run the retired HUD flow or share host dependency state. Run only with explicit
+provider authorization; see [probe commands](CONTRIBUTING.md#live-prompt-probes).
 
 Historical [plan](docs/PLAN.md), [prior-art pitch](docs/PRIOR_ART_AND_PITCH.md) and
 [old playbook](docs/DEMO_AND_SUBMISSION_PLAYBOOK.md) are provenance, not current
