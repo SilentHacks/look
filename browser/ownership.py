@@ -23,11 +23,8 @@ class OwnershipError(ConnectionError):
 
 
 def companion_profile() -> Path:
-    try:
-        from plugins.plugin_storage import plugin_data_dir
-    except ImportError:
-        return Path.home() / ".cache" / "hermes-gaze" / "chrome-profile"
-    return plugin_data_dir("hermes-gaze") / "chrome-profile"
+    # Browser/microphone ownership is account-wide, not scoped to a Hermes profile.
+    return Path.home() / ".cache" / "hermes-gaze" / "chrome-profile"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

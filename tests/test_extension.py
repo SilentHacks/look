@@ -217,6 +217,35 @@ class NativeHostTests(unittest.TestCase):
                 self.assertFalse((root / 'look/host').exists())
                 self.assertEqual(cli._setup_extension(remove=True)[0], 0)
 
+    def test_different_hermes_profiles_cannot_update_or_remove_waiting_extension(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from hermes_gaze.browser.cdp_bridge import GazeSession
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            storage = SimpleNamespace(plugin_data_dir=Mock(return_value=root / 'hermes-profile-a'))
+            with patch.dict(sys.modules, {'plugins': SimpleNamespace(__path__=[]),
+                                          'plugins.plugin_storage': storage}), \
+                 patch.object(Path, 'home', return_value=root / 'home'), \
+                 patch.object(extension_host, 'install_directory', return_value=root / 'look'), \
+                 patch.object(extension_host, 'manifest_directory', return_value=root / 'chrome'):
+                install()
+                waiting = ExtensionChrome(extension_id=EXTENSION)
+                storage.plugin_data_dir.return_value = root / 'hermes-profile-b'
+                session = GazeSession('http://127.0.0.1:1')
+                try:
+                    waiting.prepare()
+                    with patch.object(cli, 'get_shared_session', return_value=session):
+                        self.assertEqual(cli._setup_extension()[0], 1)
+                        self.assertEqual(cli._setup_extension(remove=True)[0], 1)
+                        self.assertTrue((root / 'look/host').is_file())
+                        waiting.close()
+                        self.assertEqual(cli._setup_extension()[0], 0)
+                        self.assertEqual(cli._setup_extension(remove=True)[0], 0)
+                finally:
+                    waiting.close()
+                    session.close()
+
     def test_framing_refuses_oversized_truncated_and_nonobject_messages(self):
         for raw in (struct.pack('<I', MAX_MESSAGE + 1), b'\x04\x00', struct.pack('<I', 9) + b'{}',
                     struct.pack('<I', 2) + b'[]'):

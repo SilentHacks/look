@@ -32,7 +32,7 @@ This is an unpacked developer installation, not a Chrome Web Store release.
    In the macOS folder picker, **Command–Shift–G** accepts this path. Pin Look in
    Chrome's Extensions menu if you want it in the toolbar.
 
-3. Read Chrome's permission prompt. Look needs **debugger**, **nativeMessaging**
+3. Review Look's permissions in Chrome. Look needs **debugger**, **nativeMessaging**
    and **tabs**. Debugger grants broad page access, not a read-only or
    pointed-element-only permission. Chrome's debugging banner remains.
 
@@ -82,6 +82,10 @@ malicious program/debugger remains outside this website/other-user boundary.
   it refreshes only Look's owned files and exact-origin registration. A live or
   waiting Look runtime refuses setup/removal. A conflicting registration or
   symlink is refused rather than overwritten.
+  All browser sources now share the account-scoped runtime path
+  `~/.cache/hermes-gaze/chrome-profile`, not Hermes-profile data. Restart every
+  Hermes process when upgrading; earlier per-profile separate-browser folders are
+  left untouched, not copied or deleted.
 - **Moved checkout:** the staged extension/native host do not depend on its old
   source path. If Hermes's Python environment moves or is replaced, restart
   Hermes in the working environment and rerun setup to refresh the launcher.
