@@ -76,15 +76,18 @@ class Spoken(unittest.TestCase):
 
 
 class Errors(unittest.TestCase):
-    def test_one_plain_sentence_never_raw_provider_text(self):
-        cases = [("failed", "HTTP 429 from provider xyz", "rate limited"), ("failed", "No speech recognized", "catch"),
-                 ("interrupted", "Disconnected", "disconnected"), ("interrupted", "user stop", "interrupted"),
-                 ("failed", "Traceback in provider.py line 3", "couldn’t finish")]
-        for status, raw, want in cases:
-            sentence = plain_error(status, raw)
-            self.assertIn(want, sentence)
-            self.assertNotIn("xyz", sentence)
-            self.assertNotIn("provider", sentence)
+    def test_error_categories_hide_private_provider_diagnostics(self):
+        cases = [("failed", "HTTP 429 from provider xyz"), ("failed", "No speech recognized"),
+                 ("interrupted", "Disconnected"), ("interrupted", "user stop"),
+                 ("failed", "Traceback in provider.py line 3")]
+        sentences = []
+        for status, raw in cases:
+            with self.subTest(status=status, error=raw):
+                sentence = plain_error(status, raw + " PRIVATE_DIAGNOSTIC /private/cache/model")
+                sentences.append(sentence)
+                for private in ("PRIVATE_DIAGNOSTIC", "/private/cache/model", "xyz", "provider"):
+                    self.assertNotIn(private, sentence)
+        self.assertEqual(len(set(sentences)), len(cases), "Distinct failures need distinct recovery categories")
 
 
 class Links(unittest.TestCase):

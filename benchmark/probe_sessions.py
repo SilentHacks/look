@@ -1,8 +1,8 @@
-"""Real cursor voice turns in Hermes TUI/desktop backends and private Chrome.
+"""Live prompt-semantics probes in disposable Hermes sessions and private Chrome.
 
-Uses private config/credential copies and private Chrome. The harness submits
-synthesized WAV through the real transcription binding instead of opening the
-native microphone. Physical capture and desktop renderer automation are not claimed.
+Requires --prompt-only and configured inference; not an offline acceptance suite.
+Uses private config/credential copies. No dummy warm-up turn, microphone capture,
+or retired HUD automation. Protected-UI scenarios live in probe_companion_ui.py.
 """
 from __future__ import annotations
 
@@ -99,17 +99,6 @@ def chrome_eval(port: int, expression: str):
     return result["result"].get("value")
 
 
-def speech_question(root: Path, temp: Path) -> dict:
-    subprocess.run(["say", "-o", str(temp / "speech.aiff"), "Summarize this table in one sentence."], check=True)
-    subprocess.run(["ffmpeg", "-v", "error", "-i", str(temp / "speech.aiff"), "-ar", "16000", "-ac", "1",
-                    str(temp / "speech.wav")], check=True)
-    import wave
-    with wave.open(str(temp / "speech.wav"), "rb") as audio:
-        duration = audio.getnframes() / audio.getframerate()
-    return {"source": "Synthesized WAV through the isolated transcription binding; no native microphone",
-            "duration_s": duration, "text": "Summarize this table in one sentence."}
-
-
 def browser_wait(port, predicate, timeout=30):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -120,12 +109,6 @@ def browser_wait(port, predicate, timeout=30):
             logger.debug("Chrome context temporarily unavailable", exc_info=True)
         time.sleep(.05)
     raise TimeoutError("Chrome condition did not arrive: " + predicate[:100])
-
-
-def trusted_click(port, x, y):
-    for event in ("mousePressed", "mouseReleased"):
-        chrome_command(port, "Input.dispatchMouseEvent",
-                       {"type": event, "x": x, "y": y, "button": "left", "clickCount": 1})
 
 
 def screenshot(args, source, state):
@@ -266,13 +249,10 @@ def run(args) -> dict:
     root = args.plugin_root.resolve() if args.plugin_root else Path(__file__).resolve().parents[1]
     config = load_config()
     home = get_hermes_home()
-    report = {"scope": "real Hermes TUI/desktop backend, Chrome microphone/transcription/binding and model",
-              "model_config": {k: config.get("model", {}).get(k) for k in ("default", "provider")},
-              "surfaces": {}}
+    report = {"scope": "live Hermes TUI/desktop prompt semantics in private Chrome",
+              "model_config": {k: config.get("model", {}).get(k) for k in ("default", "provider")}}
     with tempfile.TemporaryDirectory(prefix="gaze-sessions-") as directory:
         temp = Path(directory)
-        if not args.prompt_only:
-            report["speech"] = speech_question(root, temp)
         (temp / "plugins").mkdir()
         (temp / "skills").mkdir()  # Hermes omits even plugin skill hints when this directory is absent.
         if installs_root().is_dir():
@@ -307,145 +287,7 @@ def run(args) -> dict:
                 rpc = Rpc(env, log)
                 try:
                     rpc.wait(lambda f: f.get("params", {}).get("type") == "gateway.ready")
-                    if args.prompt_only:
-                        prompt_trials(args, rpc, root, temp, report)
-                        return report
-                    foreign = rpc.call("session.create", source="tui", cwd=str(temp), title="Unbound control session")["session_id"]
-                    for source in args.sources:
-                        created = rpc.call("session.create", source=source, cwd=str(temp), title=f"Gaze {source}")
-                        sid = created["session_id"]
-                        # Injection currently bypasses the host's lazy-agent startup; initialize by its normal path.
-                        rpc.call("prompt.submit", session_id=sid, text="Reply with Ready.")
-                        ready = rpc.wait(lambda f: f.get("params", {}).get("session_id") == sid and
-                                         f.get("params", {}).get("type") in ("message.complete", "error"))["params"]
-                        assert ready.get("payload", {}).get("status") == "complete", ready
-                        tools = rpc.call("slash.exec", session_id=sid, command="/tools")
-                        assert "gaze_click" in json.dumps(tools), tools
-                        result = {"trials": []}
-                        for trial in range(args.trials):
-                            if report["surfaces"] or trial:
-                                chrome_eval(args.port, "location.reload();true")
-                                browser_wait(args.port, "!!window.__HERMES_GAZE_OVERLAY__")
-                            connected = rpc.call("command.dispatch", session_id=sid, name="gaze", arg="connect")
-                            assert "connected" in connected["output"].lower(), connected
-                            browser_wait(args.port, "!!window.__HERMES_GAZE_OVERLAY__")
-                            chrome_eval(args.port, "window.__speechWav=" +
-                                        json.dumps(base64.b64encode((temp / "speech.wav").read_bytes()).decode()) + ";true")
-                            chrome_eval(args.port, """(() => {
-                              const api=window.__HERMES_GAZE_OVERLAY__;
-                              const binding=window.__hermesGazeIntent;
-                              let frozen=null, submitted=null, audioEpoch=0;
-                              window.__hermesGazeIntent=raw=>{const msg=JSON.parse(raw);
-                                if(msg.type==='record_start'){
-                                  audioEpoch=Date.now()/1000;
-                                  api.onIntentResult({id:msg.id,type:'record_start',ok:true,ready_ms:0});return;
-                                }
-                                if(msg.type==='record_stop'){
-                                  frozen=msg.cursor_context;submitted=msg;
-                                  binding(JSON.stringify({...msg,type:'transcribe',audio_base64:window.__speechWav,
-                                    mime_type:'audio/wav',audio_epoch:audioEpoch}));return;
-                                }
-                                binding(JSON.stringify(msg))};
-                              window.__snapshotCalls=[];
-                              for(const name of ['highlightSnapshot','clickSnapshot','requestActionConfirmation']){
-                                const original=api[name];api[name]=(...args)=>{const result=original(...args);
-                                  window.__snapshotCalls.push({name,args,result});return result};
-                              }
-                              window.__intentReplies=[];const onReply=api.onIntentResult;
-                              api.onIntentResult=e=>{
-                                window.__intentReplies.push(e);
-                                if(e.type==='transcribe'&&e.ok&&submitted){
-                                  api.onIntentResult({id:e.id,type:'record_stop',ok:true,text:e.text});
-                                  binding(JSON.stringify({...submitted,type:'submit',utterance:e.text,
-                                    words:e.words,cursor_context:frozen}));
-                                  submitted=null;
-                                }else onReply(e);
-                              };
-                              window.__sessionEvents=[];const onEvent=api.onSessionEvent;
-                              api.onSessionEvent=e=>{window.__sessionEvents.push(e);onEvent(e)};
-                              window.__websiteClicks=[];
-                              document.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>window.__websiteClicks.push(b.id)));
-                              return true})()""")
-
-                            def aim(selector):
-                                return chrome_eval(args.port, f"""(() => {{
-                                  const e=document.querySelector({json.dumps(selector)});e.scrollIntoView({{block:'nearest'}});
-                                  const r=e.getBoundingClientRect();window.__HERMES_GAZE_OVERLAY__.recordPoint(r.x+r.width/2,r.y+r.height/2);
-                                  return true}})()""")
-
-                            def finish_turn():
-                                frame = rpc.wait(lambda f: f.get("params", {}).get("session_id") == sid and
-                                                 f.get("params", {}).get("type") in ("message.complete", "error"), timeout=240)
-                                report["last_completion"] = frame["params"]
-                                assert frame["params"].get("payload", {}).get("status") != "error", frame
-                                assert frame["params"]["type"] != "error", frame
-                                browser_wait(args.port, "window.__sessionEvents.some(e=>e.status==='complete'&&e.text)", timeout=30)
-                                events = chrome_eval(args.port, "window.__sessionEvents")
-                                complete = next(e for e in reversed(events) if e["status"] == "complete" and e.get("text"))
-                                assert complete["text"] in chrome_eval(args.port,
-                                    "document.querySelector('#hermes-gaze-root').shadowRoot.querySelector('#hg-reply').innerText")
-                                assert not any(f.get("params", {}).get("session_id") == foreign and
-                                               f.get("params", {}).get("type") == "message.complete" for f in rpc.events)
-                                return {"events": events, "completion": frame["params"], "answer": complete["text"]}
-
-                            def submit(text):
-                                chrome_eval(args.port, f"""(() => {{window.__sessionEvents=[];
-                                  const s=document.querySelector('#hermes-gaze-root').shadowRoot;
-                                  s.querySelector('#hg-input').value={json.dumps(text)};s.querySelector('#hg-send').click();return true}})()""")
-                                return finish_turn()
-
-                            aim("#campaigns-table thead th:nth-child(4)")
-                            ctr = submit("What does this mean?")
-                            screenshot(args, source, "ctr")
-                            chrome_eval(args.port, "window.__sessionEvents=[];window.__intentReplies=[];true")
-
-                            aim("#campaigns-table tbody tr:nth-child(3) td:nth-child(3)")
-                            chrome_eval(args.port, "window.__HERMES_GAZE_OVERLAY__.startListening();true")
-                            time.sleep(report["speech"]["duration_s"] + .15)
-                            chrome_eval(args.port, "window.__HERMES_GAZE_OVERLAY__.stopListening();true")
-                            browser_wait(args.port, "window.__intentReplies.some(e=>e.type==='submit'||e.type==='transcribe'&&!e.ok)", timeout=120)
-                            admission = chrome_eval(args.port, "window.__intentReplies")
-                            assert not any(not e.get("ok") for e in admission), admission
-                            assert any(e.get("delivery") == "session" for e in admission), admission
-                            initial = finish_turn()
-                            assert any(e.get("text") and e["status"] == "thinking" for e in initial["events"]), initial
-                            assert "campaign" in initial["answer"].lower(), initial
-                            pins = chrome_eval(args.port, """(() => {
-                              const s=document.querySelector('#hermes-gaze-root').shadowRoot;
-                              return [...s.querySelectorAll('.pin-box')].map(e=>({width:parseFloat(e.style.width),height:parseFloat(e.style.height)}))})()""")
-                            table_rect = chrome_eval(args.port, "document.querySelector('#campaigns-table').getBoundingClientRect().toJSON()")
-                            wider_highlight = any(abs(pin["width"] - table_rect["width"]) < 12 for pin in pins)
-                            screenshot(args, source, "answer")
-                            followup = submit("No, the whole table. Compare all five campaigns, including Enterprise Outbound.")
-                            assert "Enterprise" in followup["answer"], followup
-                            exported = submit("Export this table using its Export CSV control.")
-                            browser_wait(args.port, "window.__websiteClicks.includes('btn-export-csv')")
-                            assert "btn-purge-cache" not in chrome_eval(args.port, "window.__websiteClicks")
-                            aim("#btn-purge-cache")
-                            purge = submit("Purge this cache.")
-                            assert "btn-purge-cache" not in chrome_eval(args.port, "window.__websiteClicks"), purge
-                            screenshot(args, source, "confirmation")
-                            card = chrome_eval(args.port, """(() => {
-                              const s=document.querySelector('#hermes-gaze-root').shadowRoot;
-                              const b=[...s.querySelectorAll('button')].find(e=>/^confirm/i.test(e.textContent.trim()));
-                              if(!b)return null;b.click();const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()""")
-                            assert card, purge
-                            assert "btn-purge-cache" not in chrome_eval(args.port, "window.__websiteClicks")
-                            trusted_click(args.port, card["x"], card["y"])
-                            browser_wait(args.port, "window.__websiteClicks.includes('btn-purge-cache')")
-                            clicks = chrome_eval(args.port, "window.__websiteClicks")
-                            assert clicks.count("btn-purge-cache") == 1, clicks
-                            disconnected = rpc.call("command.dispatch", session_id=sid, name="gaze", arg="disconnect")
-                            result["trials"].append({"ctr_header": ctr, "initial": initial, "followup": followup, "export": exported,
-                                                     "purge": purge, "website_clicks": clicks, "pins": pins,
-                                                     "model_widened_highlight": wider_highlight,
-                                                     "disconnected": disconnected, "synthetic_confirmation_blocked": True,
-                                                     "trusted_confirmation_executed_once": True})
-                            print(json.dumps({"source": source, "trial": trial + 1, "ctr_header": True, "voice": True,
-                                              "followup": True, "export": True, "trusted_confirmation": True}), flush=True)
-                        report["surfaces"][source] = result
-                        rpc.call("session.close", session_id=sid)
-                    rpc.call("session.close", session_id=foreign)
+                    prompt_trials(args, rpc, root, temp, report)
                 except Exception:
                     report["backend_errors"] = [frame for frame in rpc.events
                                                 if frame.get("params", {}).get("type") == "error"]
@@ -453,8 +295,8 @@ def run(args) -> dict:
                     log.seek(0)
                     try:
                         report["failure"] = chrome_eval(args.port, """({
-                          events:window.__sessionEvents,replies:window.__intentReplies,calls:window.__snapshotCalls,
-                          hud:document.querySelector('#hermes-gaze-root')?.shadowRoot?.textContent?.slice(-5000)})""")
+                          events:window.__promptEvents,operations:window.__promptOps,
+                          captures:window.__promptCaptures})""")
                         args.output.write_text(json.dumps(report, indent=2) + "\n")
                     except Exception:
                         logger.debug("Unable to save Chrome failure evidence", exc_info=True)
@@ -503,8 +345,9 @@ if __name__ == "__main__":
     parser.add_argument("--chrome", default="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
     parser.add_argument("--sources", nargs="+", default=["tui", "desktop"])
     parser.add_argument("--trials", type=int, default=1)
-    parser.add_argument("--screenshot", type=Path, help="PNG prefix for real answer and confirmation surfaces")
-    parser.add_argument("--prompt-only", action="store_true", help="Fresh-session ambiguous header probes, without audio")
+    parser.add_argument("--screenshot", type=Path, help="PNG prefix for prompt-trial surfaces")
+    parser.add_argument("--prompt-only", action="store_true", required=True,
+                        help="Explicitly run live prompt-semantics trials (configured inference)")
     parser.add_argument("--repo-folder", action="store_true", help="Load project rules instead of using a neutral directory")
     parser.add_argument("--plugin-root", type=Path, help="Plugin checkout to exercise (e.g. a committed baseline copy)")
     parser.add_argument("--cases", nargs="+", default=["ctr", "roas", "cell", "button", "followup",

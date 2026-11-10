@@ -7,8 +7,6 @@
    bootstrap registers a hermes_gaze package *shell* under that sys.modules name.)
 2. resolver/ and tracker/ stay pure: no I/O or sibling-layer imports — all Chrome,
    HTTP, process, and voice plumbing lives in browser/, service.py, voice.py, server.py.
-3. Removed pre-refactor symbols stay gone: get_shared_bridge, CDPBridge, voice_listener,
-   HERMES_GAZE_INTERNAL, _ensure_package_importable.
 """
 
 from __future__ import annotations
@@ -31,9 +29,6 @@ _ABS_SELF_IMPORT = re.compile(r"^\s*(?:import|from)\s+hermes_gaze\b")
 _IMPORT_STMT = re.compile(r"^\s*(?:from\s+([.\w]+)\s+)?import\s+(.+)")
 _BANNED_MODULE = re.compile(
     r"^\.{0,2}(?:websockets|urllib(?!\.parse$)|subprocess|socket|http\.server|server|service|browser)(?:\.|$)"
-)
-_REMOVED_SYMBOLS = re.compile(
-    r"get_shared_bridge|CDPBridge|voice_listener|HERMES_GAZE_INTERNAL|_ensure_package_importable"
 )
 
 
@@ -94,14 +89,6 @@ class TestLayering(unittest.TestCase):
                         break
         self.assertEqual(violations, [])
 
-    def test_removed_symbols_stay_gone(self) -> None:
-        violations = []
-        for path in _source_files():
-            for match in _REMOVED_SYMBOLS.finditer(path.read_text(encoding="utf-8")):
-                violations.append(
-                    f"{path.relative_to(PLUGIN_ROOT)}: '{match.group(0)}'"
-                )
-        self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

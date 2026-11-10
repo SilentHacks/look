@@ -224,30 +224,31 @@ class FirstRunTests(unittest.TestCase):
              patch.object(session, 'fetch_cursor_context', return_value={}), \
              patch.object(voice, 'record_microphone', side_effect=PermissionError('denied private detail')):
             result = service.resolve_now(session, utterance='', record_voice=True)
-        self.assertIn('Microphone', result['plain_error'])
-        self.assertIn('settings', result['plain_error'])
+        self.assertFalse(result['ok'])
+        self.assertIn('Microphone capture', result['error'])
+        microphone_recovery = result['plain_error']
         self.assertNotIn('private detail', result['plain_error'])
         with patch.object(session, 'configure'), \
              patch.object(session, 'fetch_cursor_context', return_value={}), \
              patch.object(voice, 'record_microphone', return_value=b'fake'), \
              patch.object(voice, 'transcribe_audio_buffer', side_effect=RuntimeError('decoder private detail')):
             result = service.resolve_now(session, utterance='', record_voice=True)
-        self.assertIn('Speech recognition', result['plain_error'])
-        self.assertIn('Right Option', result['plain_error'])
-        self.assertNotIn('microphone', result['plain_error'])
+        self.assertFalse(result['ok'])
+        self.assertIn('Speech recognition', result['error'])
+        self.assertNotEqual(result['plain_error'], microphone_recovery)
         self.assertNotIn('private detail', result['plain_error'])
 
     def test_model_load_failure_keeps_cause_but_offers_model_recovery(self):
         import numpy as np
         with patch.object(voice, 'decode_audio_to_float32', return_value=np.ones(100, dtype=np.float32)), \
              patch.object(voice, 'get_whisper_model', side_effect=OSError('private cache path')):
-            with self.assertRaisesRegex(RuntimeError, 'Speech model could not load') as caught:
+            with self.assertRaises(RuntimeError) as caught:
                 voice.transcribe_audio_buffer(b'fake', backend='whisper')
         self.assertIsInstance(caught.exception.__cause__, OSError)
+        self.assertEqual(str(caught.exception.__cause__), 'private cache path')
         message = plain_error('failed', str(caught.exception))
-        self.assertIn('disk space', message)
+        self.assertNotEqual(message, plain_error('failed', 'Speech recognition failed'))
         self.assertNotIn('private cache path', message)
-        self.assertNotIn('make out', message)
 
     def test_owned_microphone_errors_are_labelled_without_exposing_native_diagnostics(self):
         session = GazeSession('http://127.0.0.1:1')

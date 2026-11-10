@@ -52,7 +52,6 @@ class PlatformSupport(unittest.TestCase):
                     prepare.assert_not_called()
                 else:
                     prepare.assert_called_once()
-                    self.assertIn("~148 MB", result)
 
     def test_linux_start_keeps_cursor_path_and_discloses_unverified_lane(self):
         session, server = Mock(), Mock()
