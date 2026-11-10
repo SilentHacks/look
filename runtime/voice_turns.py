@@ -48,6 +48,7 @@ class VoiceTurns:
 
     def __init__(self, ctx: Any, session: Any) -> None:
         self.ctx, self.session = ctx, session
+        self.recognition_model = GazeConfig.from_ctx(ctx).whisper_model
         self.lock = threading.RLock()
         self.injection_lock = threading.RLock()
         self.binding = None
@@ -149,6 +150,7 @@ class VoiceTurns:
 
     def publish(self):
         """Versioned, UI-independent replacement state; no DOM identities leave Python."""
+        from ..audio.voice import recognition_ready, recognition_status
         self.revision += 1
         waiting = {r["request_id"]: n + 1 for n, r in enumerate(self.pending)}
         items = []
@@ -172,6 +174,8 @@ class VoiceTurns:
                  "speech_error": self.speech_error, "speaking_item_id": self.speaking,
                  "speech_backend": self.speech_backend, "speech_status": self.speech_status,
                  "coach": dict(self.coach), "waiting": len(self.pending)}
+        event["recognition"] = {"ready": recognition_ready(self.recognition_model),
+                                "status": recognition_status(self.recognition_model)}
         webcam = getattr(self.session, "webcam", None)
         event["tracker"] = {"state": webcam.state if webcam is not None else "stopped",
                             "setup_required": bool(webcam is not None and

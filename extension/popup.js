@@ -1,16 +1,19 @@
 'use strict';
 const status = document.querySelector('#status');
-let busy = false, request = null, selection = null;
+let busy = false, request = null, selection = null, offered = null, stale = false;
 async function send(op) {
   if (busy) return;
   busy = true;
   document.querySelectorAll('button').forEach(button => { button.disabled = true; });
-  status.textContent = op === 'pair' || op === 'add' ? 'Connecting…' : '';
+  if (op !== 'status') status.textContent = op === 'stop' ? 'Disconnecting…' : 'Connecting…';
   try {
     const result = await chrome.runtime.sendMessage({op, request, selection});
     if (!result?.ok) throw Error(result?.error || 'Look did not connect.');
+    if (op === 'status' && !result.connected && offered &&
+        (result.request !== offered || JSON.stringify(result.selection) !== JSON.stringify(selection))) stale = true;
+    if (stale) throw Error('Connection changed or expired. Close Look, then run /look start --extension again.');
     request = result.request || null;
-    selection = result.selection || null;
+    if (request && !offered) { offered = request; selection = result.selection || null; }
     document.querySelector('#pair').hidden = result.connected || !request;
     document.querySelector('#start').hidden = result.connected || !!request;
     document.querySelector('#add').hidden = !result.connected;
@@ -19,7 +22,12 @@ async function send(op) {
     if (op === 'pair' || op === 'add') {
       window.close();
     }
-  } catch (error) { status.textContent = error.message; }
+  } catch (error) {
+    request = null;
+    document.querySelector('#pair').hidden = true;
+    document.querySelector('#start').hidden = true;
+    status.textContent = error.message;
+  }
   finally {
     busy = false;
     document.querySelectorAll('button').forEach(button => { button.disabled = false; });
@@ -29,3 +37,4 @@ document.querySelector('#pair').addEventListener('click', event => { if (event.i
 document.querySelector('#add').addEventListener('click', () => send('add'));
 document.querySelector('#stop').addEventListener('click', () => send('stop'));
 send('status');
+setInterval(() => send('status'), 1000);

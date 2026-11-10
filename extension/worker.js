@@ -284,6 +284,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       catch (_) { fail(SETUP); }
       if (host?.op !== 'status' || host.version !== 1) fail(SETUP);
       if (revision !== foregroundRevision || epoch !== connectionRevision || !dead) fail('Connection or foreground changed. Reopen Look.');
+      if (host.request) {
+        const window = tab && await chrome.windows.get(tab.windowId);
+        if (!tab || tab.incognito || !urlAllowed(tab.pendingUrl || tab.url) ||
+            !tab.active || window.type !== 'normal' || !window.focused)
+          fail('Open Look on an ordinary web tab in a regular Chrome window.');
+        if (revision !== foregroundRevision || epoch !== connectionRevision || !dead) fail('Connection or foreground changed. Reopen Look.');
+      }
       return {ok: true, connected: false, request: host.request,
         selection: tab && {id: tab.id, windowId: tab.windowId, revision, epoch}};
     }

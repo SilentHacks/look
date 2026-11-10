@@ -82,11 +82,6 @@ def register(ctx: Any) -> None:
     session.cdp.set_intent_handler(service.handle_intent)
     get_shared_server().start()
 
-    # Warm supported verified caches only; fetching requires explicit /look setup.
-    from .audio.voice import prewarm
-
-    prewarm(cfg.whisper_model)
-
     for name, schema, handler, emoji in ALL_TOOLS:
         ctx.register_tool(
             name=name,
@@ -102,6 +97,17 @@ def register(ctx: Any) -> None:
 
     turns = VoiceTurns(ctx, session)
     service.set_voice_turns(turns)
+
+    def recognition_changed(_text):
+        # Readiness belongs to the machine, not the conversation that started warming.
+        # Publish through the current inbox; the companion retains foreground ownership.
+        with turns.lock:
+            if turns.connected:
+                turns.publish()
+
+    from .audio.voice import prewarm
+    prewarm(cfg.whisper_model, report=recognition_changed)
+
     answer_snapshots: dict[tuple[str, str], dict[str, Any]] = {}
     try:
         from hermes_constants import get_hermes_home
@@ -145,7 +151,10 @@ def register(ctx: Any) -> None:
         if command == "setup":
             post = getattr(ctx, "post_message", None)
             context = copy_context()
-            report = (lambda text: context.run(post, text)) if callable(post) else None
+            def report(text):
+                recognition_changed(text)
+                if callable(post):
+                    context.run(post, text)
             return _first_run_guide(session, report=report)
         if command in ("stop", "disconnect"):
             # Resources are machine-scoped, so Stop also releases another session's binding.
@@ -272,7 +281,7 @@ def register(ctx: Any) -> None:
             if native is None:
                 result += "\nThis frontend can’t confirm whether Look delivered your question. If no answer arrives, check the conversation in Hermes. Don’t send it again automatically."
             from .audio.voice import recognition_ready, recognition_status
-            if not recognition_ready(cfg.whisper_model):
+            if not recognition_ready(cfg.whisper_model) and recognition_status(cfg.whisper_model) not in result:
                 result += "\n" + recognition_status(cfg.whisper_model)
             return result
         result = _handle_slash_command(raw_args)

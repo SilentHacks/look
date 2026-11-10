@@ -4,6 +4,11 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- The extension popup refreshes pending connection state without retargeting an
+  offered conversation or tab. Expiry and foreground changes remove Connect.
+  Browser connection no longer advertises speech while recognition is preparing;
+  the protected page announces completed cache warmup/setup without a host-message API.
+
 - Installation now uses the public `SilentHacks/look` repository at an
   anonymously verified immutable commit. Documents stock Hermes profile setup,
   installation limits and the need to refresh the pin after local fixes are published.

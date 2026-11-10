@@ -52,10 +52,13 @@ change it on updates. There is no Store listing or automatic extension update.
    conversation, run **`/look start --extension`**. This approves one connection
    for **120 seconds**. The existing Look input permission is still required.
 2. On the web tab you want to use, open **Look** from Chrome's Extensions menu
-   and choose **Connect this tab**.
-3. Return to the page. Point at something and hold Space, then wait for
-   **Listening** before speaking. Use your compose shortcut to type instead.
-   Run `/look status` to check the connection. Speech setup is separate.
+   and choose **Connect this tab**. An already-open popup discovers the request
+   automatically. Once offered, its conversation and tab remain pinned: an expired
+   or replaced request needs a fresh popup.
+3. While speech recognition prepares, use **Right Option** to type. The page
+   announces when recognition is ready; then hold Space and wait for **Listening**
+   before speaking. Run `/look setup` if speech files are missing.
+   `/look status` checks the browser connection, not microphone permission.
 4. For another tab in this profile, open Look there and choose **Use on this tab**.
    Unselected tabs are not instrumented. Guarded new tabs retain the exact selected
    source window/profile. There is no all-tabs grant.
@@ -159,6 +162,8 @@ camera/microphone permission is requested by this extension.
 ```sh
 python -m unittest tests.test_extension tests.test_chrome_consent tests.test_first_run tests.test_companion_ownership
 node tests/extension_worker.cjs
+node tests/extension_popup.cjs
+python tests/extension_setup_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --out /tmp/look-setup-evidence
 python tests/extension_chrome.py --chrome '/absolute/path/to/Chrome for Testing executable' --out /tmp/look-extension-evidence
 ```
 

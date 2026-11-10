@@ -315,6 +315,53 @@ class PinnedDownloadsTests(unittest.TestCase):
                 self.assertEqual(Runner.transcribe_array.call_count, int(cached))
         self.download.assert_not_called()
 
+    def test_delayed_registration_readiness_follows_binding_and_respects_stop_unload_failure(self):
+        for outcome in ("rebound", "stopped", "unloaded", "failed"):
+            with self.subTest(outcome=outcome):
+                entered, release = threading.Event(), threading.Event()
+                voice._COREML_RUNNER = None
+
+                def load():
+                    entered.set()
+                    release.wait(3)
+                    if outcome == "failed":
+                        raise cache.AssetIntegrityError("Downloaded speech file changed")
+                    voice._COREML_RUNNER = object()
+                    return voice._COREML_RUNNER
+
+                fixture = test_first_run.FirstRunTests()
+                self.addCleanup(fixture.doCleanups)
+                events = []
+                try:
+                    with patch.object(voice, "prepare"), patch.object(voice, "_get_coreml_runner", side_effect=load):
+                        _, session, ctx, _, _ = fixture.register(None, warm=True)
+                        self.assertTrue(entered.wait(1))
+                        session.display_session_event = lambda event: events.append(event)
+                        ctx.turns.bind(session_key="old", session_id="old")
+                        self.assertFalse(events[-1]["recognition"]["ready"])
+                        if outcome == "rebound":
+                            ctx.turns.bind(session_key="new", session_id="new")
+                        elif outcome == "stopped":
+                            with ctx.turns.lock:
+                                ctx.turns._disconnect()
+                        elif outcome == "unloaded":
+                            ctx.turns.close()
+                        count = len(events)
+                        release.set()
+                        self.finish_warmup()
+                        if outcome in ("stopped", "unloaded"):
+                            self.assertEqual(len(events), count)
+                        elif outcome == "failed":
+                            self.assertFalse(events[-1]["recognition"]["ready"])
+                            self.assertIn("changed", events[-1]["recognition"]["status"])
+                        else:
+                            self.assertEqual(ctx.turns.binding["session_id"], "new")
+                            self.assertTrue(events[-1]["recognition"]["ready"])
+                        ctx.inject_message.assert_not_called()
+                finally:
+                    release.set()
+                    self.finish_warmup()
+
     def test_integrity_failure_stops_preparation_without_fallback(self):
         done = threading.Event()
         with patch.object(voice, "prepare", side_effect=cache.AssetIntegrityError("Downloaded speech file changed")) as prepare, \

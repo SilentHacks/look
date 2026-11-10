@@ -131,10 +131,13 @@ verified cache before downloading missing assets, so an offline cached fallback
 does not require a preferred-backend download. Integrity failures stop setup
 without fallback. Only explicit `/look setup` permits missing downloads
 when no cached backend works and shows **Preparing local speech recognition**.
-Preparation can compile models. There is no fixed wait guarantee. Check `/look setup`
-for **Local speech recognition is ready**. Hosts supporting plugin messages
-also receive a completion notice. Space is refused with a plain explanation until
-a model is ready, without opening the microphone or waiting on preparation.
+Preparation can compile models. There is no fixed wait guarantee. The connected
+page shows a typed-input hint while recognition prepares and announces readiness
+when a verified backend finishes loading, including registration's cache-only warmup.
+This uses the foreground-owned inbox and does not require Hermes `post_message`.
+Explicit setup also reports completion on hosts supporting plugin messages.
+Space is refused with a plain explanation until a model is ready, without opening
+the microphone or waiting on preparation. ASR readiness is not microphone permission.
 If recognition is preparing or your microphone is unavailable, **Right Option**
 opens protected typed questions. Text fields and **keyboard-focused controls**
 keep native Space: click ordinary page text before trying to talk. A tap scrolls.

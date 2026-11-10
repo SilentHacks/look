@@ -248,9 +248,9 @@ def prepare_recognition(model_name=_DEFAULT_MODEL, *, report=None):
     _prepare_recognition(model_name, download=True, report=report)
 
 
-def prewarm(model_name=_DEFAULT_MODEL) -> None:
+def prewarm(model_name=_DEFAULT_MODEL, *, report=None) -> None:
     """Registration warms supported verified caches asynchronously, without devices."""
-    _prepare_recognition(model_name, download=False)
+    _prepare_recognition(model_name, download=False, report=report)
 
 
 def _tokens_to_words(tokens: List[Any], end_s: float, epoch_off: float) -> List[Dict[str, object]]:

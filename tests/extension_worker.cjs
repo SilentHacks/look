@@ -190,6 +190,12 @@ function fixture() {
   assert.equal(probes.length, 1);
   assert.equal(probes[0][1].op, 'status');
   assert.equal(vm.runInContext('port===null && dead && tabs.size===0', f.context), true);
+  const query = f.context.chrome.tabs.query;
+  for (const bad of [{incognito:true,url:'https://fixture.test/'}, {url:'chrome://extensions'}]) {
+    f.context.chrome.tabs.query = async () => [{id:1,active:true,windowId:7,...bad}];
+    assert.equal((await popup({op:'status'})).ok, false, 'ineligible tab must not offer Connect');
+  }
+  f.context.chrome.tabs.query = query;
   let nativeStarts = 0;
   f.context.chrome.runtime.connectNative = () => { nativeStarts++; throw Error('must not open'); };
   f.activate(false); f.activate(true);

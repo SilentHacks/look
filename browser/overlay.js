@@ -2284,10 +2284,6 @@
     inboxRevision = event.revision;
     inbox = event;
     if (event.coach) {
-      if (event.coach.rehearsed && !S.coach.rehearsed && S.pillMode === "coach" &&
-          S.coachText === "Click page text, then hold Space. Wait for Listening before speaking.") {
-        clearTimeout(S.coachTimer); S.coachTimer = 0; hidePill(true);
-      }
       for (const key of ["heard", "answered"]) S.coach[key] = Math.max(S.coach[key], event.coach[key] || 0);
       S.coach.retreated = S.coach.retreated || !!event.coach.retreated;
       S.coach.greeted = S.coach.greeted || !!event.coach.greeted;
@@ -2306,11 +2302,9 @@
         coachLine("Look is disconnected. Run /look in Hermes to reconnect", 6000);
       }
     }
-    if (event.session_connected && !S.coach.greeted && !S.coach.rehearsed && !event.items.length) {
-      S.coach.greeted = true;
-      sendCoach({greeted: true});
-      if (!S.hold) coachLine("Click page text, then hold Space. Wait for Listening before speaking.", 11000);
-    }
+    if (event.session_connected && !S.hold && !S.view && !S.compose &&
+        event.recognition?.ready === false && event.recognition.status !== previous?.recognition?.status)
+      coachLine(event.recognition.status, 11000);
     if (event.session_connected && state.mode === "webcam" && event.tracker?.state !== previous?.tracker?.state &&
         ["preparing", "failed"].includes(event.tracker?.state) && !S.hold &&
         (!S.view || S.view === "tracking")) openView("tracking", null);
@@ -2321,6 +2315,12 @@
     if (!S.hold && !S.view) {
       const first = visible().find(i => !i.presented && started(i));
       if (first) { openStack(first); updateCapsule(); return; }
+    }
+    if (inbox?.session_connected && inbox.recognition?.ready === true && !S.coach.greeted &&
+        !S.hold && !S.view && !S.compose) {
+      S.coach.greeted = true;
+      sendCoach({greeted: true});
+      coachLine("Speech recognition is ready. Hold Space, then wait for Listening before speaking.", 11000);
     }
     updateCapsule();
     if (S.view === "tracking") { pushCard(); layout(); return; }

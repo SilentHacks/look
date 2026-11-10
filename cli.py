@@ -218,7 +218,10 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
                 ready = session.ensure_overlay()
         except (OSError, ValueError) as exc:
             return str(exc)
-        result = ("Look is ready in Chrome. Hold Space, wait for Listening, then speak."
+        from .audio.voice import recognition_ready, recognition_status
+        result = (("Look is ready in Chrome. Hold Space, wait for Listening, then speak."
+                   if recognition_ready(_config().whisper_model) else
+                   "Look is connected. " + recognition_status(_config().whisper_model))
                   if ready else "Look couldn’t connect to a page. Open a web page in Look’s Chrome, then run /look start.")
         return "\n".join(filter(None, (platform_notice(), result)))
 

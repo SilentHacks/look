@@ -141,6 +141,11 @@ def child(args):
                 return "Look stopped."
             return "Fixture Chrome connected."
         output = {}
+        asr_release = threading.Event()
+        def load_asr(_model):
+            assert asr_release.wait(20), "Delayed ASR fixture was not released"
+            voice._WHISPER_MODELS[_model] = object()
+            return voice._WHISPER_MODELS[_model]
         try:
             with patch.object(plugin, "get_shared_session", return_value=browser), \
                     patch.object(cli, "get_shared_session", return_value=browser), \
@@ -148,7 +153,9 @@ def child(args):
                     patch.object(plugin, "get_shared_server", return_value=Mock()), \
                     patch.object(plugin, "_handle_slash_command", side_effect=start_browser), \
                     patch.object(type(browser.cdp), "is_connected", property(lambda _: True)), \
-                    patch.object(voice, "prewarm"), patch.object(voice, "recognition_ready", return_value=True), \
+                    patch.object(voice, "_WHISPER_MODELS", {}), \
+                    patch.object(voice, "apple_silicon_mac", return_value=False), \
+                    patch.object(voice, "prepare"), patch.object(voice, "get_whisper_model", side_effect=load_asr), \
                     patch.object(AIAgent, "_interruptible_api_call", inference), \
                     patch("agent.turn_api_call._should_stream", return_value=False):
                 plugin.register(ctx)
@@ -216,6 +223,17 @@ def child(args):
                         attach.assert_called_once()
                     assert not calls and not hooks
                     assert (await rpc("session.info", session_id=sid))["lazy"]
+                    assert not voice.recognition_ready()
+                    assert browser.cdp._inbox_event["recognition"]["ready"] is False
+                    refusal = []
+                    service.handle_intent(dict(type="record_start", nonce=browser._intent_nonce), refusal.append)
+                    assert refusal and not refusal[-1]["ok"], refusal
+                    asr_release.set()
+                    await until(lambda: browser.cdp._inbox_event["recognition"]["ready"])
+                    assert voice.recognition_ready()
+                    assert not calls and not hooks
+                    output["delayed_speech_readiness"] = dict(
+                        pending_typed_only=True, capture_refused=True, ready_published=True, no_dummy_turn=True)
                     first = await asyncio.to_thread(question, "Explain this rate")
                     await until(lambda: turns.active is None)
                     assert first["status"] == "complete", first
@@ -453,6 +471,7 @@ def child(args):
                     turns.close()
         finally:
             barrier.set()
+            asr_release.set()
             turns = service._VOICE_TURNS
             if turns:
                 turns.close()
