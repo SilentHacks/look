@@ -115,6 +115,29 @@ class NativeHostTests(unittest.TestCase):
             self.assertFalse(manifest.exists())
             self.assertFalse((directory / 'host').exists())
 
+    def test_setup_refreshes_and_removes_manifest_icon_assets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory, manifests = root / 'look', root / 'chrome'
+            install(directory=directory, manifests=manifests)
+            unpacked = directory / 'unpacked'
+            manifest = json.loads((unpacked / 'manifest.json').read_text())
+            icons = {(size, name) for group in (manifest['icons'], manifest['action']['default_icon'])
+                     for size, name in group.items()}
+            for size, name in icons:
+                data = (unpacked / name).read_bytes()
+                self.assertEqual(data[:8], b'\x89PNG\r\n\x1a\n')
+                self.assertEqual(struct.unpack('!II', data[16:24]), (int(size), int(size)))
+                self.assertEqual(data[25], 6)  # RGBA PNG, not an opaque background.
+            icon = unpacked / manifest['action']['default_icon']['32']
+            original = icon.read_bytes()
+            icon.write_bytes(b'old icon')
+            install(directory=directory, manifests=manifests)
+            self.assertEqual(icon.read_bytes(), original)
+            uninstall(directory=directory, manifests=manifests)
+            for _, name in icons:
+                self.assertFalse((unpacked / name).exists())
+
     def test_relocation_update_and_failed_update_keep_working_host(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

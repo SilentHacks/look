@@ -1,5 +1,7 @@
 # Look
 
+<img src="assets/look.png" width="128" height="128" alt="Look icon">
+
 Ask Hermes about what you point at in Chrome. Type a question or hold Space,
 wait for **Listening**, and speak. Answers appear in a private card; browser
 changes use captured controls and guarded approvals.

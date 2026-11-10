@@ -11,6 +11,9 @@ No public release, catalogue admission, Store listing or release date is asserte
   source files and the current Python launcher with a stable development ID;
   stopped update, relocation, scoped removal and cross-profile ownership are covered.
   Consumer Store packaging remains separate.
+- The approved Look artwork brands the README, Chrome extension/action, popup and
+  separate-browser start page. Transparent PNG icons ship with extension setup;
+  the private companion cards and controls remain icon-free.
 - Release preparation separates onboarding from technical evidence; adds
   contributor/security guidance, local submission copy and a scoped publication
   audit/isolated-install record. Historical pitch/playbook/scoreboard claims are

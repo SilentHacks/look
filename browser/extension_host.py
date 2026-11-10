@@ -155,7 +155,8 @@ def _replace(path, value, mode):
         Path(temporary).unlink(missing_ok=True)
 
 
-EXTENSION_FILES = ("manifest.json", "worker.js", "popup.html", "popup.js")
+EXTENSION_FILES = ("manifest.json", "worker.js", "popup.html", "popup.js",
+                   "icon-16.png", "icon-32.png", "icon-48.png", "icon-128.png")
 
 
 def install(*, directory=None, manifests=None):
