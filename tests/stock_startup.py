@@ -169,7 +169,7 @@ def child(args):
                     (patch.object(type(browser.cdp), "is_connected", property(lambda _: True))
                      if not args.journey_chrome else nullcontext()), \
                     patch.object(voice, "_WHISPER_MODELS", {}), \
-                    patch.object(voice, "apple_silicon_mac", return_value=False), \
+                    patch("hermes_gaze.config.apple_silicon_mac", return_value=False), \
                     patch.object(voice, "prepare"), patch.object(voice, "get_whisper_model", side_effect=load_asr), \
                     patch.object(AIAgent, "_interruptible_api_call", inference), \
                     patch("agent.turn_api_call._should_stream", return_value=False):

@@ -96,7 +96,7 @@ def run(chrome, out, headed=False):
         stack.enter_context(patch.object(extension_host, 'install_directory', return_value=native))
         stack.enter_context(patch.object(extension_host, 'manifest_directory', return_value=profile / 'NativeMessagingHosts'))
         stack.enter_context(patch.object(voice, '_WHISPER_MODELS', {}))
-        stack.enter_context(patch.object(voice, 'apple_silicon_mac', return_value=False))
+        stack.enter_context(patch('hermes_gaze.config.apple_silicon_mac', return_value=False))
         stack.enter_context(patch.object(voice, 'prepare'))
         stack.enter_context(patch.object(voice, 'get_whisper_model', side_effect=load))
         fixture = FirstRunTests()

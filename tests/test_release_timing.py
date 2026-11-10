@@ -157,8 +157,7 @@ class ReleaseTimingTests(unittest.TestCase):
         script = """import tests, threading
 from unittest.mock import patch
 from hermes_gaze.audio import voice
-with patch.object(voice, 'apple_silicon_mac', return_value=False), patch.object(
-        voice, 'prepare', side_effect=voice.AssetsMissing('empty test cache')):
+with patch.object(voice, 'prepare', side_effect=voice.AssetsMissing('empty test cache')):
     voice.prewarm()
     for thread in threading.enumerate():
         if thread.name == 'gaze-asr-prewarm':
