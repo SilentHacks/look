@@ -4,9 +4,9 @@ Ask Hermes about what you point at in Chrome. Type a question or hold Space,
 wait for **Listening**, and speak. Answers appear in a private card; browser
 changes use captured controls and guarded approvals.
 
-**Source beta for technical users, not a Chrome Web Store release.** The release
-pin and user-operated acceptance are still pending. See the
-[release evidence and remaining gates](docs/RELEASE_READINESS.md).
+**Source beta for technical users, not a Chrome Web Store release.** The public
+release pin and user-operated acceptance are still pending. Final isolated browser
+acceptance is blocked; see [evidence, trial procedure and gates](docs/RELEASE_READINESS.md).
 
 ## Supported lane
 

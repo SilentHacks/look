@@ -111,7 +111,8 @@ Marketplace/Store availability or all-platform claim is supported by this draft.
 
 ## Owner submission checklist
 
-- [ ] Integrate final extension/test work; pass applicable [release gates](RELEASE_READINESS.md).
+- [x] Integrate approved extension/test/release tracks; final local pin is in the integration handoff.
+- [ ] Clear the final-browser blocker and applicable [release gates](RELEASE_READINESS.md) before recording acceptance.
 - [ ] Review intended refs, author metadata, historical traces and final source/media artifacts.
 - [ ] Verify current organizer eligibility, deadline, fields, video/tag and attribution requirements.
 - [ ] Run headed user/provider/device journeys for every behavior shown; keep failures and limits honest.

@@ -7,20 +7,21 @@ reserves approval for each of those actions. Submission copy is
 
 ## Scope and integration contract
 
-Reviewed baseline: `feature/look-platform-contract`,
-`3b850207165c327a5899e94eb188029721e4825a`. Release-doc work is on a separate
-worktree/branch; it changes no runtime, extension implementation or test file.
-The exact integrated release commit must be selected **after** extension setup
-and test-cleanup changes land. The baseline is evidence identity, not a proposed
-public install pin.
+Starting point: `feature/look-platform-contract`,
+`3b850207165c327a5899e94eb188029721e4825a`. All approved tracks are integrated,
+in this order: cleanup `c7bbac3`, validator `930f98a`, release docs `be0b950`,
+extension setup `070f26d`, cross-profile ownership correction `c4ddab4`.
+The README conflict retained the shorter release guide and restored the
+prompt-only probe prerequisites. Setup now uses `/look setup extension`, fixed
+staged source files and the current Hermes Python; no manual ID/path is needed.
 
-Extension integration owner must reconcile [CHROME_EXTENSION.md](CHROME_EXTENSION.md)
-with the final setup command, installed source/Python paths, stopped upgrade,
-relocation/reinstall and scoped uninstall. This record does not assume that the
-current manual native-host command is the final onboarding. Test-cleanup owner
-must reconcile the command matrix and stock-validator benchmark warning below.
-Neither headless test totals nor another transport's proof close the extension's
-headed ordinary-user gates. Preserve unrelated untracked `docs/research/`.
+Integration also isolates both optional live probes' account-wide runtime in
+their temporary `HOME`, removes private dependency-state sharing from the UI
+probe, and updates the stock-startup fake for the current `on_error` callback.
+No product policy was weakened to make a test pass. Untracked `docs/research/`
+is excluded from commits and source archives. The final local commit/digest is
+recorded in the integration handoff, not advertised as a published release pin.
+Headed ordinary-user/device/provider acceptance remains open.
 
 ## Publication/history audit
 
@@ -63,16 +64,16 @@ files. Do not use `push --mirror`, `--all` or an indiscriminate tag push.
   claim that deleting current files erased them.
 
 This is a scoped credential/artifact review, not comprehensive privacy, legal or
-security certification. Repeat it on the **integrated intended publication ref**
-and final artifacts; do not extend its result to unreviewed local refs, recordings,
-model caches, profiles, research folders or a later demo video.
+security certification. The numbers above describe the baseline, not the final
+integrated ancestry. Integration checks changed paths, source packaging and stock
+scanner findings; a full historical rescan of the intended publication ref remains
+an owner publication gate. Do not extend old scans to unreviewed refs or recordings.
 
 ## Source, licences and packaging
 
-The 13 intended release-document files were also scanned separately with
-Gitleaks: exit 0, no findings. Their relative local Markdown targets resolved.
-README onboarding is 175 lines; longer runtime disclosures moved to
-`docs/REFERENCE.md`, not discarded.
+The original 13 release-document files were scanned separately with Gitleaks:
+exit 0, no findings. Their relative local Markdown targets resolved. Longer
+runtime disclosures moved to `docs/REFERENCE.md`, not discarded.
 
 - Root source licence: MIT, copyright SilentHacks. Vendored
   `asr/parakeet_coreml.py` has silicon-asr provenance/MIT text in
@@ -118,7 +119,7 @@ an independently bootstrapped Hermes application installer from a blank machine.
 
 | Check | Observed result |
 |---|---|
-| `hermes plugins validate CHECKOUT` | Exit 0; manifest/dependency declaration, isolated registration, tools/hooks/middleware alignment and safe scanner verdict passed. One private-core-import warning below. |
+| `hermes plugins validate CHECKOUT` | Baseline exit 0 with the historical private-core warning below; integrated validation exits 0, safe, with no warnings. |
 | `hermes plugins install file://CHECKOUT --ref BASELINE_SHA --enable`, no TTY | Exit 0 but **installed disabled**, explicitly skipped dependency preparation. Exact committed revision installed; no untracked files imported. |
 | `hermes plugins enable hermes-gaze` | Exit 0; stock PM resolved 377 packages and installed the selected dependency environment. Explicit enable did not ask a second dependency question at this stock revision. |
 | Fresh-process list and doctor | Enabled `git pinned@3b850207`, version 0.1.0; installed Git HEAD exactly matched baseline; doctor exit 0, import/registration passed, 14 tools and 7 hooks. |
@@ -132,26 +133,54 @@ or real account was used by these installation checks. No model files were
 created in the isolated XDG cache. Package/tool downloads are **not** a proof of
 fully offline installation.
 
-**Limits and warnings:** the copied host lacked its full native tool/install stamp
-and printed `unknown-managed install` / out-of-sync notices for ffmpeg, node, npm,
-ripgrep (and transient venv state). Existing dependency imports helped bootstrap
-it. That limits a clean whole-Hermes-install claim; it did not prevent isolated
-plugin PM admission or doctor registration. `plugins validate` also warned about
-`benchmark/probe_sessions.py:264` importing `pm.environments.installs_root`
-(catalogue rule 9). The test-cleanup owner should remove that private seam or
-establish the supported replacement before a catalogue submission; this task did
-not modify their harness.
+**Limits and warnings:** the copied host lacks its full native tool/install stamp
+and prints `unknown-managed install` / out-of-sync notices for ffmpeg, node, npm
+and ripgrep. Existing prepared dependency imports bootstrap the CLI, read-only.
+That limits a fresh whole-Hermes-install claim, not isolated plugin PM admission.
+The baseline warning about `pm.environments.installs_root` in the prompt probe is
+fixed; integrated stock validation reports **zero warnings**.
 
-The declared Python/Hermes ranges, a headless Chrome report or these install
-checks are not a compatibility matrix. Runtime suite/browser acceptance results
-elsewhere are historical attribution unless the integration owner reruns them.
+### Integrated verification — 2026-11-10
+
+- Full deterministic suite run once: **349 tests, PASS**, 16.343 seconds.
+- Node: **27 collector/parser/action contracts PASS**, worker ownership races
+  PASS, webcam feature checks PASS; syntax checks for extension worker/popup and
+  browser overlay/panel/markdown PASS.
+- Stock validator: manifest, 8 Python requirements, isolated capability probe,
+  declared tools/hooks/middleware and scanner all PASS; safe, no warnings.
+- Stock lifecycle acceptance initially found a stale test fake missing `on_error`.
+  After correcting only that fake, the specific stock-startup probe passed:
+  cold lazy first question without dummy turn, exact receipt/hook matching,
+  permission refusal, constructor failure, lost acknowledgement, Stop/unknown
+  ownership, reset and retirement paths. Inference/browser are local fakes.
+- Both optional live probes passed a disposable-fixture handoff check: warmed
+  Chrome profile equals the backend's temporary account-scoped profile, and no
+  host dependency-state link is created. No live provider/device probe was run.
+- Real stock local-pin install, enabled discovery, doctor (14 tools/7 hooks) and
+  repeated **actual shell** `hermes look setup-extension` passed in a private home.
+  The native registration uses only the fixed extension origin. Final update,
+  staged-host relocation/status and scoped-removal receipts accompany the handoff.
+- **Browser acceptance blocker:** available bundled Chrome for Testing
+  **145.0.7632.6** passed 11 setup/pairing/opaque-frame checks, then the test-only
+  `Input.dispatchMouseEvent` (`mouseMoved`) lost its reply; the generation revoked
+  with “Chrome reply lost; outcome unknown. Do not replay the action.”
+  Trusted-input/answer checks and the other three scenarios were not reached.
+  No retry, timeout increase, browser-policy bypass or runtime workaround was added.
+  This is not a passing final browser run or proof of a product-only root cause.
+  Earlier setup-track **157.0.8103.50 / 66-check** proof is historical attribution,
+  not a result on this integrated candidate. Resolve/retest in a supported isolated
+  browser before treating the extension lane as accepted or recording a success claim.
+
+The declared Python/Hermes ranges and these checks are not a compatibility matrix.
+No personal browser, physical device, provider inference or installed Hermes
+mutation was used. The user trial below is a procedure, not completed acceptance.
 
 ## Exact remaining release gates
 
 ### Before a public source-beta announcement
 
-1. Integrate setup/test work; select and review one immutable commit. Reconcile
-   README/extension instructions and rerun the affected command/contract checks.
+1. Review the final immutable local commit and the browser blocker above. Clear
+   applicable browser acceptance before claiming release/recording success.
 2. Owner reviews personal Git metadata, historical raw traces/developer paths,
    final source archive, intended refs and any demo media; approve the precise
    publication scope. No automatic rewrite or broad ref publication.
@@ -175,7 +204,7 @@ elsewhere are historical attribution unless the integration owner reruns them.
 
 ### Additional distribution/submission gates
 
-- Catalogue: resolve the private-import warning, check current organizer/catalogue
+- Catalogue: the private-import warning is fixed; check current organizer/catalogue
   rules and required fields, repeat download/network disclosures, and obtain the
   maintainer ruling for converter-published CoreML/MLX assets. No catalogue entry
   or PR was created by this work.
@@ -189,11 +218,58 @@ elsewhere are historical attribution unless the integration owner reruns them.
   link accessibility, then explicitly approves posting/submitting. The historical
   playbook is not evidence of current rules or promised performance.
 
+## User trial and recording procedure
+
+User-operated only; use fictional data and a configured provider you authorize.
+Keep pairing tickets, profiles, account names and terminal history out of recordings.
+
+1. Install the final local Git SHA using the README's pinned command, check
+   `hermes plugins list --plain --no-bundled`, merge the injection/in-process
+   configuration, stop the gateway and restart **every** Hermes process.
+2. Run `/look setup extension`. In the intended standard Chrome profile,
+   `chrome://extensions` → Developer mode → Load unpacked →
+   `~/Library/Application Support/Look/extension/unpacked`; review broad debugger
+   permissions. Setup is not browser consent or Store installation.
+3. From this checkout, serve only local fixtures:
+   `python3 -m http.server 8765 --bind 127.0.0.1 --directory benchmark`.
+   Open `http://127.0.0.1:8765/benchmark_page.html`.
+   In the intended new Hermes conversation, `/look start --extension`; open Look
+   on that tab, paste the fresh 120-second ticket, **Connect this tab**.
+4. Point at a table cell, **Right Option**, type “What does this cell measure?”
+   Check the private streamed answer refers to that cell. Ask a typed follow-up;
+   verify recall with **Q**, selection/scroll and **Esc**.
+5. In another terminal, run
+   `python3 -m http.server 8766 --bind 127.0.0.1 --directory tests/browser_actions`.
+   Open `http://127.0.0.1:8766/browser_actions_page.html?kind=mail`;
+   choose **Use on this tab**. Ask: “Prepare a local fixture message to
+   trial@example.com, subject Look trial, body This is fictional. Do not send.”
+   Inspect the draft. Ask for Send review: Enter/Space must not approve; use
+   **Cancel** first, then request fresh review and consciously primary-mouse approve.
+   Only “Message sent locally.” should change; no real recipient/network send.
+6. During another local task switch tabs/navigate: no input may target the new
+   foreground document, and old approval must expire. `/look stop` must remove
+   Look/stop capture and output while leaving tabs open. Pair with a fresh ticket.
+7. For voice only after explicit `/look setup`: grant the launching app's macOS
+   microphone permission, hold Space, **wait for Listening**, speak and release.
+   Test focus-loss cancellation and the 30-second cap with the five-second warning.
+   For read-aloud, explicitly prepare speech assets, verify audible Stop/Esc and
+   no overlap before capture. For eyes, explicitly prepare/start calibration and
+   pass the personal nine-point check; report misses. Do not claim these from mocks.
+8. Stop, restart Hermes after updating the plugin, rerun setup, **Reload** Look and
+   pair afresh. Test Chrome disable/remove and scoped host uninstall before plugin
+   removal. Close both local HTTP servers with Ctrl-C. Native-consent Allow/deny/revoke
+   is a separate trial if that lane is shown.
+
+Record only accepted behavior, using the [85-second plan](SUBMISSION_DRAFT.md#suggested-85-second-recording-plan).
+Do not show eye/voice performance that failed; keep the source-beta label and
+question/page-sharing disclosure. Owner review/publication/media approval remains required.
+
+
 ## Cost and actions
 
 Product/provider inference, account/Store purchases and external communications:
 **$0 / none**. Public package/tool downloads occurred. No push, PR, publication,
 history rewrite, personal Chrome/device access or credential-store access.
-Assistant/session billing is not exposed. One harness semantic-search attempt was
-rejected before producing results (0 reported tokens/$0); no model inference was
-used to test the product. Local audit reports use redaction and metadata only.
+Assistant/session billing is not exposed; harness code-location searches are
+separate from product inference and can incur tool charges. No model inference
+was used to test the product. Local audit reports use redaction and metadata only.
