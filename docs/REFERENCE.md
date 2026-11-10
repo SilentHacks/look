@@ -34,15 +34,10 @@ auxiliary inference. Questions/evidence may persist in Hermes history.
 
 Use `/look setup extension`, then `/look start --extension` and connect the
 selected tab from Chrome's Extensions menu. See [extension setup](CHROME_EXTENSION.md).
-The native-consent `/look start --existing` command has been removed.
 Use `/look start --separate` for Look's separate browser.
 
-Verification: fake-server consent/denial/cancellation/routing and disposable
-Chrome 156.0.8078.81 flattened renderer/Stop/context-navigation checks pass.
-The disposable wire probe uses an independently token-verified owned browser.
-It does **not** prove native human approval. Native Allow/deny/revoke and the
-user-operated existing signed-in session trial remain release gates. No real
-devices or personal browser/account were accessed by these probes.
+See [extension verification](CHROME_EXTENSION.md#verification-and-remaining-gates)
+for disposable-browser coverage and user-operated permission checks.
 
 ### Commands
 

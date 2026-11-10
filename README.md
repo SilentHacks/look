@@ -51,8 +51,7 @@ model and may remain in Hermes history.
 4. Run `/look start --extension`. Within 120 seconds, open **Look** from Chrome's
    Extensions menu on an HTTP(S) tab and choose **Connect this tab**.
 
-For another tab, choose **Use on this tab** in Look. This is an unpacked extension,
-not a Chrome Web Store release.
+For another tab, choose **Use on this tab** in Look.
 
 ### A separate Look browser
 
@@ -67,6 +66,14 @@ Point at text or a table cell. Press **Right Option**, type “What does this me
 and submit. Follow up on the answer card, or point elsewhere for a new question.
 **Q** recalls answers. **Esc** stops or dismisses the current interaction.
 `/look stop` disconnects Look without closing tabs.
+
+### Browser actions
+
+Look asks for approval before sending, buying, deleting or using an ambiguous
+control. Run `/look actions allow-all` to execute requested actions without Look
+approval prompts for this connection. This can send, buy or delete immediately,
+including if page instructions mislead the model. `/look actions confirm` restores
+prompts. Stopping or reconnecting resets the mode.
 
 ## Optional voice and eyes
 

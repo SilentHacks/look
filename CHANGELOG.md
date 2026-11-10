@@ -4,6 +4,12 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Removed the native-consent start command. Use the extension for your usual
+  Chrome or `start --separate` for Look's browser.
+- Added connection-scoped `/look actions allow-all` to execute requested actions
+  without Look approval prompts. Default review, captured ownership, secret-field
+  exclusions and no-replay handling remain. Stop and reconnect restore review.
+
 - The extension popup refreshes pending connection state without retargeting an
   offered conversation or tab. Expiry and foreground changes remove Connect.
   Browser connection no longer advertises speech while recognition is preparing;
@@ -33,11 +39,10 @@ No public release, catalogue admission, Store listing or release date is asserte
 
 - Look provides exact cursor evidence, private streamed cards, local voice input,
   guarded captured-control actions and experimental personal eye calibration.
-- Browser lanes: separate Look Chrome, explicit native existing-Chrome consent,
-  and an unpacked extension/native host. `/look setup extension` stages fixed
-  source files and the current Python launcher with a stable development ID.
-  Stopped update, relocation, scoped removal and cross-profile ownership are covered.
-  Consumer Store packaging remains separate.
+- Browser lanes: separate Look Chrome and an unpacked extension/native host.
+  `/look setup extension` stages fixed source files and the current Python
+  launcher with a stable development ID. Stopped update, relocation, scoped
+  removal and cross-profile ownership are covered.
 - The approved Look artwork brands the README, Chrome extension/action, popup and
   separate-browser start page. Transparent PNG icons ship with extension setup.
   The private companion cards and controls remain icon-free.

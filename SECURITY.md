@@ -26,8 +26,8 @@ History cleanup requires a separately approved plan.
 
 ## Boundaries to preserve
 
-- **Debugger authority is broad.** Existing-Chrome native consent and the extension
-  can inspect/mutate authorized pages. Dedicated Chrome also exposes local CDP.
+- **Debugger authority is broad.** The extension can inspect/mutate authorized
+  pages. Dedicated Chrome also exposes local CDP.
   Do not forward debugger ports or connect generic model browser/code tools to
   Look's endpoint. Same-user/root programs and authorized debuggers are outside
   the protected website boundary.
@@ -37,7 +37,11 @@ History cleanup requires a separately approved plan.
   service (hiding/removing the host) remains possible.
 - **Identity is not a selector.** Actions retain captured tab/document/route/epoch
   ownership. Consequential/ambiguous controls need a content-bound, single-use
-  primary mouse approval. Detached identities fail. Missing mutation replies are
+  primary mouse approval by default. Only the bound conversation's explicit
+  `/look actions allow-all` skips Look review for requested actions. It resets
+  on Stop/reconnect and leaves ownership and secret-field guards intact.
+  Page instructions can mislead the model into sending, buying or deleting in
+  that mode. Detached identities fail. Missing mutation replies are
   unknown outcomes, never safe automatic retries. Typing/GET navigation can still
   have effects on unusual sites.
 - **Stop has limits.** It cancels local capture/output/tasks/approvals, not an

@@ -239,13 +239,19 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   a live selection.
 - **Confirmation is not a model tool.** Python classifies live controls, never the
   whole utterance: known navigation/selection may proceed, form Submit, Send, Buy,
-  Delete, publish and ambiguous controls require review. `gaze_request_commit`
-  only requests the card. Its safe field/content summary and destination live in
+  Delete, publish and ambiguous controls require review by default.
+  `gaze_request_commit` requests the card in confirm mode. Its summary and destination live in
   the protected glass frame. Approval binds the exact identity, epoch, owner,
   destination and current nonsensitive content, and invalidates on observed edits;
   the final DOM evaluation rechecks and consumes it before clicking. Only the
   nonce-checked binding from a trusted primary mouse click may approve once.
   Neither page/answer text, synthetic events, model tools, speech nor keys approve.
+  Only the bound conversation's explicit `/look actions allow-all` command skips
+  Look approval cards for requested actions, including `gaze_request_commit`.
+  Prepare-only/do-not-send requests must not commit in that mode. Changing mode
+  revokes the current task. Stop, reconnect and conversation changes reset it.
+  Exact ownership, secret-field exclusions, external permissions, guarded tools
+  and no replay remain mandatory in both modes.
 - **The companion browser is not an arbitrary-code browser.** Default CDP is
   `127.0.0.1:9333`, separate from Hermes's independently launched browser.
   Never export it as `BROWSER_CDP_URL`, `BU_CDP_URL`, `BU_CDP_WS`, or Hermes

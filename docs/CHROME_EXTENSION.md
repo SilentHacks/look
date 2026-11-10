@@ -139,7 +139,6 @@ still end the connection. If Look disconnects, run `/look stop`, then
 **Connect this tab**. Inspect the page before repeating an action with unknown outcome.
 
 Use `/look start --separate` to select Look's separate browser.
-The native-consent `/look start --existing` command has been removed.
 No source is substituted silently.
 
 ## Privacy and ownership

@@ -216,6 +216,20 @@ def child(args):
                         assert turns.connected and turns.native_input is not None, initial
                         attach.assert_called_once()
                     assert not calls and not hooks
+                    for retired in ("start --existing", "start --existing --accept"):
+                        previous_binding = turns.binding
+                        await look(sid, retired)
+                        assert turns.binding is previous_binding and len(calls) == 0
+                    await look(sid, "actions allow-all")
+                    assert browser.tasks.approval_session == sid
+                    foreign = await create("foreign-command")
+                    await look(foreign, "actions confirm")
+                    assert browser.tasks.approval_session == sid
+                    await look(sid, "actions confirm")
+                    assert browser.tasks.approval_session == ""
+                    output["action_commands"] = dict(
+                        opted_in=True, foreign_refused=True, default_restored=True,
+                        retired_start_cannot_rebind=True)
                     assert (await rpc("session.info", session_id=sid))["lazy"]
                     assert not voice.recognition_ready()
                     assert browser.cdp._inbox_event["recognition"]["ready"] is False

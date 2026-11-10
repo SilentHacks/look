@@ -33,7 +33,7 @@ never advertises direct tools absent from Hermes's executable set.
 |---|---|
 | `gaze_read` | No arguments; bounded structure, up to 64 captured fields/controls, viewport first, options and sanitized HTTP(S) links, no field values. Returns `resolution_id`. |
 | `gaze_fill` | `resolution_id`, batch `entries:[{handle,text}]`; replaces text/native-select/contenteditable values. |
-| `gaze_click` | `resolution_id`, `handle`, required boolean `new_tab`; false for buttons/same-tab links, true opens a safe captured link in a new tab and returns its structure. Consequential/ambiguous controls request review. |
+| `gaze_click` | `resolution_id`, `handle`, required boolean `new_tab`; false for buttons/same-tab links, true opens a safe captured link in a new tab and returns its structure. Consequential/ambiguous controls request review by default. |
 | `gaze_press` | `resolution_id`, `handle`, listed `key`; Enter/Space use guarded activation. Escape belongs exclusively to the user's Stop, not model page input. No arbitrary shortcuts. |
 | `gaze_open_tab` | `resolution_id`, HTTP(S) `url`; genuinely new foreground tab, becomes action target, returns its fresh structure. |
 | `gaze_navigate` | Same arguments; navigates the task tab and returns fresh structure. |
