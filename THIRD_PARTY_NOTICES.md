@@ -4,8 +4,8 @@
 
 The repository is distributed as a pinned source plugin under [MIT](LICENSE),
 except for the attributed vendored material below. Keep these notices with source
-archives. Models, voices, browser binaries and datasets are not bundled; explicit
-setup downloads the pinned assets to local caches.
+archives. Models, voices, browser binaries and datasets are not bundled.
+Explicit setup downloads the pinned assets to local caches.
 
 Direct Python requirements are in [pyproject.toml](pyproject.toml). Their published
 licences include BSD-3-Clause (websockets, NumPy), MIT (faster-whisper, sounddevice,
@@ -21,7 +21,7 @@ See [release scope and remaining legal/distribution gates](docs/RELEASE_READINES
   [original v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/blob/ae9ad07059c7c739ffaf932226a8fe64ae2620b0/README.md),
   converted to CoreML by **FluidInference**, **CC-BY-4.0** per the
   [pinned conversion card](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/blob/ee09c569f73759e6d44c9bd16766f477b2b36d39/README.md).
-  The downloaded conversion is unmodified; FluidInference publishes it.
+  FluidInference publishes the conversion. The downloaded files are unmodified.
   NVIDIA endorsement is not established.
 - macOS fallback: **mlx-community's MLX conversion** of NVIDIA Parakeet v2,
   **CC-BY-4.0**, [revision and conversion attribution](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v2/blob/8ae155301e23d820d82aa60d24817c900e69e487/README.md).
@@ -67,21 +67,21 @@ SOFTWARE.
 - SYSTRAN's conversions of OpenAI Whisper:
   [base.en](https://huggingface.co/Systran/faster-whisper-base.en/blob/3d3d5dee26484f91867d81cb899cfcf72b96be6c/README.md) and
   [tiny.en](https://huggingface.co/Systran/faster-whisper-tiny.en/blob/0d3d19a32d3338f10357c0889762bd8d64bbdeba/README.md),
-  MIT per their cards. The selected repository tokenizer is mandatory and verified;
-  no separately downloaded OpenAI tokenizer is used. Tokenizer-specific legal
+  MIT per their cards. The selected repository tokenizer is mandatory and verified.
+  No separately downloaded OpenAI tokenizer is used. Tokenizer-specific legal
   terms beyond the conversion cards were not independently established.
 
 Recognition and Phonon file revisions and SHA-256 expectations are in
 [`audio/assets.json`](audio/assets.json). Weight/embedding hashes derive from immutable
 publisher LFS metadata, not a claim that this release audit downloaded those weights.
 CoreML/MLX official-distribution acceptance under the Hermes catalog remains a
-maintainer decision; pinning alone is not catalog approval.
+maintainer decision. Pinning alone is not catalog approval.
 
 ## Gradium Phonon read-aloud
 
 - Runtime: [`ptts` 0.6.0 / xn-ptts](https://github.com/gradium-ai/xn-ptts),
-  Laurent Mazare and Gradium; **MIT OR Apache-2.0**. Its wheel includes both
-  `LICENSE-MIT` and `LICENSE-APACHE`; retain these when redistributing the runtime.
+  Laurent Mazare and Gradium, **MIT OR Apache-2.0**. Its wheel includes both
+  `LICENSE-MIT` and `LICENSE-APACHE`. Retain these when redistributing the runtime.
 - [Phonon-31M English weights, tokenizer and bundled voice](https://huggingface.co/gradium/phonon-31m-en/tree/8c64b55ec301728e2d1695bfea87a08a267d0c2d),
   Gradium, **Apache-2.0**, revision `8c64b55ec301728e2d1695bfea87a08a267d0c2d`.
   Only the q8 31M checkpoint is used, not the CC-BY-NC 40M siblings.
@@ -92,7 +92,7 @@ maintainer decision; pinning alone is not catalog approval.
 Setup downloads unmodified assets and their model cards outside this repository.
 The Apache-2.0 licence text below also applies to these assets. No model weights,
 voice embeddings, training data or generated speech are bundled in this repository.
-The emergency Apple `say` fallback uses installed system voices; its generated
+The emergency Apple `say` fallback uses installed system voices. Its generated
 audio is not established as licensed for publication in the submission video.
 
 ## MediaPipe Tasks Vision and Face Landmarker
@@ -108,7 +108,7 @@ The runtime and model are downloaded unmodified, outside this repository.
 - [Face Mesh V2 model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20MediaPipe%20Face%20Mesh%20V2.pdf)
   explicitly licenses the 478-landmark weights under Apache-2.0.
 - [Blendshape model card](https://storage.googleapis.com/mediapipe-assets/Model%20Card%20Blendshape%20V2.pdf)
-  also states Apache-2.0; blendshape output is not enabled here.
+  also states Apache-2.0. Blendshape output is not enabled here.
 - [BlazeFace short-range model card](https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20%28Short%20Range%29.pdf)
   licenses the detector weights under Apache-2.0 and describes consented AR-app
   training images, without separate downloadable dataset terms.
@@ -125,8 +125,8 @@ Glance code or gaze weights are included in this implementation.
 NASA image S69-31741, official portrait of Neil Armstrong, credit NASA.
 [Image source](https://www.nasa.gov/image-article/official-portrait-of-neil-armstrong/).
 [Usage guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/).
-US-government photograph, used only as a public-domain local fake-camera fixture;
-no endorsement or human gaze accuracy is implied. The test crops/translates it.
+US-government photograph, used only as a public-domain local fake-camera fixture.
+No endorsement or human gaze accuracy is implied. The test crops/translates it.
 
 Downloaded image SHA-256:
 `1cb000ea1005dc2b63bc0593e86a371b95105a9e1c989876b7dbd1874837714c`.

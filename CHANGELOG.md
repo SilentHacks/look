@@ -8,7 +8,8 @@ No public release, catalogue admission, Store listing or release date is asserte
   Privacy disclosures, user choices and browser-action safeguards are unchanged.
 - Grouped audio, runtime and browser internals into packages while keeping the
   stock plugin entry point and manifest at the root. Updated source paths in
-  contributor guidance, asset notices and technical documentation.
+  contributor guidance, asset notices and technical documentation. Removed the
+  obsolete root redirects to historical documents, which remain in `docs/`.
 
 - Look provides exact cursor evidence, private streamed cards, local voice input,
   guarded captured-control actions and experimental personal eye calibration.
