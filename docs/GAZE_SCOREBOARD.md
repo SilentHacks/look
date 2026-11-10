@@ -1,19 +1,16 @@
-# Gaze dataset scoreboard
+# Historical gaze scoreboard placeholder
 
-No human results from our own dataset have been recorded and scored yet.
-Fake-device checks prove collection, portability and scoring plumbing only; they
-are not human gaze accuracy. Previous public-data scores have been removed.
+This placeholder predates the one-person offline estimator research and the live
+left-eye appearance ridge λ10 cutover. Its former “no human results” and iris/head
+ridge λ1 descriptions are stale.
 
-Keep the live nine-point MediaPipe iris/head ridge λ=1 unchanged. No tuning fit,
-smoothing choice or larger calibration experiment is installed into the tracker.
+See [the dated research and its denominators](GAZE_TUNING_RESEARCH.md) for the
+eight-session, one-person offline evaluation. Those results are not independently
+reproduced release evidence, moving-target performance or population accuracy.
+[Current live model and limits](WEBCAM_GAZE.md) remain the supported description.
 
-After collecting both glasses rounds, run the commands in [GAZE_RECORDING.md](GAZE_RECORDING.md).
-Private outputs are `results.json`, `summary.json`, `SCOREBOARD.md` and held-out
-traces. Report 3×3 / 4×4 / 5×5 exact-cell hits, coverage and end-validation drift
-per person, condition and glasses. Cross-person summaries weight people equally;
-all models are still personally calibrated, not trained across people.
-
-Do not select a winner on one person's aggregate alone. Compare calibrated
-within-session, baseline-to-changed-condition without recalibration and
-cross-glasses transfer separately. Add real observed results here only with the
-protocol, calibration budget, people/session counts and held-out denominators.
+Future scores must state protocol, calibration budget, people/session counts,
+held-out denominator, coverage and drift. Separate fresh personal calibration,
+condition reuse and eyewear transfer; do not select a population winner from one
+person's aggregate. Private recordings, features, fitted weights and traces do
+not belong in Git.

@@ -51,11 +51,11 @@ They use the existing in-memory collector; no automatic persistence was added.
 Verification:
 
 - Baseline: `CAPTURE_BASELINE=f3c2827 SHOTS=/tmp/hermes-capture-stall
-  /Users/Abid/Projects/hermes-gaze/.venv/bin/python tests/ui_review/probe_capture.py`.
+  python tests/ui_review/probe_capture.py`.
 - Current: same command without `CAPTURE_BASELINE`; both captures under 50 ms,
   pointed evidence retained, sensitive label excluded, and an earlier exact gaze
   identity retained in noisy mode. The baseline omitted that gaze identity.
-- `/Users/Abid/Projects/hermes-gaze/.venv/bin/python -m unittest discover -s tests -t .`:
+- `python -m unittest discover -s tests -t .`:
   **225 tests, 4.444 seconds, OK**.
 - `node --test tests/cursor_context_dom.js`: **27 passed, 0 failed**.
 - `node --check browser/overlay.js`: exit 0.

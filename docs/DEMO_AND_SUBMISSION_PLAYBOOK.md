@@ -1,4 +1,11 @@
-# Hermes Gaze — Demo Script & Catalog Submission Playbook
+# Historical demo and catalogue draft — not release instructions
+ 
+> Superseded planning copy, retained for provenance. The timing, accuracy,
+> hands-free/dwell-action, One-Euro/click-recalibration, catalogue availability,
+> validation and architecture claims below are **not current product claims or
+> verified submission instructions**. Do not run these commands or reuse this
+> copy for a release. Use [the current local submission draft](SUBMISSION_DRAFT.md),
+> [README](../README.md) and [release gates](RELEASE_READINESS.md).
 
 ## 1. The 85-Second X Demo Video Script ("Neuralink at Home")
 

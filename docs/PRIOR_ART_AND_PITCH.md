@@ -1,4 +1,11 @@
-# Hermes Gaze — Prior Art & Competitive Analysis
+# Historical prior-art search and pitch — 2026-11-05
+
+> Research snapshot and proposed marketing, not a current competitive audit.
+> The absolute novelty, catalogue counts, accuracy, hands-free and “Neuralink”
+> comparisons below are unverified historical claims, not release evidence or
+> medical/accessibility claims. No exhaustive novelty search is established.
+> Use [the current submission draft](SUBMISSION_DRAFT.md) for reviewable copy and
+> [README](../README.md) for implemented behavior.
 
 ## 1. Executive Summary: Has Anyone Done This?
 

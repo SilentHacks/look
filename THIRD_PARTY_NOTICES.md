@@ -1,5 +1,20 @@
 # Third-party notices
 
+## Distribution scope
+
+The repository is distributed as a pinned source plugin under [MIT](LICENSE),
+except for the attributed vendored material below. Keep these notices with source
+archives. Models, voices, browser binaries and datasets are not bundled; explicit
+setup downloads the pinned assets to local caches.
+
+Direct Python requirements are in [pyproject.toml](pyproject.toml). Their published
+licences include BSD-3-Clause (websockets, NumPy), MIT (faster-whisper, sounddevice,
+PyObjC), Apache-2.0 (parakeet-mlx, huggingface_hub), and MIT OR Apache-2.0 (ptts).
+The installation record checks resolved metadata, not every transitive source
+file or platform wheel. A source beta is not legal clearance for redistributing
+a native-app bundle, model mirror, generated voice recording or all dependencies.
+See [release scope and remaining legal/distribution gates](docs/RELEASE_READINESS.md).
+
 ## Parakeet speech recognition
 
 - Preferred macOS model: **Parakeet TDT 0.6B v2**, NVIDIA's

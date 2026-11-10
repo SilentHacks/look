@@ -1,6 +1,12 @@
-# Hermes Gaze ("Telepathy") — Full Technical & Product Plan
+# Historical Hermes Gaze design plan — not a release contract
 
-> **Post-refactor note:** This is the original design plan and is preserved as background. Where it diverges from the shipped code — the planned `platform_adapter.py`, `webcam_gaze.py`, `coord_mapper.py`, `config_schema.json`, gateway platform, and the HTTP voice/demo server on :9111 — the current architecture is documented in `../AGENTS.md` and `../README.md` (resolution in `service.py`, a persistent CDP session with a `Runtime.addBinding("__hermesGazeIntent")` channel, `overlay.js` as a pure terminal, `resolver/` + `tracker/` as pure no-I/O modules, a GET-only demo server, and modes `hover`/`simulated` — webcam mode intentionally unimplemented).
+> Original proposal, retained for provenance. The deadline and product promises
+> below are historical notes, not independently verified current organizer rules.
+> Architecture, commands and scope have changed: webcam beta now exists, with
+> explicit calibration and no smoothing; raw generic browser tools are not granted
+> Look's endpoint. Use [README](../README.md), [the technical reference](REFERENCE.md)
+> and [AGENTS.md](../AGENTS.md) for current behavior. Do not implement or demonstrate
+> obsolete proposal features merely because they appear here.
 
 > **Hackathon Deadline:** Wednesday, Nov 11, 2026 at 5:00 PM EST  
 > **Target Development & Demo Hardware:** MacBook (Apple Silicon, built-in FaceTime HD camera, macOS Retina display, Google Chrome)  
