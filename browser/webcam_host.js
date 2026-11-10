@@ -277,7 +277,7 @@
     practiceFace = faceVisible();
     const help = !practiceFace && !answered ? "Bring your face into view." : step === "waiting" ? "Keep holding Space." : step === "listening" ? "Say “What are these rings made of?”" :
       step === "tap" ? "Hold Space a little longer." : step === "early" ? "Wait for “Listening” before speaking." :
-      step === "cancelled" ? "Rehearsal cancelled. Hold Space to try again." : step === "interrupted" ? "Rehearsal interrupted. Hold Space to try again." :
+      step === "cancelled" ? "Practice cancelled. Hold Space to try again." : step === "interrupted" ? "Practice interrupted. Hold Space to try again." :
       answered ? "" : "Look at the rings, then hold Space.";
     example.hidden = !answered;
     practice.setAttribute("aria-hidden", String(answered));
@@ -286,7 +286,7 @@
     if (help) parts.push(make("p", help, "note"));
     if (step === "listening") parts.push(make("p", "Then release Space.", "note"));
     parts.push(buttons(answered ? [["return", "Return to browsing"], ["again", "Try again"]] : [["done", "Skip practice"]]),
-      make("p", "Practice only — microphone off.", "quiet"));
+      make("p", "This is practice. Your microphone is off.", "quiet"));
     bar.replaceChildren(...parts);
   }
   function interruptPractice(step) {

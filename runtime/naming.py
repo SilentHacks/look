@@ -66,7 +66,7 @@ def plain_error(status: str, error: str) -> str:
     text = str(error or "")
     lower = text.lower()
     if "outcome unknown" in lower or "unknown outcome" in lower or "outcome is unresolved" in lower:
-        return "This question’s outcome is unknown. Reconnect in Hermes; do not resend it."
+        return "This question’s outcome is unknown. Reconnect in Hermes. Don’t send it again."
     if "gateway_injection_not_granted" in lower:
         return "Look input is not permitted. Check this profile’s plugin injection permission."
     if status == "interrupted" and ("disconnect" in lower):
@@ -74,7 +74,7 @@ def plain_error(status: str, error: str) -> str:
     if status == "interrupted":
         return "This answer was interrupted."
     if "no speech" in lower:
-        return "I didn’t catch that; hold Space, wait for Listening, then ask again."
+        return "I didn’t catch that. Hold Space, wait for Listening, then ask again."
     if "no available cursor target" in lower or "target unavailable" in lower:
         return "I couldn’t tell what you were pointing at."
     if "capture" in lower and ("no transcribed" in lower or "no longer" in lower):
@@ -83,16 +83,16 @@ def plain_error(status: str, error: str) -> str:
         return "Read aloud is stopping. Wait, then hold Space again."
     if "microphone" in lower or "portaudio" in lower or "input device" in lower:
         if "permission" in lower or "denied" in lower or "not permitted" in lower:
-            return "Microphone denied. Allow your terminal in settings, then restart it."
+            return "Microphone access is blocked. Allow your terminal app in system microphone settings, then restart it."
         if "already in use" in lower or "closing" in lower:
-            return "Microphone busy. Let go of Space, wait, then hold again."
-        return "Microphone failed. Check input and permission, then try again."
+            return "The microphone is busy. Release Space, wait a moment, then hold it again."
+        return "The microphone couldn’t start. Check your input device and microphone permission, then try again."
     if "downloaded speech file changed" in lower:
-        return "A downloaded speech file changed. Preparation stopped; do not use this cache."
+        return "A downloaded speech file changed. Setup stopped. Don’t use this cache."
     if "speech recognition is not ready" in lower or "preparing local speech recognition" in lower:
-        return "Local speech recognition is not ready. Run /look setup; use Right Option to type."
+        return "Local speech recognition isn’t ready. Run /look setup, or press Right Option to type."
     if "speech model" in lower:
-        return "Speech model unavailable. Check internet and disk space; restart Hermes."
+        return "The speech model isn’t available. Check your internet connection and disk space, then restart Hermes."
     if any(word in lower for word in ("transcri", "recognition", "whisper", "parakeet", "asr")):
         return "Speech recognition failed. Try again, or use Right Option to type."
     if "rate" in lower and "limit" in lower or "429" in lower or "quota" in lower:

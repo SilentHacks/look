@@ -15,7 +15,7 @@ async function send(op) {
     document.querySelector('#start').hidden = result.connected || !!request;
     document.querySelector('#add').hidden = !result.connected;
     document.querySelector('#stop').hidden = !result.connected;
-    status.textContent = result.connected ? 'Connected. Return to the page to ask.' : request ? 'Ready to connect.' : '';
+    status.textContent = result.connected ? 'Connected. Return to the page to ask a question.' : '';
     if (op === 'pair' || op === 'add') {
       window.close();
     }

@@ -12,7 +12,7 @@ def platform_notice() -> str:
     if apple_silicon_mac():
         return ""
     if system in ("Darwin", "Linux"):
-        return ("Outside the supported Apple Silicon Mac beta: cursor and faster-whisper paths "
-                "remain available but unverified here; eye tracking is unavailable. "
-                "Use /look cursor; Right Option opens typed questions.")
+        return ("This beta supports Apple Silicon Mac. Cursor and faster-whisper paths "
+                "are available here but unverified. Eye tracking is unavailable. "
+                "Use /look cursor, or press Right Option to type questions.")
     return "Unsupported platform. Use an Apple Silicon Mac with standard Google Chrome for this beta."

@@ -44,7 +44,7 @@
   const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, ...data}));
   const make = (tag, text) => { const n = document.createElement(tag); n.textContent = text || ""; return n; };
   document.head.append(make("style", "body{margin:0;background:#17191c;color:#f5f5f7;font:18px system-ui;text-align:center}main{max-width:850px;margin:auto;padding:24px}video{width:240px;transform:scaleX(-1)}button,input,textarea{font:inherit;padding:8px;margin:6px}label{display:block}input,textarea{width:340px}button{cursor:pointer}#dot{position:fixed;width:20px;height:20px;border-radius:50%;background:#a9d7ff;transform:translate(-50%,-50%);display:none}#instruction{position:fixed;bottom:0;width:100%;pointer-events:none;font-size:14px}body.recording main{display:none}button:focus-visible{outline:3px solid #a9d7ff}"));
-  document.title = "Look — private dataset recorder";
+  document.title = "Look private dataset recorder";
   const main = make("main"), dot = make("div"), instruction = make("p"), video = make("video");
   dot.id = "dot"; instruction.id = "instruction";
   video.autoplay = true; video.muted = true; video.playsInline = true;
@@ -113,9 +113,9 @@
     if (index >= opts.blocks.length) { close(); return; }
     const block = opts.blocks[index];
     duration = blockDuration(block.name);
-    main.replaceChildren(make("h1", `${index ? "Break — next" : "Ready"}: ${block.name}`),
+    main.replaceChildren(make("h1", `${index ? "Next block" : "Ready"}: ${block.name}`),
       make("p", `${opts.person} · ${opts.glasses} · ${opts.device}`), make("p", message),
-      make("p", block.instruction), make("p", `${duration.toFixed(1)} seconds. Follow the dot naturally. Keep this window visible; maximize it now, before starting.`), video);
+      make("p", block.instruction), make("p", `${duration.toFixed(1)} seconds. Maximize this window before starting and keep it visible. Follow the dot naturally.`), video);
     for (const [key, value] of Object.entries(block.details)) {
       const label = make("label", key.replaceAll("_", " "));
       fields[key] = make("input"); fields[key].id = key; fields[key].value = value; fields[key].maxLength = 200;
@@ -145,13 +145,13 @@
       emit("record_start", {screen: geometry, viewport_origin: [e.screenX - e.clientX, e.screenY - e.clientY],
         epoch: Date.now() / 1000, block: block.name, details, note: fields.note.value, distance_mm, seed});
     });
-    button("exit", "Stop here — resume later", close);
+    button("exit", "Stop and resume later", close);
   }
   async function enableCamera() {
-    main.replaceChildren(make("p", "Starting camera only — no microphone…"));
+    main.replaceChildren(make("p", "Starting camera only…"));
     try {
       stream = await navigator.mediaDevices.getUserMedia({video: {width: 640, height: 480, frameRate: 15}, audio: false});
-      video.srcObject = stream; await video.play(); prepare("Check your background for private material. Allow camera only. No microphone is requested.");
+      video.srcObject = stream; await video.play(); prepare("Check your camera preview for anything private in the background.");
     } catch (_) { emit("error", {error: "Recording camera could not start"}); }
   }
   function intro() {
@@ -166,7 +166,7 @@
     saved: () => {
       saving = false;
       if (reason === "complete") index++;
-      prepare(reason === "complete" ? "Session saved. Rest your eyes; adjust only the next named condition. Continue when ready." : "Partial session saved, not counted as complete. Rest, then retry this block, or stop and resume later.");
+      prepare(reason === "complete" ? "Session saved. Rest your eyes, then adjust only the next named condition." : "Partial session saved. It won’t count as complete. Rest, then retry this block or stop and resume later.");
     },
     status: () => ({started: active, saving, pending, index, frames, phase: shown?.phase})
   };
@@ -174,10 +174,10 @@
   addEventListener("visibilitychange", () => { if (document.hidden && active) finish("window hidden"); });
   addEventListener("pagehide", () => { if (active) finish("window closed"); stream?.getTracks().forEach(t => t.stop()); }, {once: true});
   if (opts.consent_required) {
-    main.append(make("h1", "Your choice — local face recording"),
-      make("p", "This records face and background video, gaze-target positions, anonymous ID and the condition notes you enter. No audio. Everything stays on this computer; no upload or Hermes connection. Export only to a person you trust for local gaze research. Participation is optional; stop at any time."),
-      make("p", `Use only an anonymous ID, never your real name. Delete ${opts.delete_path} to remove your sessions and consent, plus any exported bundles, extracted frames/features, scores and backup copies. File deletion is not forensic erasure.`));
-    button("consent", "I agree — continue", () => { emit("record_consent", {accepted: true}); intro(); });
+    main.append(make("h1", "Record a local gaze dataset?"),
+      make("p", "This saves video of your face and background, gaze-target positions, an anonymous ID and your condition notes. It does not record audio or connect to Hermes. Everything stays on this computer unless you export it. Share exports only with someone you trust for local gaze research. You can decline or stop at any time."),
+      make("p", `Use an anonymous ID, not your real name. To delete your sessions and consent, remove ${opts.delete_path}. Also remove any exports, extracted frames or features, scores and backups. Deleting files does not guarantee they cannot be recovered.`));
+    button("consent", "I agree, continue", () => { emit("record_consent", {accepted: true}); intro(); });
     button("decline", "No thanks", close);
   } else intro();
   emit("ready");

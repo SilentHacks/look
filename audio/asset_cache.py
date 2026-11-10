@@ -22,11 +22,11 @@ class AssetsMissing(FileNotFoundError):
 def verify(path, expected):
     path = Path(path)
     if path.stat().st_size != expected["size"]:
-        raise AssetIntegrityError(f"Downloaded speech file changed: {path.name}. Preparation stopped; do not use this cache.")
+        raise AssetIntegrityError(f"Downloaded speech file changed: {path.name}. Setup stopped. Don’t use this cache.")
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     if digest != expected["sha256"]:
-        raise AssetIntegrityError(f"Downloaded speech file changed: {path.name}. Preparation stopped; do not use this cache.")
+        raise AssetIntegrityError(f"Downloaded speech file changed: {path.name}. Setup stopped. Don’t use this cache.")
 
 
 def prepare(repo, *, download=False, names=None, local_dir=None):
@@ -45,7 +45,7 @@ def prepare(repo, *, download=False, names=None, local_dir=None):
         else:
             missing.append(name)
     if missing and not download:
-        raise AssetsMissing("Local speech recognition is not ready. Run /gaze setup to prepare it; use Right Option to type.")
+        raise AssetsMissing("Local speech recognition is not ready. Run /look setup, or press Right Option to type.")
     for name in missing:
         path = hf_hub_download(repo, name, revision=asset["revision"], local_dir=local_dir,
                                endpoint="https://huggingface.co")

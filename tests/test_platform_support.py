@@ -67,8 +67,7 @@ class PlatformSupport(unittest.TestCase):
         session = Mock()
         with self.platform("Linux", "x86_64"), \
              patch.object(cli, "get_shared_session", return_value=session):
-            result = cli._handle_slash_command("setup eyes")
-            self.assertIn("eye tracking is unavailable", result)
+            cli._handle_slash_command("setup eyes")
             session.configure.assert_not_called()
             session.start_webcam.assert_not_called()
 

@@ -270,7 +270,7 @@ def register(ctx: Any) -> None:
                 return result  # Disclosure/refused source changes never bind the old browser.
             ready()
             if native is None:
-                result += "\nThis frontend uses untracked Look input. If no answer arrives, check the conversation in Hermes; do not resend automatically."
+                result += "\nThis frontend can’t confirm whether Look delivered your question. If no answer arrives, check the conversation in Hermes. Don’t send it again automatically."
             from .audio.voice import recognition_ready, recognition_status
             if not recognition_ready(cfg.whisper_model):
                 result += "\n" + recognition_status(cfg.whisper_model)

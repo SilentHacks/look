@@ -4,7 +4,7 @@
 
 MediaPipe Face Landmarker (Face Mesh V2 with iris landmarks), followed by our own
 personal ridge regressor. The model card explicitly licenses the weights under
-Apache-2.0; Tasks Vision is also Apache-2.0. Google does not publish separate
+Apache-2.0. Tasks Vision is also Apache-2.0. Google does not publish separate
 training-image dataset terms. See [third-party notices](../THIRD_PARTY_NOTICES.md)
 for primary sources, pinned versions, hashes and the full upstream licence.
 No GazeFollower/GazeFollower2, Glance, EyeTrax or WebEyeTrack code is used.
@@ -12,19 +12,19 @@ No GazeFollower/GazeFollower2, Glance, EyeTrax or WebEyeTrack code is used.
 This avoids uncertain gaze-checkpoint provenance and Python MediaPipe wheel
 compatibility. Tasks Vision 0.10.32 WASM/SIMD runs on CPU in a **separate Chrome
 process and private temporary profile**. The supported beta requires native arm64
-Python on an Apple Silicon Mac and standard Google Chrome in Applications;
-platform/Chrome preflight runs before asset preparation. No new Python runtime or
+Python on an Apple Silicon Mac and standard Google Chrome in Applications.
+Platform/Chrome preflight runs before asset preparation. No new Python runtime or
 Python dependency is installed. See the README for version evidence and unverified platforms.
 
 Before updating or reloading the plugin, quit Hermes and run `hermes gateway stop`
 first, then restart Hermes. Hermes runs a background gateway that keeps old code
-loaded even after the terminal closes; closing the terminal alone is not a reload.
+loaded even after the terminal closes. Closing the terminal alone is not a reload.
 
 During ordinary plugin use, only explicit `/look mode webcam`, `/look calibrate`,
 `/look setup eyes` or protected camera controls start the camera. Registration,
 model tools, status and changing configuration do not.
-The owned window requests video only, never audio. It captures and infers locally;
-images never leave it in ordinary tracking mode. The separate, explicit
+The owned window requests video only, never audio. It captures and infers locally.
+Images never leave it in ordinary tracking mode. The separate, explicit
 [guided dataset recorder](GAZE_RECORDING.md) saves camera video locally.
 Only 130 bounded numeric biometric features cross an exact-context, nonce-checked
 `__hermesGazeIntent` CDP binding: 128 normalized left-eye appearance values followed
@@ -34,14 +34,14 @@ There is no HTTP sample endpoint. The camera
 profile has extensions disabled and HTTP(S) requests blocked after startup.
 Only `/look setup eyes` authorizes Python to download missing pinned files (~11 MB)
 from official sources, then open the camera. Normal startup and developer
-evaluation/recording verify cache-only assets; verified caches work offline.
+evaluation/recording verify cache-only assets. Verified caches work offline.
 Preparation runs in a worker. `/look tracker` and the protected Eye tracking
 controls distinguish preparing files, opening the window, loading the model,
 opening camera access and failure. No percentage or permission outcome is invented.
 **Use cursor**, `/look cursor`, Stop and disconnect revoke startup before slow work
 can launch Chrome or hand off to camera access. A blocked network read may take
-up to its 60-second socket timeout to finish; cursor use does not wait for it.
-Retry waits until that cancelled worker exits; it never starts a second worker.
+up to its 60-second socket timeout to finish. Cursor use does not wait for it.
+Retry waits until that cancelled worker exits. It never starts a second worker.
 Failures do not silently switch the evidence source or overwrite saved calibration.
 `/look diagnostics` retains the failure stage, exception/error category, optional
 OS error/exit code and bounded native failure categories. No raw Chrome stderr,
@@ -56,14 +56,15 @@ unload and owned-document replacement close only the camera process we started.
 
 ## Calibration and coordinates
 
-`/look calibrate` switches to webcam mode, starts the owned camera window and
-brings it forward; `/look mode webcam` opens the same flow. Maximize it, keep its zoom at
-100%, and click **Start calibration** (**Calibrate again** for a saved setup). At each dot, look at it, tap Space and keep looking for
-about one second. Each dot keeps its concise instruction underneath: **Tap Space**,
-**Keep looking**, or a retry cue. One current-target count advances only after Python
-accepts the observation. A dot without enough usable frames asks again.
-Esc or **Cancel** cancels; moving/resizing/hiding the window
-cancels rather than applying wrong screen targets. The trusted opening click
+Run `/look calibrate` to open the camera window. `/look mode webcam` opens the same setup.
+
+1. Maximize the window and keep Chrome zoom at 100%.
+2. Choose **Start calibration**, or **Calibrate again** for a saved setup.
+3. Look at each dot, tap Space and keep looking until it moves, about one second.
+   If your eyes aren’t visible long enough, the dot asks you to try again.
+
+Press Esc or choose **Cancel** to stop. Moving, resizing or hiding the window also
+cancels the attempt. Your saved calibration stays unchanged. The trusted opening click
 measures the actual viewport origin, including browser chrome. Nine targets are
 converted to desktop logical coordinates using that origin, not a fullscreen or
 `outerHeight - innerHeight` guess.
@@ -78,35 +79,27 @@ It tests five positions that differ from the training nine, in two orders (ten e
 takes the median of its valid estimates. Missing, off-screen or mostly absent trials
 fail. Estimates stay in memory for that trial and never refit anything. Named
 constants in `tracker/webcam_gaze.py` are **provisional pending a real-camera
-trial**: a trial hits inside one cell of a 3×3 screen grid around its target; eight
-of ten pass; fewer than six valid trials cannot judge.
+trial**: a trial hits inside one cell of a 3×3 screen grid around its target. Eight
+of ten pass. Fewer than six valid trials cannot judge.
 
 The result states whether calibration was saved, whether a saved calibration passed,
 or why another attempt is needed. No circles or miss lines are shown. A weak or
 unmeasurable new calibration offers **Calibrate again** or **Use cursor** and
 keeps any earlier saved calibration. A cancelled or failed attempt saves nothing.
 Moving, resizing or hiding the window during measurement or at the stopped boundary
-discards the candidate. Saved setup offers **Check** or **Calibrate again**;
-checking goes straight to ten targets and never rewrites the saved profile.
+discards the candidate. Saved setup offers **Check** or **Calibrate again**.
+Checking goes straight to ten targets and never rewrites the saved profile.
 
-**Try a question** opens the guided Saturn example. It is silent practice only:
-no microphone, transcription, model call or question injection. A tap or early
-release asks you to try the hold again; a completed hold shows **Listening**,
-the suggested question, then a labelled example answer on release. Escape, blur
-or face loss interrupts rehearsal without claiming completion. Completed practice
-uses the inbox's existing coach state so browsing does not repeat the hold lesson;
-skipping does not claim that it was taught. Real browsing **Listening** still
-requires the first native microphone buffer.
+**Try a question** opens a practice question about Saturn. Your microphone stays off.
+Hold Space, wait for **Listening**, then release it to see an example answer.
+A short tap or early release lets you try again. Esc, switching windows or moving
+your face out of view interrupts practice. No question is sent to Hermes.
 
-**Return to browsing** and **Skip practice** activate the exact companion page
-captured before opening setup, including its document, route, bound Hermes connection
-and setup generation. One foreground request is followed by at most three seconds
-of focus/visibility observations and a protected-renderer check. An acknowledgement
-alone is not success. A closed/replaced page, disconnect, changed setup or unobserved
-focus keeps explicit recovery; **Try again** rechecks the same destination.
-**Open start page** explicitly creates/reuses a small local Look page in the
-owned companion, waits for attachment and checks foreground ownership. It never
-navigates an unrelated tab or restores a missing source by URL.
+Choose **Return to browsing** or **Skip practice** to return to the page where you
+started setup. The camera keeps running in its own window.
+If that page has closed, changed or can’t be brought forward, choose **Try again**
+to check it again or **Open start page** to open Look’s local page instead.
+Look does not navigate an unrelated tab or reopen the missing page by its URL.
 
 The same camera process, document and video stream stay live behind browsing.
 Its retained **Eye tracking** page offers return, recalibration and **Use cursor**.
@@ -114,15 +107,15 @@ In the companion, press **Q** before the first answer, or choose **Eye tracking*
 in an answer's footer, to open camera controls and **Use cursor**. Camera/session
 loss revokes setup return and stops the corresponding runtime without joining
 the camera reader under the inbox lock. The saved calibration remains unchanged.
-Focused companion buttons accept trusted Enter/Space input; those keys never approve
-website actions. Status commands do not replace an ongoing setup's connection;
-explicit reconnects do. Restarting a closed camera document gives completion a
+Focused companion buttons accept trusted Enter/Space input. Those keys never approve
+website actions. Status commands do not replace an ongoing setup's connection.
+Explicit reconnects do. Restarting a closed camera document gives completion a
 fresh setup generation rather than reusing an earlier return attempt.
 
 **Use cursor** is available at entry and on unsuccessful results/recovery.
 Camera errors stay on screen with a plain state and **Try again**.
 If the window closes or startup returns `stopped`, the command offers
-**Try again** with `/look calibrate`; it does not claim calibration is ready.
+**Try again** with `/look calibrate`. It does not claim calibration is ready.
 
 The accepted profile is stored atomically at
 `${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`, mode `0600`
@@ -140,7 +133,7 @@ On each new companion tab, move the pointer once **in the page** to measure the
 viewport origin from a trusted mouse event. Repeat after resizing, zooming or
 changing browser chrome/side panels. Window movement on the same display is
 accounted for by its screen-position delta. The scale from desktop logical pixels
-to page CSS pixels is `page.devicePixelRatio / calibration.devicePixelRatio`;
+to page CSS pixels is `page.devicePixelRatio / calibration.devicePixelRatio`.
 Retina pixels are not multiplied twice. The mapper adds the current scroll offset
 for document coordinates. A different display or pinch zoom is rejected rather
 than guessed. This initial pointer measurement is a deliberate usability limit.
@@ -154,7 +147,7 @@ start, compatible with audio word epochs. Camera exposure-to-inference latency i
 not measured. Python maps each prediction only into the currently focused owned
 Chrome document, delivers its soft region, and calls `session.ingest(...)`.
 Question release freezes that document's camera fixations/candidates before ASR.
-The existing Bayesian fusion and temporal alignment resolve the question; the
+The existing Bayesian fusion and temporal alignment resolve the question. The
 answering model gets its bounded evidence. Webcam research is read-only. Cursor
 mode is permanent and retains its exact-identity path.
 Frozen ASR results cannot change the live mode or restore action authority,
@@ -162,8 +155,8 @@ including a simulated question completed after switching to webcam. Choosing a
 simulated target requires both the saved resolution and the live mode to be simulated.
 
 `tracker.webcam_gaze.GazeEstimator` is the swappable prediction/calibration
-boundary. `WebcamHost` accepts an estimator and an observation-runtime source;
-the shipped `AppearanceEstimator` has model id
+boundary. `WebcamHost` accepts an estimator and an observation-runtime source.
+The shipped `AppearanceEstimator` has model id
 `mediapipe-face-v2-left-appearance-iris-ridge10-1`. It uses **nine-point personal,
 standardized linear ridge λ10, strict off-screen rejection, no smoothing**.
 `browser/webcam_features.js` owns extraction for both live video and offline images:
@@ -180,7 +173,7 @@ pseudonymous dataset with glasses/condition metadata and end validation.
 [Offline evaluation](GAZE_EVAL.md) compares personal calibration budgets and
 within-session, cross-condition and cross-glasses transfer, with per-person
 summaries. [Reserved offline validation](GAZE_TUNING_RESEARCH.md) motivated this
-cutover; it is one person's recorded footage, not population or live accuracy.
+cutover. It is one person's recorded footage, not population or live accuracy.
 Fake devices prove plumbing only. Broad-region gaze remains experimental, not
 button precision or unattended posture reuse.
 
@@ -191,13 +184,13 @@ nine-point recalibration after moving instead.
 ## Hands-on checklist (real hardware: user only)
 
 1. Start a normal Hermes conversation, then `/look`.
-2. `/look setup eyes` on first use (may download ~11 MB); later `/look mode webcam`
+2. `/look setup eyes` on first use (may download ~11 MB). Later `/look mode webcam`
    uses verified cached files. Allow **camera only** in the separate tracker window.
-   Confirm the camera indicator; no website needs a camera permission.
+   Confirm the camera indicator. No website needs a camera permission.
 3. `/look calibrate`: maximize that window and complete the dots and the short
    check. Note the plain result and whether it matched how well it followed you.
    Stay in the same posture and lighting. Try Practise and losing your face.
-4. Return to a supported Chrome page; move the pointer once in its content.
+4. Return to a supported Chrome page. Move the pointer once in its content.
    Leave the pointer elsewhere, look at a broad region, hold Space, wait for
    Listening, and ask about “this”. Judge a roughly 3×3–4×4 region, not buttons.
 5. `/look diagnostics`: `samples` should rise, `sample_age_seconds` stay fresh,
@@ -207,24 +200,24 @@ nine-point recalibration after moving instead.
    After moving, leaning back or changing camera position/glasses, recalibrate.
    Record actual successes/errors before making any accuracy or comfort claim.
 7. `/look cursor`: confirm the camera indicator goes off and exact cursor
-   questions still work. `/look stop` also detaches the companion; browser tabs stay open.
+   questions still work. `/look stop` also detaches the companion. Browser tabs stay open.
 
 ### When gaze is not fresh
 
 `/look diagnostics` includes cumulative numeric `drops` counters for this tracker
 instance, retained across stop/restart. Compare two readings while the companion
-page has focus; old counts from calibration or another application are normal.
+page has focus. Old counts from calibration or another application are normal.
 No coordinates, features, images or calibration values are included.
 
 Startup regressions use mocked slow assets, cancellation, missing Chrome and
-connection races; `tests/webcam_startup_chrome.py` exercises protected recovery
+connection races. `tests/webcam_startup_chrome.py` exercises protected recovery
 without opening capture devices. `tests/calibration_return_chrome.py` uses fake
 video and a synthetic saved fit for camera/handoff checks. These do not establish
 real macOS permission behavior, physical camera release timing or live gaze accuracy.
 
 - `no_features`: no usable face/eyes, including blinks.
-- `uncalibrated`, `calibrating`: waiting for a profile or collecting calibration;
-  these frames intentionally do not become predictions.
+- `uncalibrated`, `calibrating`: waiting for a profile or collecting calibration.
+  These frames intentionally do not become predictions.
 - `offscreen`: the fitted estimator predicted outside the calibrated screen.
   Estimates are still rejected, not clamped. `prediction_rejected` is the
   corresponding generic rejection for a replacement estimator.
@@ -242,9 +235,9 @@ real macOS permission behavior, physical camera release timing or live gaze accu
   invalid viewport information, interrupted transport, a timed-out delivery, or
   page-side refusal. Navigation/focus changes can interrupt a captured delivery.
 
-With a valid page anchor but no fresh delivery, the page says only
-“No fresh gaze. Check /look status.” A size change or pinch zoom gets its own
-instruction. Missing gaze still blocks talking; there is no cursor/center fallback.
+With a valid page anchor but no fresh delivery, the page says
+“Eye tracking isn’t ready. Check /look status.” A size change or pinch zoom gets its own
+instruction. Missing gaze still blocks talking. There is no cursor/center fallback.
 
 
 ## Reproducible fake-device proof
@@ -255,7 +248,7 @@ instruction. Missing gaze still blocks talking; there is no cursor/center fallba
 ```
 
 `tests/calibration_chrome.py --out DIR` is headless and exercises every calibration,
-check, practice, failure and restart state with a fake camera; only `predict` is scripted
+check, practice, failure and restart state with a fake camera. Only `predict` is scripted
 for the passing path. The headed probe below still needs a separate serial run.
 `tests/calibration_return_chrome.py --headed --out DIR` checks the real completion
 binding and native foreground return with fake video and a synthetic saved fit:
@@ -274,7 +267,7 @@ delivery, specific missing/changed-anchor guidance, interruption and restart wit
 the saved profile, hidden-tab samples, wall-clock ingestion, foreground ownership
 and return to cursor. Run it separately from other headed Chrome probes: those
 processes can steal native OS focus.
-Screenshots and a small results JSON go to the output directory; calibration and
+Screenshots and a small results JSON go to the output directory. Calibration and
 fake video are temporary and removed.
 
 The appearance-live milestone did **not** run this Chrome probe: another builder
@@ -282,10 +275,10 @@ was using private test windows. Schedule it serially before claiming live proof.
 The camera window's isolated `__HERMES_WEBCAM__.status()` now exposes aggregate
 `frame_ms` (WASM + feature extraction wall time), `feature_ms` (iris + appearance
 extraction wall time) and `sample_hz` (processed frames over elapsed inference-start
-time). The probe saves those numeric aggregates in `camera_runtime`; none contain
+time). The probe saves those numeric aggregates in `camera_runtime`. None contain
 features, coordinates or images. Live per-frame cost and fake-camera sample rate
 remain unmeasured until that deferred run. These timers exclude exposure, binding
-serialization/delivery and Python prediction; they are not CPU or end-to-end latency.
+serialization/delivery and Python prediction. They are not CPU or end-to-end latency.
 
 **Human gaze accuracy, real-camera latency/heat and posture robustness are not
 measured by a fake camera.** The 3×3–4×4 target is a design goal, not a result.

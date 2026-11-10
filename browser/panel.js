@@ -505,8 +505,8 @@
       card.setAttribute('aria-label', 'Confirm page action');
       const head = h('div', 'head');
       head.append(h('div', 'title', m.label || 'This control'));
-      const sub = h('div', 'sub', 'Hermes wants to press this on the page. Click to allow it.');
-      const summary = h('div', 'sub', m.summary || 'No nonsensitive fields on this page.');
+      const sub = h('div', 'sub', 'Hermes wants to click this control. Review the details, then choose Confirm to allow it.');
+      const summary = h('div', 'sub', m.summary || 'No non-sensitive form fields to review.');
       summary.style.whiteSpace = 'pre-wrap';
       summary.style.overflowWrap = 'anywhere';
       summary.style.maxHeight = `${Math.max(96, Number(m.maxBody) || 300)}px`;
@@ -535,7 +535,7 @@
       shownKey = 'doing'; view = 'doing';
       const card = h('div', 'card arrive quiet');
       const head = h('div', 'head');
-      head.append(h('div', 'title', 'Doing'));
+      head.append(h('div', 'title', 'Working'));
       const label = h('div', 'sub', m.label || 'Working on this page');
       label.dataset.doingLabel = '';
       const choices = h('div', 'choices');
@@ -599,11 +599,11 @@
     if (shownKey === key) return;
     clearView(); shownKey = key; view = 'tracking';
     const titles = {preparing: 'Preparing eye tracking', starting: 'Opening camera window',
-      loading: 'Loading eye tracking', camera: 'Opening camera — allow access if asked',
+      loading: 'Loading eye tracking', camera: 'Opening camera. Allow access if asked.',
       running: 'Eye tracking', stopping: 'Camera is stopping', failed: 'Camera unavailable', stopped: 'Camera stopped'};
     const card = h('div', 'card quiet');
     const head = h('div', 'head'); head.append(h('div', 'title',
-      m.setupRequired ? 'Files missing — /look setup eyes' : titles[state] || 'Camera stopped'));
+      m.setupRequired ? 'Missing files. Run /look setup eyes' : titles[state] || 'Camera stopped'));
     const choices = h('div', 'choices');
     const actions = m.setupRequired || ['preparing', 'starting', 'loading', 'camera', 'stopping'].includes(state)
       ? [] : [['show_camera', state === 'failed' || state === 'stopped' ? 'Try again' : 'Open camera window']];

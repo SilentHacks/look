@@ -43,7 +43,7 @@ def _notice(snapshot):
 class VoiceTurns:
     MAX_PENDING = 8
     MAX_TEXT = 12000
-    TRUNCATION_NOTICE = "Answer shortened here. Full response in Hermes history."
+    TRUNCATION_NOTICE = "This answer is shortened. You can read the full response in Hermes history."
     MAX_SNAPSHOT_BYTES = 262144
 
     def __init__(self, ctx: Any, session: Any) -> None:
@@ -144,7 +144,7 @@ class VoiceTurns:
             worker.join(1)
             if worker.is_alive():
                 self.capture_status("failed")
-                return {"ok": False, "error": "Read aloud is still stopping; try talking again."}
+                return {"ok": False, "error": "Read aloud is still stopping. Wait, then try talking again."}
         return {"ok": True}
 
     def publish(self):
@@ -646,7 +646,7 @@ class VoiceTurns:
                 if run is None:
                     return {"ok": False, "error": "No failed request to retry or skip"}
                 if run.get("outcome_unknown") or self.active is run and run.get("native_input") is not None:
-                    return {"ok": False, "error": "This question's outcome is unresolved. Reconnect; do not resend it."}
+                    return {"ok": False, "error": "This question's outcome is unresolved. Reconnect. Do not send it again."}
                 if action == "retry" and not run["utterance"]:
                     if not run.get("transcribe") or not self.connected:
                         return {"ok": False, "error": "Capture is no longer available"}

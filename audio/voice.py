@@ -70,7 +70,7 @@ MAX_AUDIO_BYTES = 12 * 1024 * 1024
 def get_whisper_model(model_name: str = _DEFAULT_MODEL) -> Any:
     """Lazy per-name singleton loader for the local faster-whisper model."""
     if model_name not in WHISPER:
-        raise ValueError("Supported speech models are base.en and tiny.en; custom repositories and paths are unsupported.")
+        raise ValueError("Supported speech models are base.en and tiny.en. Custom repositories and paths are not supported.")
     with _MODEL_LOCK:
         model = _WHISPER_MODELS.get(model_name)
         if model is None:
@@ -146,7 +146,7 @@ def recognition_status(model_name=_DEFAULT_MODEL):
         return "Preparing local speech recognition. You can type with Right Option while you wait."
     if _PREPARATION_ERROR:
         return _PREPARATION_ERROR
-    return "Local speech recognition is not ready. Run /look setup; use Right Option to type."
+    return "Local speech recognition is not ready. Run /look setup, or press Right Option to type."
 
 
 def _prepare_recognition(model_name, *, download, report=None):
@@ -194,7 +194,7 @@ def _prepare_recognition(model_name, *, download, report=None):
 
         try:
             if model_name not in WHISPER:
-                raise ValueError("Supported speech models are base.en and tiny.en; custom models are unsupported.")
+                raise ValueError("Supported speech models are base.en and tiny.en. Custom models are not supported.")
             # Explicit retries may repair unavailable runtimes, never bypass integrity.
             if download:
                 with _COREML_LOCK:

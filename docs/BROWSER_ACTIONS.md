@@ -47,7 +47,7 @@ executing; the model can recover with its new epoch. Executed clicks return fres
 structure/epoch, including non-link buttons that change routes or documents.
 Navigation, scroll and recapture do not invent a pointer hit. Detached/changed controls fail honestly.
 Lost mutation replies mean unknown outcome, revoke the task and are never replayed.
-The existing glass surface shows Doing and Stop; Esc stops further task steps.
+The private card shows the current action and Stop. Esc stops further task steps.
 Already completed typing/navigation cannot be undone by Stop.
 Simulated Lens selection is read-only too: the old selector-based `choose` click
 and its `execute` argument are removed. There is no parallel legacy action path.
@@ -122,24 +122,24 @@ comparison demonstrated. This plugin cannot sandbox an arbitrary local process.
 1. Start a new Hermes conversation, send one ordinary message, then `/gaze connect`.
    Use the new companion Chrome, not your everyday Chrome. Wait for Listening
    before speaking.
-2. In that Chrome, sign into Gmail yourself once. Enter passwords/2FA yourself;
+2. In that Chrome, sign into Gmail yourself once. Enter passwords and 2FA yourself.
    Hermes must not read or type them. The companion profile retains your login.
    Never connect Hermes's generic browser tools to this window.
 3. Try a harmless form: point and say “fill this out, prepare it for review”.
    Check remembered details and that Hermes asks for anything missing. Inspect
-   the card; Cancel the first attempt.
+   the review card, then cancel the first attempt.
 4. Ask “open a new tab and write an email to [your test recipient] about [topic],
    but do not send”. Check that it is a genuinely new tab and that recipient,
    subject and body match the card. Cancel, or consciously click Confirm.
 5. Change a draft after its card appears: confirmation must fail, not send changed
-   content. Ask again for a fresh review. Try Esc/Stop during a multi-step task;
-   no later steps or pending approval should remain.
+   content. Ask again for a fresh review. Try Esc or Stop during a multi-step task.
+   No later steps or pending approval should remain.
 6. Switch tabs mid-task: it must not type into the newly focused page. Return and
    ask again after document/route changes. Unsupported controls should fail
-   honestly. Typing itself can trigger rare-site effects; start with harmless data.
+   honestly. Start with harmless data, since typing alone can trigger effects on some sites.
 
 All automated verification uses owned local fixtures, fake personal details and
-fake devices. Gmail and real account behavior require this user check; agents
+fake devices. Gmail and real account behavior require this user check. Agents
 must not perform it.
 
 ## Historical production measurements before Beam acceptance

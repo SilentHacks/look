@@ -649,7 +649,7 @@ class WebcamHost:
                 raise FileNotFoundError("Chrome missing")
             with tempfile.TemporaryDirectory(prefix="hermes-webcam-", ignore_cleanup_errors=True) as profile:
                 host = Path(profile) / "tracker.html"
-                host.write_text('<!doctype html><meta charset="utf-8"><title>Look — Eye tracking</title>')
+                host.write_text('<!doctype html><meta charset="utf-8"><title>Look eye tracking</title>')
                 args = [_CHROME, f"--user-data-dir={profile}", "--remote-debugging-port=0", "--no-first-run",
                         "--no-default-browser-check", "--disable-extensions", "--allow-file-access-from-files", "--start-maximized",
                         "--disable-background-timer-throttling", "--disable-renderer-backgrounding",

@@ -36,7 +36,7 @@ class Microphone:
             try:
                 loss = check_loss()
             except Exception:
-                return {"ok": False, "error": "Could not check the focused Chrome tab; try again"}
+                return {"ok": False, "error": "Could not check the focused Chrome tab. Try again."}
             if loss:
                 return {"ok": False, "error": loss}
             with self._audio_lock:

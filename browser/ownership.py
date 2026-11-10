@@ -93,7 +93,7 @@ class OwnedChrome:
                     f"--hermes-gaze-owner={self._token}"}
         if not self._token or not isinstance(args, list) or not expected.issubset(args):
             raise OwnershipError("Debugging endpoint is another browser, not Look's owned companion. "
-                                 "Leave it running; choose a free local cdp_url port, or close only Look's old companion and retry.")
+                                 "Leave it running. Choose a free local cdp_url port, or close only Look's old companion and retry.")
 
     def _exchange(self, method: str, params: dict) -> dict:
         self._sequence += 1
@@ -122,7 +122,7 @@ class OwnedChrome:
         ws_url = version.get("webSocketDebuggerUrl", "")
         prefix = self.http_url.replace("http://", "ws://") + "/devtools/browser/"
         if not isinstance(ws_url, str) or not re.fullmatch(re.escape(prefix) + r"[a-zA-Z0-9-]+", ws_url):
-            raise OwnershipError("Debugging port is not a local Chrome browser endpoint. Leave its service running; choose a free cdp_url port.")
+            raise OwnershipError("The debugging port is not a local Chrome endpoint. Leave its service running and choose a free cdp_url port.")
         self._ws = connect(ws_url, open_timeout=2, close_timeout=1, max_size=1024 * 1024, proxy=None)
         try:
             self.verify_arguments(self._exchange("Browser.getBrowserCommandLine", {}))
@@ -148,8 +148,8 @@ class OwnedChrome:
                     self.close()
                 if isinstance(exc, OwnershipError):
                     raise
-                raise OwnershipError("Companion ownership could not be verified. Leave unrelated services running; "
-                                     "close only Look's old companion or choose a free local cdp_url port, then /look start.") from None
+                raise OwnershipError("Look couldn’t verify its companion browser. Leave unrelated services running. "
+                                     "Close only Look's old companion or choose a free local cdp_url port, then run /look start.") from None
 
     def available(self) -> bool:
         with self._lock:
@@ -199,7 +199,7 @@ class OwnedChrome:
                     except (OSError, ValueError):
                         time.sleep(.1)
                 raise OwnershipError("Look's Chrome did not start or its profile is already open. "
-                                     "Close only the Look companion windows and retry /look start; keep unrelated browsers open.")
+                                     "Close only the Look companion windows and retry /look start. Keep unrelated browsers open.")
             except Exception as exc:
                 if acquired:
                     self.close()
@@ -217,7 +217,7 @@ class OwnedChrome:
                     self._ws.close()
                     self._ws = None
                 # The command may have executed. Never reconnect/replay it here.
-                raise OwnershipError("Companion connection lost; outcome unknown. Stop Look and /look start; do not repeat an action automatically.") from None
+                raise OwnershipError("Companion connection lost with an unknown outcome. Run /look stop, then /look start. Do not repeat an action automatically.") from None
 
     def close(self) -> None:
         with self._lock:

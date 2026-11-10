@@ -22,10 +22,10 @@ HELP = """/look · /look start     Start in Chrome
 /look start --existing   Use my Chrome (shows disclosure first)
 /look start --extension  Pair the Look development extension
 /look start --separate   Use separate Look Chrome
-/look stop              Stop Look; keep browser tabs
+/look stop              Stop Look and keep browser tabs open
 /look status            Show current state
 /look calibrate         Set up eye tracking
-/look cursor            Turn off the camera; use the pointer
+/look cursor            Turn off the camera and use the pointer
 /look setup             Prepare local speech recognition
 /look setup extension   Prepare the existing-Chrome extension
 /look setup eyes        Prepare eye tracking and open its camera
@@ -39,9 +39,10 @@ ADVANCED_HELP = """/look demo                         Open the practice dashboar
 /look listen                       Record and resolve a short question
 /look benchmark                    Run the simulated benchmark
 /look diagnostics timing           Save recent release traces
-/gaze remains an alias for /look. connect=start; disconnect=stop; voice=listen; timing=diagnostics timing.
+/gaze is an alias for /look.
+Other aliases: connect=start, disconnect=stop, voice=listen, timing=diagnostics timing.
 Shell: hermes look status|diagnostics|setup-extension [--uninstall]|setup-speech|demo|resolve|listen|benchmark.
-Start and stop inside Hermes; shell commands do not bind or stop a running conversation."""
+Use start and stop inside Hermes to control the current conversation."""
 
 
 def _config() -> GazeConfig:
@@ -57,19 +58,19 @@ def _first_run_guide(session, *, report=None) -> str:
     lines = [platform_notice()] if not apple_silicon_mac() else []
     lines.append("Local speech setup may download " + (
         "~465 MB (fallbacks up to 2.47 GB)." if apple_silicon_mac() else
-        "~148 MB for base.en (~78 MB for tiny.en).") + " No devices open.")
+        "~148 MB for base.en (~78 MB for tiny.en).") + " Your camera and microphone stay off.")
     if platform.system() == "Darwin" and not Path(
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").is_file():
         lines.append("Install Google Chrome in Applications.")
     if _missing_modules():
-        lines.append("Dependencies missing. Quit Hermes; run hermes pm install and "
+        lines.append("Some dependencies are missing. Quit Hermes, run hermes pm install and "
                      "hermes plugins enable hermes-gaze, then restart Hermes.")
     voice.prepare_recognition(_config().whisper_model, report=report)
     lines.append(voice.recognition_status(_config().whisper_model))
     if not session.cdp.is_connected:
-        lines.append("Next: /look start.")
+        lines.append("Run /look start when you’re ready.")
     lines.append("Questions and page context go to your Hermes model and may stay in history.")
-    lines.append("/look help for commands; /look diagnostics for troubleshooting.")
+    lines.append("Use /look help for commands or /look diagnostics for troubleshooting.")
     return "\n".join(lines)
 
 
@@ -84,7 +85,7 @@ def _tracker_summary(session) -> str:
     status = session.webcam_status()
     state = status["state"]
     if status.get("error", "").startswith("Eye tracking files missing"):
-        return "Eye tracking files missing. /look setup eyes downloads them and opens the camera; /look cursor to use the pointer."
+        return "Eye tracking files are missing. Run /look setup eyes to download them and open the camera, or /look cursor to use the pointer."
     if status.get("diagnostic", {}).get("stage") == "preflight":
         return status["error"]  # Static, server-owned platform/Chrome guidance.
     if state == "preparing":
@@ -93,14 +94,14 @@ def _tracker_summary(session) -> str:
         return "Camera is stopping. /look cursor to use the pointer."
     if state in ("failed", "stopped"):
         if status.get("error") or state == "failed":
-            return "Camera unavailable. /look calibrate to retry; /look cursor to use the pointer. Details: /look diagnostics."
-        return "Camera stopped. /look calibrate to retry; /look cursor to use the pointer."
+            return "The camera isn’t available. Run /look calibrate to try again or /look cursor to use the pointer. For details, use /look diagnostics."
+        return "Camera stopped. Run /look calibrate to try again or /look cursor to use the pointer."
     if state == "starting":
         return "Opening the camera window. /look cursor to cancel."
     if state == "loading":
         return "Loading eye tracking. /look cursor to cancel."
     if state == "camera":
-        return "Opening camera. Allow access if asked; /look cursor to cancel."
+        return "Opening the camera. Allow access if asked. Run /look cursor to cancel."
     if not status.get("calibrated") or status.get("calibration_message"):
         return "Eye tracking needs calibration. Continue in the camera window."
     return "Eye tracking is on."
@@ -122,12 +123,12 @@ def _setup_extension(*, remove=False):
         return 1, str(exc)
     except OSError:
         return 1, ("Look extension setup could not finish. /look stop in every Hermes process, then try again. "
-                "Check file access if it still fails; docs/CHROME_EXTENSION.md has recovery steps.")
+                "If it still fails, check file access. See docs/CHROME_EXTENSION.md for recovery steps.")
     return 0, ("Look extension prepared. In Chrome: chrome://extensions → Developer mode → Load unpacked.\n"
             "Select this folder (or Reload Look if already installed):\n"
             + str(install_directory() / "unpacked") +
             "\nThen open an ordinary web tab and run /look start --extension in this conversation. "
-            "Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
+            "Chrome grants broad debugging access. Question evidence goes to your model and may stay in Hermes history.")
 
 
 def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str:
@@ -179,10 +180,10 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         try:
             session.cdp.start_extension(on_ready=on_ready, on_error=on_error)
         except (OSError, ValueError):
-            return "Extension connection unavailable. /look stop, then /look setup extension; retry /look start --extension."
+            return "The extension couldn’t connect. Run /look stop, then /look setup extension, then /look start --extension."
         return ("Open Look from Chrome’s Extensions menu on the web tab you want to use and choose Connect this tab within 120 seconds. "
                 "/look stop cancels. "
-                "Chrome grants broad debugging access; question evidence goes to your model and may stay in Hermes history.")
+                "Chrome grants broad debugging access. Question evidence goes to your model and may stay in Hermes history.")
 
     if sub in ("start", "connect") and (tail or session.cdp.source == "existing"):
         from .browser.consent import DISCLOSURE, PREPARE
@@ -217,8 +218,8 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
                 ready = session.ensure_overlay()
         except (OSError, ValueError) as exc:
             return str(exc)
-        result = ("Look is ready in Chrome. Hold Space; wait for Listening, then speak."
-                  if ready else "Chrome could not attach. Open an ordinary page in the companion, then /look start.")
+        result = ("Look is ready in Chrome. Hold Space, wait for Listening, then speak."
+                  if ready else "Look couldn’t connect to a page. Open a web page in Look’s Chrome, then run /look start.")
         return "\n".join(filter(None, (platform_notice(), result)))
 
     if sub in ("stop", "disconnect") and not tail:
@@ -226,7 +227,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         session.close()
         session.configure(mode="hover")
         get_shared_server().stop()
-        return ("Look disconnected; Chrome and tabs remain. Remote debugging may still be enabled. "
+        return ("Look disconnected. Chrome and your tabs are still open. Remote debugging may still be enabled. "
                 "Turn it off at chrome://inspect/#remote-debugging."
                 if session.cdp.source == "existing" else "Look stopped. Browser tabs are still open.")
 
@@ -237,7 +238,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
                 return "Look is ready in the selected Chrome tabs."
             return status["error"] or ("Waiting for the Look extension. /look stop cancels."
                                        if status["state"] == "waiting" else
-                                       "Look extension disconnected. /look start --extension to pair again explicitly.")
+                                       "Look extension disconnected. Run /look start --extension to connect again.")
         if session.cdp.source == "existing":
             return _existing_status(session)
         if not session.cdp.is_connected:
@@ -284,7 +285,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
             return "Using the pointer. Camera off." if mode == "hover" else "Using simulated gaze. Camera off."
         status = session.start_webcam(download=sub == "setup")
         if sub == "setup" and status["state"] == "preparing":
-            return "Preparing eye tracking; may download ~11 MB, then open the camera. /look cursor to cancel."
+            return "Preparing eye tracking. This may download about 11 MB, then open the camera. Run /look cursor to cancel."
         if status["state"] == "running":
             return "Continue in the camera window."
         return _tracker_summary(session)
@@ -300,7 +301,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         return handle_gaze_resolve({"utterance": " ".join(argv[1:]) or "What happens if I press this?"})
     if sub in ("listen", "voice") and not tail:
         return handle_gaze_resolve({"record_voice": True, "duration_s": 2.8})
-    return "Unknown command or option. /look help shows commands; /look help advanced shows more."
+    return "That command or option isn’t recognized. Use /look help for commands or /look help advanced for more."
 
 
 def _existing_status(session) -> str:
@@ -308,12 +309,12 @@ def _existing_status(session) -> str:
     if session.cdp.is_connected:
         return "Look is ready in your Chrome. Point and ask."
     if status["state"] in ("idle", "discovering"):
-        return "Looking for Chrome. /look status checks progress; /look stop cancels."
+        return "Looking for Chrome. Run /look status to check progress or /look stop to cancel."
     if status["state"] == "waiting":
         return "Waiting for Chrome approval (up to 120 seconds). Approve only your request. /look stop to cancel."
     if status["state"] in ("connecting", "connected"):
-        return "Connecting to your Chrome. Open an ordinary web page; /look status checks readiness, /look stop cancels."
-    return status["error"] or "Chrome disconnected. /look start --existing to connect again explicitly."
+        return "Connecting to Chrome. Open a web page, then run /look status to check. Run /look stop to cancel."
+    return status["error"] or "Chrome disconnected. Run /look start --existing to connect again."
 
 
 def _setup_cli(subparser: argparse.ArgumentParser) -> None:

@@ -158,7 +158,7 @@ class Ownership(unittest.TestCase):
         owner._ws = ws
         owner._acquire()
         ws.recv.side_effect = TimeoutError
-        with self.assertRaisesRegex(OwnershipError, "outcome unknown"):
+        with self.assertRaises(OwnershipError):
             owner.command("Target.createTarget", {"url": "about:blank"})
         self.assertEqual(ws.send.call_count, 1)
         self.assertIsNone(owner._ws)

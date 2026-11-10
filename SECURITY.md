@@ -9,8 +9,8 @@ sandbox. The supported trial lane and current gates are in the
 Do not post credentials, active pairing tickets, account pages, transcripts,
 recordings, calibration or full Hermes logs in a public issue.
 Use the repository's **Security → Report a vulnerability** flow if it is enabled.
-A working private reporting channel has **not been verified for this release**;
-the maintainer must enable/verify one before public announcement. If it is absent,
+A working private reporting channel has **not been verified for this release**.
+The maintainer must enable/verify one before public announcement. If it is absent,
 request a private reporting channel without publishing exploit details. No response
 time or security-update service is promised by this beta.
 
@@ -21,8 +21,8 @@ commit/blob IDs, not secret values. Never test on somebody else's account, devic
 or browser. Do not execute Send/Buy/Delete to demonstrate a report.
 
 If a real credential is exposed, revoke/rotate it with its owner before sharing
-further. Removing a file does not remove Git history or provider/host retention;
-history cleanup requires a separately approved plan.
+further. Removing a file does not remove Git history or provider/host retention.
+History cleanup requires a separately approved plan.
 
 ## Boundaries to preserve
 
@@ -32,27 +32,27 @@ history cleanup requires a separately approved plan.
   Look's endpoint. Same-user/root programs and authorized debuggers are outside
   the protected website boundary.
 - **Websites and answers are untrusted.** Private words and input live in opaque,
-  script-disabled frames; closed shadow DOM alone is not a privacy boundary.
+  script-disabled frames. Closed shadow DOM alone is not a privacy boundary.
   Page/answer text never grants a task or approves an action. Website denial of
   service (hiding/removing the host) remains possible.
 - **Identity is not a selector.** Actions retain captured tab/document/route/epoch
   ownership. Consequential/ambiguous controls need a content-bound, single-use
-  primary mouse approval. Detached identities fail; missing mutation replies are
+  primary mouse approval. Detached identities fail. Missing mutation replies are
   unknown outcomes, never safe automatic retries. Typing/GET navigation can still
   have effects on unusual sites.
 - **Stop has limits.** It cancels local capture/output/tasks/approvals, not an
   already admitted Hermes turn or an action that already executed. It is not data
   erasure. Transport loss releases intercepted input through a bounded lease.
-- **Native devices are explicit.** No website microphone; input opens only while
-  talking. The separate camera is opt-in. Live eye features/images stay local;
-  saved calibration is sensitive. No real-device proof follows from fakes.
+- **Native devices are explicit.** No website microphone. Input opens only while
+  talking. The separate camera is opt-in. Live eye features/images stay local.
+  Saved calibration is sensitive. No real-device proof follows from fakes.
 - **Local does not mean no retention.** Questions/page evidence reach the configured
   Hermes provider and can remain in Hermes history. Optional TypeSafe highlighting
-  has its own disclosure. Failed audio stays in memory for retry; MLX's temporary
+  has its own disclosure. Failed audio stays in memory for retry. MLX's temporary
   WAV can survive a crash/deletion failure. Development recording is separate and
   must never be enabled silently.
-- **Downloads and removal are separate.** Explicit setup verifies pinned assets;
-  dependency preparation can fetch packages/native wheels. Plugin removal does not
+- **Downloads and removal are separate.** Explicit setup verifies pinned assets.
+  Dependency preparation can fetch packages/native wheels. Plugin removal does not
   erase shared model caches, calibration, browser profiles or host/provider history.
 
 See [technical disclosures and data locations](docs/REFERENCE.md) and

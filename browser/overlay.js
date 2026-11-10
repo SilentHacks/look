@@ -973,7 +973,7 @@
       const label = safeLabel(node) || node.labels?.[0]?.textContent?.trim().slice(0, 100) || "Field";
       size += value.length;
       if (fields.length >= 64 || value.length > 20000 || size > 128000)
-        return {error: "Draft too large to bind safely; review and commit it yourself."};
+        return {error: "This draft is too large to review safely here. Review it on the page and submit it yourself."};
       fields.push([cursorId(node), label, value, !!node.checked, node.selectedIndex ?? null]);
       if (rendered(node)) summary.push(`${label}: ${value.length > 600 ? value.slice(0, 600) + "… (review full text on page)" : value}${["checkbox", "radio"].includes(node.type) ? node.checked ? " (selected)" : " (not selected)" : ""}`);
     }
@@ -1819,7 +1819,7 @@
     const local = S.localPending;
     const total = waiting.length + local.length;
     if (!total) return "";
-    if (inbox?.paused) return `Paused. Press Q to sort it out`;
+    if (inbox?.paused) return `Paused. Press Q to review`;
     const things = waiting.reduce((n, i) => n + Math.max(1, i.count), 0) + local.reduce((n, r) => n + Math.max(1, r.subject?.count || 1), 0);
     if (things === 1) return `Looking into ${waiting[0]?.subject || local[0].subject?.name || "this"}`;
     return `Looking into ${things} things`;
@@ -2274,7 +2274,7 @@
     inbox = event;
     if (event.coach) {
       if (event.coach.rehearsed && !S.coach.rehearsed && S.pillMode === "coach" &&
-          S.coachText === "Hold Space. Wait for Listening. Leave fields or keyboard-focused controls.") {
+          S.coachText === "Click page text, then hold Space. Wait for Listening before speaking.") {
         clearTimeout(S.coachTimer); S.coachTimer = 0; hidePill(true);
       }
       for (const key of ["heard", "answered"]) S.coach[key] = Math.max(S.coach[key], event.coach[key] || 0);
@@ -2298,7 +2298,7 @@
     if (event.session_connected && !S.coach.greeted && !S.coach.rehearsed && !event.items.length) {
       S.coach.greeted = true;
       sendCoach({greeted: true});
-      if (!S.hold) coachLine("Hold Space. Wait for Listening. Leave fields or keyboard-focused controls.", 11000);
+      if (!S.hold) coachLine("Click page text, then hold Space. Wait for Listening before speaking.", 11000);
     }
     if (event.session_connected && state.mode === "webcam" && event.tracker?.state !== previous?.tracker?.state &&
         ["preparing", "failed"].includes(event.tracker?.state) && !S.hold &&
@@ -2446,10 +2446,10 @@
   function freshWebcam() { return performance.now() - lastWebcamAt < 800 && lastWebcamAt > 0; }
   function webcamBlockMessage() {
     const reason = webcamViewport(devicePixelRatio).drop_reason;
-    if (reason === "no_page_anchor") return "Move the pointer once in this page to position webcam gaze.";
-    if (reason === "viewport_changed") return "Page size changed. Move the pointer once in this page.";
+    if (reason === "no_page_anchor") return "Move the pointer in this page once to position eye tracking.";
+    if (reason === "viewport_changed") return "The page size changed. Move the pointer in this page again.";
     if (reason === "unsupported_zoom") return "Reset pinch zoom before asking with your eyes.";
-    return "No fresh gaze. Check /look status.";
+    return "Eye tracking isn’t ready. Check /look status.";
   }
   function webcamViewport(screenDpr) {
     if (state.mode !== "webcam") return {drop_reason: "page_mode_mismatch"};
@@ -2636,7 +2636,7 @@
         S.keyDown = false;
         if (S.hold) { S.hold.tentative && dropRing(S.hold.tentative.key); for (const t of S.hold.targets) dropRing(t.key); S.hold = null; }
         if (S.pillMode === "wave") hidePill(true);
-        coachLine(msg.plain_error || "Microphone failed. Check input and permission, then try again.", 8000);
+        coachLine(msg.plain_error || "The microphone couldn’t start. Check your input device and microphone permission, then try again.", 8000);
         armRetreat();
       } else if (isListening) {
         S.micReady = true;
@@ -2650,7 +2650,7 @@
       spaceHeld = false;
       S.keyDown = false;
       resetMic();
-      const reason = msg.plain_error || msg.error || "Recording cancelled; hold Space to ask again.";
+      const reason = msg.plain_error || msg.error || "Recording cancelled. Hold Space to ask again.";
       if (S.hold) {
         S.hold.tentative && dropRing(S.hold.tentative.key);
         for (const t of S.hold.targets) dropRing(t.key);
@@ -2666,7 +2666,7 @@
       if (msg.delivery === "one_shot") {
         renderScopeOptions(msg);
         showPlainMessage(msg.explanation || "", true);
-      } else if (!msg.ok && !msg.item_id) showPlainMessage(msg.plain_error || "That recording didn’t work; hold Space and try again.");
+      } else if (!msg.ok && !msg.item_id) showPlainMessage(msg.plain_error || "That recording didn’t work. Hold Space and try again.");
       return;
     }
     if (msg.type === "confirm_action") {

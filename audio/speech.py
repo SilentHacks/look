@@ -31,7 +31,7 @@ def setup(voice="Russell"):
     prepare(VOICE_REPO, download=True, names=["voices.jsonl", "README.md"], local_dir=catalog)
     selected = _voice(catalog, voice)
     prepare(VOICE_REPO, download=True, names=[selected["filename"]], local_dir=catalog)
-    print(f"Phonon ready offline: {model}; voice {selected['name']}")
+    print(f"Read aloud is ready offline.\nVoice: {selected['name']}\nModel files: {model}")
 
 
 def _voice(catalog, voice):
@@ -109,7 +109,7 @@ class SpeechPlayback:
         if sys.platform != "darwin" or not os.access("/usr/bin/say", os.X_OK):
             report("unavailable", "", f"Phonon unavailable: {reason}. macOS say is unavailable too.")
             return
-        report("say", "Reading with macOS say.", f"Using macOS say; Phonon unavailable: {reason}")
+        report("say", "Reading with macOS say.", f"Using macOS say because Phonon is unavailable: {reason}")
         if cancel.is_set():
             return
         process = subprocess.Popen(["/usr/bin/say", "-f", "-"], stdin=subprocess.PIPE,

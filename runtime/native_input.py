@@ -125,7 +125,7 @@ class NativeInput:
         except Exception as exc:
             self.close()
             reason = str(exc) if isinstance(exc, NativeError) else "native_connection_unavailable"
-            raise NativeError(f"Native Look input unavailable ({reason}). Use Hermes input; no question was sent.") from None
+            raise NativeError(f"Native Look input unavailable ({reason}). No question was sent. Use Hermes input instead.") from None
 
     def _bootstrap(self):
         if not consent(self.home, self.plugin_id) and not (self.receipt_admission and self.identity is not None):
@@ -264,7 +264,7 @@ class NativeInput:
                 callback(run, {"status": "unknown" if previous_attempt or run.get("admission_id") else "refused",
                                "error": str(exc)})
             except Exception:
-                callback(run, {"status": "unknown", "error": "Native connection lost; outcome unknown. Reconnect this conversation; do not resend."})
+                callback(run, {"status": "unknown", "error": "Native connection lost with an unknown outcome. Reconnect this conversation. Do not send the question again."})
         return asyncio.run_coroutine_threadsafe(observe(), self.loop)
 
     def close(self):

@@ -16,10 +16,10 @@ import threading
 from .ownership import OwnershipError, acquire_runtime_lease, companion_profile
 
 DISCLOSURE = (
-    "Chrome grants Look broad debugger access, including signed-in pages and browser data. "
-    "Look instruments ordinary web tabs in one supported profile; only the foreground private card receives answers. "
-    "The bounded page evidence you ask about goes to your configured model and may stay in Hermes history. "
-    "Approve only the Chrome request you just started. Stop disconnects Look, not Chrome's remote-debugging setting."
+    "Chrome gives Look broad debugging access, including signed-in pages and browser data.\n\n"
+    "Look works across web tabs in one supported profile. Answers appear only in the focused tab’s private card. "
+    "Page evidence you ask about goes to your configured model and may stay in Hermes history.\n\n"
+    "Approve only the Chrome request you just started. Stopping Look does not turn off Chrome’s remote debugging."
 )
 PREPARE = "In Chrome 145+, enter chrome://inspect/#remote-debugging and enable remote debugging."
 
@@ -204,7 +204,7 @@ class ConsentChrome:
             contexts = self.command("Target.getBrowserContexts")
             context = contexts.get("defaultBrowserContextId")
             if not isinstance(context, str) or not context or context in contexts.get("browserContextIds", []):
-                raise OwnershipError("Chrome did not provide a safe regular-profile identity (Target.getBrowserContexts.defaultBrowserContextId). Update to stable Chrome 145+; private/multiple profiles are unsupported.")
+                raise OwnershipError("Chrome couldn’t identify a supported regular profile. Update to stable Chrome 145 or later. Private windows and multiple profiles are not supported.")
             self.default_context = context
             self.command("Target.getTargets")  # Capability check before any Runtime/page access.
             with self._lock:
@@ -221,7 +221,7 @@ class ConsentChrome:
             elif isinstance(exc, OwnershipError):
                 message = str(exc)
             else:
-                message = "Chrome connection failed; permission or browser policy could not be established. " + PREPARE
+                message = "Chrome couldn’t connect. Permission or browser policy could not be confirmed. " + PREPARE
             self.error = message
             self.close()
             self.state = "failed"

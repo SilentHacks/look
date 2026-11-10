@@ -1,6 +1,6 @@
 name: hermes-gaze
 version: "0.1.0"
-description: "Look — private Chrome questions and guarded actions. Supported beta: Apple Silicon Mac; Linux/Intel cursor paths are unverified, not full-platform support. /look starts; /gaze is an alias."
+description: "Look lets you ask about pages and review browser actions in Chrome. Beta support is limited to Apple Silicon Mac. Linux and Intel cursor paths are unverified. Start with /look. /gaze is an alias."
 author: "Abid"
 kind: standalone
 license: MIT
@@ -46,7 +46,7 @@ config_schema:
   mode:
     type: str
     default: "hover"
-    description: "Pointing source: 'hover' (exact cursor), 'simulated' (cursor + noise), or 'webcam' (personal calibrated gaze). Camera starts only through /look calibrate or /look mode webcam."
+    description: "Choose 'hover' for the pointer, 'simulated' for the pointer with added noise, or 'webcam' for calibrated eye tracking. Start the camera with /look calibrate or /look mode webcam."
   cdp_url:
     type: str
     default: "http://127.0.0.1:9333"
@@ -54,50 +54,50 @@ config_schema:
   sigma_px:
     type: float
     default: 120.0
-    description: "Spatial uncertainty radius (CSS pixels) for simulated or webcam gaze; not a measured accuracy claim."
+    description: "Uncertainty radius in CSS pixels for simulated and webcam gaze. This is not a measured accuracy rating."
   dwell_ms:
     type: int
     default: 450
-    description: "Dwell selection duration in milliseconds for Semantic Lens cards."
+    description: "How long to look at a Semantic Lens card to select it, in milliseconds."
   wiggle_trigger:
     type: bool
     default: false
-    description: "Open the typed question card when the user quickly wiggles the cursor. Off by default: nothing appears unasked."
+    description: "Open the typed question card with a quick pointer wiggle."
   hotkey:
     type: str
     default: "AltRight"
-    description: "Keyboard key (KeyboardEvent.code) that locks/unlocks the pointer target for safe HUD interaction (e.g., 'AltRight', 'Backquote', 'F8'). Push-to-talk is always Spacebar."
+    description: "Key used to hold or release the pointer target while using the question card. Use a KeyboardEvent.code such as 'AltRight', 'Backquote' or 'F8'. Hold Space to talk."
   whisper_model:
     type: str
     default: "base.en"
-    description: "Pinned English faster-whisper model: base.en or tiny.en only. Custom names, repositories and local paths are unsupported."
+    description: "English faster-whisper model: base.en or tiny.en. Custom names, repositories and local paths are not supported."
   tts_voice:
     type: str
     default: "Russell"
-    description: "Downloaded English Phonon catalogue voice. Run scripts/setup_speech.py --voice NAME before selecting another voice."
+    description: "English Phonon voice for read aloud. Download a different voice with scripts/setup_speech.py --voice NAME before selecting it."
   record_trials:
     type: bool
     default: false
-    description: "Development only: write local replay evidence. May contain sensitive page text; never audio."
+    description: "Development only. Save local replay evidence, which may include sensitive page text. Audio is never saved."
   typesafe_api_key:
     type: secret
     label: "TypeSafe API key"
     env: TYPESAFE_API_KEY
     required: false
-    description: "Optional key for early highlights. Leave unset to use the post-answer model."
+    description: "Optional key for early highlights. Without it, Hermes can choose highlights after answering."
   early_highlight:
     type: bool
     default: true
-    description: "Select intended scope immediately through TypeSafe using TYPESAFE_API_KEY; failure or no key uses the existing post-answer model."
+    description: "Use TypeSafe for early highlights. If no key is set or the request fails, Hermes can choose highlights after answering."
   highlight_model:
     type: str
     default: "jev-1.14.0"
-    description: "TypeSafe decision model for early highlights (direct TypeSafe API only)."
+    description: "TypeSafe model used for early highlights through the direct TypeSafe API."
   highlight_include_page_text:
     type: bool
     default: false
-    description: "Opt in to sending bounded captured page evidence to TypeSafe. Otherwise only the question, pointer structure and static scope descriptions are sent."
+    description: "Also send captured page evidence to TypeSafe. When off, TypeSafe receives only your question, pointer structure and fixed descriptions of the available scopes."
   answer_turn_seconds:
     type: float
     default: 12.0
-    description: "How long each unseen answer stays forward before the next comes up or the stack retreats. Longer answers get more reading time."
+    description: "Seconds to show each unread answer before moving to the next or hiding the stack. Longer answers get more reading time."

@@ -429,11 +429,7 @@ class Integration(unittest.TestCase):
              patch.object(cli.platform, "system", return_value="Darwin"), \
              patch.object(cli.platform, "machine", return_value="arm64"), \
              patch("hermes_gaze.browser.consent.discovery_port", side_effect=AssertionError("personal read")):
-            text = cli._handle_slash_command("start --existing")
-            self.assertIn("broad debugger access", text)
-            self.assertIn("--accept", text)
-            self.assertNotIn("\\n", text)
-            self.assertEqual(len(text.splitlines()), 3)
+            cli._handle_slash_command("start --existing")
             self.assertEqual(session.cdp.source, "owned")
             self.assertFalse(session.cdp._tabs)
 

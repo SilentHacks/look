@@ -10,7 +10,7 @@ const fail = text => { throw safeError(text); };
 const SETUP = 'Run /look setup extension in Hermes, reload Look in chrome://extensions, then try again.';
 const FRESH_REQUEST = 'Connection used, cancelled or expired. Run /look stop, then /look start --extension in Hermes and reopen Look.';
 const urlAllowed = url => /^https?:\/\//.test(url || '');
-const bounded = promise => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Error('Chrome did not reply. Reconnect explicitly; do not repeat an action.')), 5000))]);
+const bounded = promise => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(Error('Chrome did not reply. Reconnect, but do not repeat the action.')), 5000))]);
 async function foreground(tab) {
   const revision = foregroundRevision, connection = port;
   const current = await chrome.tabs.get(tab.id);

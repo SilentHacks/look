@@ -4,9 +4,9 @@
 [Scoreboard](GAZE_SCOREBOARD.md)
 
 No Hermes session, API key, hosted model, website permission, real camera or
-microphone is needed for evaluation. Run `scripts/gaze.py` from the repository root;
-no shell functions or plugin registration are needed. The live appearance model is
-documented in [Webcam gaze](WEBCAM_GAZE.md); evaluation keeps the original baseline
+microphone is needed for evaluation. Run `scripts/gaze.py` from the repository root.
+No shell functions or plugin registration are needed. The live appearance model is
+documented in [Webcam gaze](WEBCAM_GAZE.md). Evaluation keeps the original baseline
 and existing saved-feature layout for reproducible comparisons.
 
 ## Load, extract, compare
@@ -29,38 +29,38 @@ Use new output directories for a new extraction. `data load` joins every complet
 recording, across people and imported bundles. Add `--person p-a7c4` to load one
 participant. Partial sessions remain available on disk, but are excluded from this
 batch loader. The low-level `eval recording SESSION --out DIR` can decode a
-finalized partial recording for recovery; an unfinalized video is refused.
+finalized partial recording for recovery. An unfinalized video is refused.
 
-Output directories are outside the repo and `0700`; files are `0600`. Nothing is
+Output directories are outside the repo and `0700`. Files are `0600`. Nothing is
 uploaded, installed as a live profile or added to Git. Decoded PNGs can be much
 larger than video: load one person first and delete derived frames when no longer
-needed. `--stride 2` decodes every second frame; do not use a stride so large that
+needed. `--stride 2` decodes every second frame. Do not use a stride so large that
 selected calibration targets have fewer than 45 valid observations in total.
 
 ## Protocols and separation
 
 Targets are chosen from the source's initial contiguous calibration phase only.
 Nested farthest-point selection gives 9/16/25 labelled locations from the 5×5
-collection; 16 is a spatially spread subset, not a literal 4×4 acquisition grid.
+collection. 16 is a spatially spread subset, not a literal 4×4 acquisition grid.
 Selection is label-only and **before** face filtering or candidate gating. A missing
 face never moves calibration into the test phase or substitutes an easier target.
-The selected observations may lose faces; retained target count is reported.
+The selected observations may lose faces. Retained target count is reported.
 
-- **`same-session`**: fresh personal fit for each session; later fixed/moving/reading
+- **`same-session`**: fresh personal fit for each session. Later fixed/moving/reading
   frames test it. The explicit `no-recalibration` session instead names its earlier
-  baseline session in `calibration_source`; it has no calibration phase of its own.
+  baseline session in `calibration_source`. It has no calibration phase of its own.
 - **`cross-condition`**: use the earliest compatible earlier upright baseline with
-  the same person, glasses, camera/device and pixel geometry; test each later
+  the same person, glasses, camera/device and pixel geometry. Test each later
   non-baseline condition without refitting. Target-session calibration is ignored.
 - **`cross-glasses`**: use the earliest compatible earlier session of the same
-  condition/person/device/geometry with different eyewear; test without refitting.
+  condition/person/device/geometry with different eyewear. Test without refitting.
   Direction depends on recording order and is explicit in `calibration_session`.
   This includes contacts when present. Record a further round to test the opposite
-  temporal direction; no future session is silently used to calibrate the past.
+  temporal direction. No future session is silently used to calibrate the past.
 - **Cross-person summary**: frame-weight within each person/condition/glasses,
   then equal weight per person. No cross-person training or pooled personal fit.
   `summary.json` includes both per-person and macro rows. Conditions and eyewear
-  remain separate; a missing compatible source is `unscorable`, not a fallback.
+  remain separate. A missing compatible source is `unscorable`, not a fallback.
 
 Fits require matching camera/device and display/viewport size, DPR and screen size.
 Changed physical viewing distance is allowed and uses the target session's physical
@@ -72,7 +72,7 @@ Exact calibration-location repeats are excluded from headline tests. The start a
 end 3×3 validation blocks use the **same nine targets and dwell**, including repeats
 of calibration coordinates: they are separately scored in `results.json` under
 `validation`. Each has frame/prediction counts, 3×3/4×4/5×5 hits and conditional
-pixel error; `bias_shift_px` compares their mean residuals. This matched probe is
+pixel error. `bias_shift_px` compares their mean residuals. This matched probe is
 more interpretable than the additional descriptive first/last-third drift metric,
 which is confounded by target movement and condition. No refit uses either probe.
 
@@ -82,7 +82,7 @@ Headline: **3×3, 4×4, 5×5 exact cell hits**. Missing-face, blink, gated and o
 predictions remain misses in the full test denominator. Coverage is separate.
 2×2 remains a coarse diagnostic in JSON. Pixel mean/median/p95 are conditional on a
 prediction. Approximate centered-viewer degrees are available only when all three
-physical measurements were supplied; otherwise `N/A`. They are not measured 3D
+physical measurements were supplied. Otherwise `N/A`. They are not measured 3D
 head/eye rays. Jitter is RMS adjacent stationary-target residual displacement with
 a gap of at most 250 ms. Latency is WASM inference + Python prediction, not exposure
 or camera-to-answer delay. CPU is renderer/Python thread time, not total OS/GPU use.
@@ -90,15 +90,15 @@ or camera-to-answer delay. CPU is renderer/Python thread time, not total OS/GPU 
 `EvalRidge` keeps the original iris/head λ1 predictor, standardization and ridge
 solver as the baseline. Dataset experiments allow target counts beyond the live UI's nine, but still require 45
 finite samples, distinct targets, eye movement and a training error ≤.20. A fake
-portrait may fail that honest fit check; never weaken it to manufacture accuracy.
+portrait may fail that honest fit check. Never weaken it to manufacture accuracy.
 
 Eleven tuning configurations remain: baseline λ=1, ridge λ=10/100, eyes-only,
 one-eye, head-local coordinates, openness/blink gating, degree-two polynomial,
 RBF ridge, separate per-axis inputs and scratch personal eye-pixel ridge. Every
 normalization and fit sees calibration only. No external gaze checkpoint or
-reusable public-data weights. `tune --configs ...` selects existing configurations;
+reusable public-data weights. `tune --configs ...` selects existing configurations.
 `--protocols ...` selects protocols. `eval score --estimator module:factory` loads
-only a **trusted local** `GazeEstimator` implementation; never use an imported
+only a **trusted local** `GazeEstimator` implementation. Never use an imported
 participant's code or factory.
 
 For causal smoothing/jitter experiments only, append
@@ -112,7 +112,7 @@ changed.
 The [personal-calibration research report](GAZE_TUNING_RESEARCH.md) records the
 frozen comparison, uncertainty and original shipping recommendation. The later live
 cutover implements its nine-point left-appearance + iris λ10 candidate with strict
-rejection and no smoothing; it does not install research fits or bias refresh.
+rejection and no smoothing. It does not install research fits or bias refresh.
 
 `research` reads an existing `features.json` only. It does not run Chrome, load
 images, access devices, fetch assets or install calibration profiles:
@@ -129,8 +129,8 @@ images, access devices, fetch assets or install calibration profiles:
 Selection uses fixed/moving/reading phases, excluding exact selected-calibration
 coordinates. Every `validation-end` frame is removed before the search. Fits and
 normalizers see only selected initial calibration frames. Optional 1/3/5-point
-bias refresh uses labelled `validation-start` locations, before screen rejection;
-those observations are a calibration cost, not test data. This is the only
+bias refresh uses labelled `validation-start` locations, before screen rejection.
+Those observations are a calibration cost, not test data. This is the only
 research exception to the standard evaluator's no-validation-refit rule.
 
 The finite hill-climb starts with eye/pose/appearance subsets, five ridge
@@ -138,22 +138,22 @@ strengths, polynomial and RBF models. Top development candidates try Huber fitti
 blink/openness rejection, causal EMA, limited off-screen tolerance and bias
 refresh. Choices are frozen separately for each point budget, protocol and
 eyewear stratum, plus a shared-eyewear choice. Selection optimizes equal-session,
-equal-3×3/4×4/5×5 hits; missing predictions and failed fits count as misses.
+equal-3×3/4×4/5×5 hits. Missing predictions and failed fits count as misses.
 No weights are pooled between sessions or eyewear states.
 
-`selection.json` pins feature-file and research-code hashes; selection cannot
+`selection.json` pins feature-file and research-code hashes. Selection cannot
 overwrite itself, and reporting rejects changed inputs/code. `development.json`
 is exploratory, **not** a held-out score. `final.json`, `final-summary.json` and
 `FINAL.md` contain aggregate end-validation results only, never per-frame traces,
-features or fitted weights. Each session has exact conditional mean/p95 error;
-summary p95 is explicitly the mean/range of session p95s, not a pooled quantile.
+features or fitted weights. Each session has exact conditional mean/p95 error.
+Summary p95 is explicitly the mean/range of session p95s, not a pooled quantile.
 `research-safety` evaluates fixed ablations of those same frozen choices with
 strict screen rejection, and the original baseline with 1/3/5-point bias refresh.
-It never reselects a model; aggregates go to `safety-ablations.json`.
+It never reselects a model. Aggregates go to `safety-ablations.json`.
 
 This is phase separation, not independent-session or independent-person
-validation. End probes are stationary and repeat some calibration coordinates;
-they do not establish moving-target accuracy. Eight sessions from one person
+validation. End probes are stationary and repeat some calibration coordinates.
+They do not establish moving-target accuracy. Eight sessions from one person
 cannot establish a population estimate or isolate eyewear from session order.
 9/16/25 subsets come from one distributed 25-point acquisition, not measured
 standalone live calibrations. Saved inference times plus new Python CPU/wall
@@ -170,13 +170,13 @@ media times, actual displayed target, phase and settling marker. The native fram
 presentation clock resets against each session's recorder start, not a paused
 preview's playback time. `camera.webm` is original camera-only VP8 video, no dots.
 
-The common manifest remains version 1: dataset, licence and sessions; each session
+The common manifest remains version 1: dataset, licence and sessions. Each session
 retains person/session/condition/glasses/device, geometry, start epoch, true video
 clock and frames. A frame has absolute decoded path, epoch `t`, `video_t`, target
 and phase. Extraction retains eight `features` or null, pose/openness/blink, and
 `appearance` in the existing order: 128 normalized left-eye values, 128 right-eye
 values, then the original eight features. Live and offline use the same shared
-`browser/webcam_features.js` implementation; live takes only the left eye and its
+`browser/webcam_features.js` implementation. Live takes only the left eye and its
 two iris coordinates (`appearance[:128] + appearance[-8:-6]`, length 130).
 Existing saved feature files remain usable without re-extraction. Feature/runtime
 hashes identify the extractor. Portable bundles contain raw recordings, not
@@ -185,7 +185,7 @@ machine-local PNG paths.
 FFmpeg decoder PTS is matched to the last recorded target, never a future target.
 Settling frames (first .35 s of each standard 1.2 s fixed dwell) are excluded before
 extraction. Video is frame-stepped through the same pinned MediaPipe WASM/model,
-CPU delegate, feature function and VIDEO mode; session boundaries reset state.
+CPU delegate, feature function and VIDEO mode. Session boundaries reset state.
 Recorder/video alignment is approximate within a camera frame, not lab hardware
 synchronization. Moving-target lag and saccades remain limitations. Frame stepping
 does not measure device startup, live drops, thermals or battery cost.
@@ -198,7 +198,7 @@ does not measure device startup, live drops, thermals or battery cost.
 ```
 
 Held-out prediction-minus-target residuals replace Gaussian gaze noise on the demo
-dashboard; missing predictions remain misses. This is **noise-transfer**, not real
+dashboard. Missing predictions remain misses. This is **noise-transfer**, not real
 spoken-question/ASR/model success. Omit the trace for the seeded synthetic benchmark.
 
 ## Fake-only reproduction
@@ -212,8 +212,8 @@ The dataset probe accepts consent with trusted CDP input **before** opening its 
 camera, runs all six blocks twice (glasses/none), stops at a break and resumes in a
 new owned process, verifies CLI resume, byte-identical export/import, decodes and
 extracts retained video, then scores per condition/glasses and all protocols.
-Accelerated 36-second sessions are fake-only; human default is 150 seconds.
+Accelerated 36-second sessions are fake-only. Human default is 150 seconds.
 The translated public-domain NASA portrait is a plumbing fixture, not gaze ground
-truth. Temporary videos/frames/features/bundles are removed; only screenshots and
+truth. Temporary videos/frames/features/bundles are removed. Only screenshots and
 small JSON proof files remain. Private allocated CDP ports only, never 9222, user's
 Chrome or running Hermes. No real camera, microphone or paid inference.

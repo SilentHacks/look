@@ -54,7 +54,7 @@
     }
   };
   globalThis.__HERMES_WEBCAM__ = {stop() { model?.close(); }};
-  document.title = "Look — offline evaluation (no camera)";
+  document.title = "Look offline evaluation (no camera)";
   document.body.textContent = "Offline frame evaluation. No camera or microphone is open.";
   __hermesGazeIntent(JSON.stringify({type: "ready", nonce: opts.nonce}));
 })
