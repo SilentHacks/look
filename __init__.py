@@ -185,7 +185,7 @@ def register(ctx: Any) -> None:
                 if speech_worker.is_alive():
                     result += "\nRead aloud is still stopping."
             return result
-        bind_only = command in ("calibrate", "mode webcam", "setup eyes", "demo")
+        bind_only = command in ("eyes", "calibrate", "mode webcam", "setup eyes", "demo")
         if (bind_only or command in ("", "connect", "start") or
                 command.split()[:1] in (["start"], ["connect"]) and
                 command.split()[1:] in (["--extension"], ["--separate"])):

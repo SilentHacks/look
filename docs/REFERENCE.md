@@ -46,6 +46,7 @@ for disposable-browser coverage and user-operated permission checks.
 |`/look` or `/look start`|Start/connect in Chrome|
 |`/look stop`|Stop capture, camera, read-aloud and overlay. Keep browser tabs|
 |`/look status`|Current state, without diagnostic counters|
+|`/look eyes`|Use eye tracking with saved calibration; no download|
 |`/look calibrate`|Start optional eye tracking from verified cached files|
 |`/look cursor`|Stop the camera and return to the pointer|
 |`/look setup`|Prepare/retry local recognition|
@@ -114,13 +115,20 @@ typing or navigation already performed.
 
 ### Try eyes, beta
 
-After a useful cursor answer, explicitly enter `/look calibrate`. It switches to
+Explicitly enter `/look eyes` to use saved calibration, or `/look calibrate` to set it up. Either switches to
 webcam mode and verifies cached files asynchronously before opening the separate camera.
 If files are missing, `/look setup eyes` explicitly permits their download and camera startup.
 Preparation, window startup, model loading, camera access and failures appear in
 `/look tracker` and the protected **Eye tracking** controls. **Use cursor** or `/look cursor`
 cancels immediately. A blocked network read may finish later, but cannot open a camera.
 Failures keep webcam selected until you choose cursor. No cursor evidence is fabricated.
+`/look status` reports the pointing source for every browser connection, including
+the extension. A saved calibration alone is not live gaze: status says when no
+fresh gaze is reaching a page. Stop resets to cursor; after reconnecting, run
+`/look eyes` to reopen the camera with saved calibration. Repeated Start without
+Stop preserves the current source and camera.
+Changing pointing source also starts a new page question instead of implicitly
+following the previous source's answer. Asking on the answer card remains a follow-up.
 Click **Start calibration**
 (**Calibrate again** for a saved setup). Look at each dot, tap Space, and keep looking
 until it moves. After nine accepted targets, **Ready to check** waits for your

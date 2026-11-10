@@ -20,7 +20,7 @@ Before updating or reloading the plugin, quit Hermes and run `hermes gateway sto
 first, then restart Hermes. Hermes runs a background gateway that keeps old code
 loaded even after the terminal closes. Closing the terminal alone is not a reload.
 
-During ordinary plugin use, only explicit `/look mode webcam`, `/look calibrate`,
+During ordinary plugin use, only explicit `/look eyes`, `/look mode webcam`, `/look calibrate`,
 `/look setup eyes` or protected camera controls start the camera. Registration,
 model tools, status and changing configuration do not.
 The owned window requests video only, never audio. It captures and infers locally.
@@ -56,13 +56,18 @@ unload and owned-document replacement close only the camera process we started.
 
 ## Calibration and coordinates
 
-Run `/look calibrate` to open the camera window. `/look mode webcam` opens the same setup.
+Run `/look eyes` to use saved calibration or `/look calibrate` to set it up.
+Both select eye tracking and open the camera window; `/look mode webcam` does the same.
+Missing or invalid calibration keeps eyes selected and blocks questions rather
+than using the cursor. `/look setup eyes` also authorizes missing asset downloads.
 
 In separate-browser mode, these commands first start Chrome if it is disconnected.
 For your usual Chrome, pair `/look start --extension` before `/look setup eyes`.
 Repeating Start or reopening calibration in the same conversation keeps the camera
 and saved setup alive. Stop, a new conversation/input binding, or a replaced browser
 connection revokes it; changing browser source still requires Stop first.
+Stop resets pointing to cursor but retains the calibration file. After reconnecting,
+run `/look eyes` to reactivate it; ordinary Start does not open the camera.
 
 1. Maximize the window and keep Chrome zoom at 100%.
 2. Choose **Start calibration**, or **Calibrate again** for a saved setup.
@@ -122,9 +127,10 @@ in an answer's footer, to open camera controls and **Use cursor**. Camera/sessio
 loss revokes setup return and stops the corresponding runtime without joining
 the camera reader under the inbox lock. The saved calibration remains unchanged.
 Focused companion buttons accept trusted Enter/Space input. Those keys never approve
-website actions. Status commands do not replace an ongoing setup's connection.
-Explicit reconnects do. Restarting a closed camera document gives completion a
-fresh setup generation rather than reusing an earlier return attempt.
+website actions. Status and repeated Start in the same conversation do not replace
+an ongoing setup's connection. Replacing the browser connection or input binding
+does. Restarting a closed camera document gives completion a fresh setup generation
+rather than reusing an earlier return attempt.
 
 **Use cursor** is available at entry and on unsuccessful results/recovery.
 Camera errors stay on screen with a plain state and **Try again**.
@@ -198,8 +204,8 @@ nine-point recalibration after moving instead.
 ## Hands-on checklist (real hardware: user only)
 
 1. Start a normal Hermes conversation, then `/look`.
-2. `/look setup eyes` on first use (may download ~11 MB). Later `/look mode webcam`
-   uses verified cached files. Allow **camera only** in the separate tracker window.
+2. `/look setup eyes` on first use (may download ~11 MB). Later `/look eyes`
+   uses saved calibration and verified cached files. Allow **camera only** in the separate tracker window.
    Confirm the camera indicator. No website needs a camera permission.
 3. `/look calibrate`: maximize that window and complete the dots and the short
    check. Note the plain result and whether it matched how well it followed you.
@@ -217,6 +223,11 @@ nine-point recalibration after moving instead.
    questions still work. `/look stop` also detaches the companion. Browser tabs stay open.
 
 ### When gaze is not fresh
+
+`/look status` shows the selected source for separate Chrome and the extension.
+It says **Using gaze** only after a recent accepted page delivery, not merely
+because the camera has frames or a calibration file exists. `/look diagnostics`
+adds `delivery_age_seconds` (null before the first delivery, reset on camera start).
 
 `/look diagnostics` includes cumulative numeric `drops` counters for this tracker
 instance, retained across stop/restart. Compare two readings while the companion

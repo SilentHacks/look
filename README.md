@@ -85,7 +85,9 @@ prompts. Stopping or reconnecting resets the mode.
 - **Eye tracking:** run `/look setup eyes`, allow camera access in its separate
   window and follow calibration. It is experimental, not a precise pointer
   replacement. [Calibration guide](docs/WEBCAM_GAZE.md).
-  `/look cursor` stops the camera.
+  `/look eyes` activates saved calibration after reconnecting or using the cursor;
+  `/look cursor` stops the camera. `/look status` shows the selected source and
+  whether fresh gaze is reaching a page.
 
 ## Privacy and limits
 

@@ -485,7 +485,7 @@ def child(args):
                     output["revoked_consent_receipt_recovery"] = dict(no_resubmit=True, input_disabled=True)
 
                     # Every command that can establish a local binding uses native admission.
-                    for entry in ("demo", "calibrate", "mode webcam", "setup eyes"):
+                    for entry in ("demo", "eyes", "calibrate", "mode webcam", "setup eyes"):
                         await look(boot, "stop")
                         alternate = await create("entry-" + entry)
                         response = await look(alternate, entry)
@@ -495,7 +495,7 @@ def child(args):
                         await until(lambda: turns.active is None)
                         assert answer["status"] == "complete" and len(calls) == before + 1, (entry, answer)
                         boot = alternate
-                    output["camera_and_demo_native_entrypoints"] = ["demo", "calibrate", "mode webcam", "setup eyes"]
+                    output["camera_and_demo_native_entrypoints"] = ["demo", "eyes", "calibrate", "mode webcam", "setup eyes"]
                     turns.close()
         finally:
             barrier.set()

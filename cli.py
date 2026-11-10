@@ -24,6 +24,7 @@ HELP = """/look · /look start     Start in Chrome
 /look stop              Stop Look and keep browser tabs open
 /look status            Show current state
 /look actions [confirm|allow-all]  Choose Look approval prompts
+/look eyes              Use eye tracking with saved calibration
 /look calibrate         Set up eye tracking
 /look cursor            Turn off the camera and use the pointer
 /look setup             Prepare local speech recognition
@@ -104,7 +105,10 @@ def _tracker_summary(session) -> str:
         return "Opening the camera. Allow access if asked. Run /look cursor to cancel."
     if not status.get("calibrated") or status.get("calibration_message"):
         return "Eye tracking needs calibration. Continue in the camera window."
-    return "Eye tracking is on."
+    age = status.get("delivery_age_seconds")
+    if age is None or age >= .8:
+        return "Eye tracking selected. No fresh gaze is reaching a page. Check the camera window and foreground page."
+    return "Eye tracking is on. Using gaze, not the pointer."
 
 
 def _setup_extension(*, remove=False):
@@ -225,14 +229,20 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
         if session.cdp.source == "extension":
             status = session.cdp.connection_status
             if session.cdp.is_connected:
-                return "Look is ready in the selected Chrome tabs."
+                return "Look is ready in the selected Chrome tabs. " + (
+                    _tracker_summary(session) if session.tracker.mode == "webcam" else
+                    "Using the pointer." if session.tracker.mode == "hover" else "Using simulated gaze.")
             if status["state"] in ("connecting", "connected"):
                 return "Look extension connected. Preparing the page; return to an ordinary web tab and check /look status again."
             return status["error"] or ("Waiting for the Look extension. /look stop cancels."
                                        if status["state"] == "waiting" else
                                        "Look extension disconnected. Run /look start --extension to connect again.")
         if session.cdp.source == "existing":
-            return _existing_status(session)
+            connection = _existing_status(session)
+            if session.cdp.is_connected:
+                connection += " " + (_tracker_summary(session) if session.tracker.mode == "webcam" else
+                                      "Using the pointer." if session.tracker.mode == "hover" else "Using simulated gaze.")
+            return connection
         if not session.cdp.is_connected:
             state = session.webcam_status()["state"]
             if state in ("preparing", "starting", "loading", "camera", "running", "stopping", "failed"):
@@ -265,7 +275,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
             time.sleep(0.5)
         return "Practice page could not attach. /look diagnostics has connection details."
 
-    if ((sub == "calibrate" and not tail) or sub == "mode" and len(tail) == 1
+    if ((sub in ("eyes", "calibrate") and not tail) or sub == "mode" and len(tail) == 1
             or sub == "setup" and tail == ["eyes"]):
         mode = tail[0] if sub == "mode" else "webcam"
         if mode not in ("hover", "simulated", "webcam"):

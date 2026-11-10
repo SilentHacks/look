@@ -23,6 +23,11 @@ from hermes_gaze.audio import voice
 
 from hermes_gaze.runtime import service
 
+FIXTURE = ('<title>Local journey</title><style>p{position:absolute;width:200px;height:100px}'
+           '#cursor{left:20px;top:0}#gaze{left:500px;top:220px}</style>'
+           '<p id="cursor">Cursor balance: 999 dollars</p>'
+           '<p id="gaze">Gaze fixture price: 42 pounds</p><div style="height:4000px"></div>')
+
 async def journey(args, base, session, turns, look, create, sid):
     results = []
     shots = base / 'screens'
@@ -69,6 +74,27 @@ async def journey(args, base, session, turns, look, create, sid):
         delivered = host.delivered
         await asyncio.to_thread(cmd, tab, 'Input.dispatchMouseEvent',
                                 dict(type='mouseMoved', x=100 if submit else 400, y=24 if submit else 250))
+        if session.tracker.mode == 'webcam' and session.cdp.source == 'extension':
+            geometry = await asyncio.to_thread(page, tab,
+                f'window.__HERMES_GAZE_OVERLAY__.webcamViewport({host.profile["screen"]["dpr"]})')
+            check(label + ': trusted pointer measures viewport origin', 'origin_x' in geometry)
+            zoom = geometry['dpr'] / host.profile['screen']['dpr']
+            Scripted.script = lambda f, t: ScreenPoint(
+                geometry['origin_x'] + 600 * zoom, geometry['origin_y'] + 280 * zoom, t)
+            def gaze_evidence():
+                data = session.cdp.capture('window.__HERMES_GAZE_OVERLAY__.captureNoisyContext()')
+                return data if data['fixations'] and all(
+                    s['source'] == 'webcam' and abs(s['x_vp'] - 600) < 1 and abs(s['y_vp'] - 280) < 1
+                    for s in data['fixations']) else None
+            data = await until(gaze_evidence)
+            with patch.object(service, '_LLM', None):
+                resolved = await asyncio.to_thread(service.resolve_now, session, utterance='Explain this',
+                                                   pushed=data, activate=False)
+            check(label + ': gaze selects price with cursor over different balance',
+                  resolved['ok'] and resolved['mode'] == 'webcam' and
+                  'Gaze fixture price' in resolved['top']['label'] and
+                  'Cursor balance' not in resolved['context'])
+            check(label + ': status reports gaze delivery', 'Using gaze' in str(await command('status')))
         await until(lambda: host.delivered > delivered + 2 if session.tracker.mode == 'webcam' else True)
         before = await asyncio.to_thread(page, tab, 'scrollY')
         runs = len(turns.runs)
@@ -94,15 +120,23 @@ async def journey(args, base, session, turns, look, create, sid):
                       'capture', turns.capture_state, 'connected', turns.connected, flush=True)
                 raise
             check(label + ': released voice reaches stock provider and terminal receipt', bool(turns.runs[-1].get('admission_id')))
-    async def camera():
+            if session.tracker.mode == 'webcam':
+                snapshot = turns.runs[-1]['snapshot']
+                check(label + ': admitted stock question retains gaze evidence',
+                      snapshot['mode'] == 'webcam' and 'Gaze fixture price' in snapshot['context'] and
+                      'Cursor balance' not in snapshot['context'])
+    async def camera(*, saved=False):
         await until(lambda: host.state in ('running', 'failed', 'stopped'))
         check('camera command opens actual owned process', host.state == 'running' and host._process.poll() is None)
         window = await asyncio.to_thread(Window, host, base)
         await until(lambda: window.state()['face'], 30)
         # Simulated accepted calibration, not a physical accuracy claim.
         screen = await asyncio.to_thread(window.tab.main, '({left:screen.availLeft,top:screen.availTop,width:screen.availWidth,height:screen.availHeight,screen_width:screen.width,screen_height:screen.height,screen_left:screen.availLeft,screen_top:screen.availTop,dpr:devicePixelRatio})')
-        profile = AppearanceEstimator().calibrate(appearance_observations(), screen)
-        host._save(profile); host.estimator.load(profile); host.profile = profile
+        if saved:
+            check('cached calibration loads without another fit', host.profile is not None and host.estimator.profile is not None)
+        else:
+            profile = AppearanceEstimator().calibrate(appearance_observations(), screen)
+            host._save(profile); host.estimator.load(profile); host.profile = profile
         Scripted.script = lambda f, t: ScreenPoint(screen['left'] + 400, screen['top'] + 350, t)
         host._ui('checkResult', host._result_words('good', True))
         await asyncio.to_thread(window.wait, 'result')
@@ -155,8 +189,8 @@ async def journey(args, base, session, turns, look, create, sid):
         await until(lambda: host._process.poll() is not None)
         # Same session restart, tracker started after browser.
         await command('start --separate')
-        await command('setup eyes')
-        await camera()
+        await command('eyes')
+        await camera(saved=True)
         tab = await asyncio.to_thread(session.cdp._target)
         await listen(tab, 'separate start-before-setup')
         await command('stop')
@@ -170,7 +204,7 @@ async def journey(args, base, session, turns, look, create, sid):
         import threading
         class Page(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                body = b'<title>Local journey</title><p>Fixture price: 42 pounds</p><div style="height:4000px"></div>'
+                body = FIXTURE.encode()
                 self.send_response(200); self.end_headers(); self.wfile.write(body)
             def log_message(self, *a): pass
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Page)
@@ -193,7 +227,7 @@ async def journey(args, base, session, turns, look, create, sid):
         local_session = driver.attach(local_page['targetId'])
         driver.call('Page.enable', session=local_session)
         driver.call('Page.setDocumentContent', dict(frameId=driver.call('Page.getFrameTree', session=local_session)['frameTree']['frame']['id'],
-            html='<title>Local journey</title><p>Fixture price: 42 pounds</p><div style="height:4000px"></div>'), local_session)
+            html=FIXTURE), local_session)
         worker_target = await until(lambda: next((t for t in driver.targets() if t['url'] == f'chrome-extension://{EXTENSION}/worker.js'), None))
         worker = driver.attach(worker_target['targetId'])
         driver.call('Runtime.enable', session=worker)
@@ -226,16 +260,18 @@ async def journey(args, base, session, turns, look, create, sid):
         await command('start --extension')
         tab = await pair()
         await listen(tab, 'extension cursor', submit=True)
+        check('extension status identifies cursor before eyes', 'Using the pointer' in str(await command('status')))
         await command('setup eyes')
         pid = await camera()
         check('extension setup retains canonical native binding', turns.native_input is not None and turns.connected)
         await command('start')
         check('existing extension start retains tracker', host._process.pid == pid and host._live())
-        await listen(tab, 'extension eyes')
+        await listen(tab, 'extension eyes', submit=True)
         await command('start --separate')
         check('separate source change cannot replace live extension camera',
               session.cdp.source == 'extension' and host._live() and host._process.pid == pid)
         replacement = await create('replacement-conversation')
+        sid = replacement
         await command('start', replacement)
         await until(lambda: not host._live() and host._process.poll() is not None)
         check('new session revokes old camera authority', turns.binding['session_id'] == replacement)
@@ -245,6 +281,33 @@ async def journey(args, base, session, turns, look, create, sid):
               not turns.connected and host._process.poll() is not None)
         await command('start --extension', replacement)
         tab = await pair()
-        await listen(tab, 'extension session restart')
+        check('stop and reconnect report cursor until explicit eye activation',
+              session.tracker.mode == 'hover' and 'Using the pointer' in str(await command('status')))
+        await command('eyes', replacement)
+        await camera(saved=True)
+        await listen(tab, 'extension saved eyes', submit=True)
+        saved_profile = host.profile_path.read_bytes()
+        await command('cursor', replacement)
+        await until(lambda: host._process.poll() is not None)
+        check('explicit cursor stops camera and changes page source',
+              await asyncio.to_thread(page, tab, 'window.__HERMES_GAZE_OVERLAY__.state.mode') == 'hover')
+        host.profile_path.write_text('{"model_id":"invalid"}')
+        await command('eyes', replacement)
+        await until(lambda: host.state == 'running')
+        await front(tab)
+        check('invalid saved calibration never falls back to cursor',
+              host.profile is None and session.tracker.mode == 'webcam' and
+              await asyncio.to_thread(page, tab, 'window.__HERMES_GAZE_OVERLAY__.state.mode') == 'webcam')
+        await asyncio.to_thread(cmd, tab, 'Input.dispatchMouseEvent', dict(type='mouseMoved', x=100, y=24))
+        await asyncio.to_thread(cmd, tab, 'Input.dispatchKeyEvent', dict(type='keyDown', code='Space', key=' ', windowsVirtualKeyCode=32))
+        await asyncio.sleep(1)
+        await asyncio.to_thread(cmd, tab, 'Input.dispatchKeyEvent', dict(type='keyUp', code='Space', key=' ', windowsVirtualKeyCode=32))
+        check('invalid calibration blocks capture instead of using cursor', turns.capture_state == 'idle' and
+              'needs calibration' in str(await command('status', replacement)))
+        await command('cursor', replacement)
+        host.profile_path.write_bytes(saved_profile)
+        await command('eyes', replacement)
+        await camera(saved=True)
+        await listen(tab, 'extension recovered eyes')
         await command('stop', replacement)
         return results

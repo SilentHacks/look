@@ -315,8 +315,13 @@ class WebcamContracts(unittest.TestCase):
             send(None)
             send([3.] * 130)  # Valid observations, but an off-screen estimate.
             send(features, t=1.)
-            for _ in range(7):
+            for _ in range(6):
                 send(features)
+                self.assertIsNone(host.status()["delivery_age_seconds"])
+            send(features)
+            self.assertLess(host.status()["delivery_age_seconds"], .8)
+            with patch("hermes_gaze.browser.webcam.time.monotonic", return_value=host.last_delivery + 1):
+                self.assertGreaterEqual(host.status()["delivery_age_seconds"], 1)
             drops = host.status()["drops"]
             self.assertEqual(host.delivered, 1)
             for reason in ("uncalibrated", "no_features", "offscreen", "stale_sample", "no_page_anchor",

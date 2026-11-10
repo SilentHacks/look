@@ -122,6 +122,7 @@ class WebcamHost:
             "mode_changed", "rejected_by_page", "transport_error", "transport_timeout",
         ), 0)
         self.last_sample = 0.
+        self.last_delivery = 0.
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._start_lock = threading.RLock()
@@ -196,6 +197,7 @@ class WebcamHost:
                 "predictions": self.predictions, "delivered": self.delivered, "hidden_samples": self.hidden_samples,
                 "drops": dict(self.drops),
                 "sample_age_seconds": round(time.time() - self.last_sample, 2) if self.last_sample else None,
+                "delivery_age_seconds": round(time.monotonic() - self.last_delivery, 2) if self.last_delivery else None,
                 "error": self.error, "model": self.estimator.model_id,
                 "diagnostic": {**self.diagnostic, "native": list(self._native_notes)} if self.diagnostic else {},
                 "calibration_message": self._calibration_notice}
@@ -225,6 +227,7 @@ class WebcamHost:
             self.error = ""; self.diagnostic = {}; self._native_notes = []
             self.state = self._stage = "preparing"
             self.last_sample = 0.
+            self.last_delivery = 0.
             self._clear_flow()
             self._thread = threading.Thread(target=self._bootstrap, args=(download,),
                                             name="hermes-webcam", daemon=True)
@@ -624,6 +627,7 @@ class WebcamHost:
                 result = "transport_error"
             if result is True:
                 self.delivered += 1
+                self.last_delivery = time.monotonic()
             else:
                 self.drops[result if isinstance(result, str) and result in self.drops else "rejected_by_page"] += 1
 

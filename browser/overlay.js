@@ -1961,7 +1961,7 @@
     if (S.hoverCard) return true;
     if (S.pointer.moved >= FOLLOW_UP_PX) return false;
     const anchor = item.pointerAnchor;
-    return !!anchor && hitNode(anchor.x, anchor.y) === anchor.hit;
+    return anchor?.mode === state.mode && hitNode(anchor.x, anchor.y) === anchor.hit;
   }
   // Talking stops the card taking hover, which itself fires a mouse event with no travel.
   // So a hold that began on the card stays on it until the pointer really travels.
@@ -2111,7 +2111,7 @@
     return intent;
   }
   function bindRequest(intent, rec) {
-    rec.pointerAnchor = {x: state.pointerX, y: state.pointerY, hit: hitNode(state.pointerX, state.pointerY)};
+    rec.pointerAnchor = {mode: state.mode, x: state.pointerX, y: state.pointerY, hit: hitNode(state.pointerX, state.pointerY)};
     if (state.mode === "webcam") webcamAskedAt = {x: state.pointerX, y: state.pointerY};
     if (intent.cursor_context?.snapshot_id) snapshotOwner.set(intent.cursor_context.snapshot_id, rec);
     S.localPending.push(rec);

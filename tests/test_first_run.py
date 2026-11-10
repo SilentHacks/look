@@ -212,6 +212,33 @@ class FirstRunTests(unittest.TestCase):
             detailed = json.loads(cli._handle_slash_command('diagnostics'))
             self.assertEqual(detailed['webcam'], status)
 
+    def test_status_distinguishes_selected_source_calibration_and_delivery_for_every_browser(self):
+        from unittest.mock import PropertyMock
+        session = GazeSession('http://127.0.0.1:1')
+        self.addCleanup(session.close)
+        with patch.object(cli, 'get_shared_session', return_value=session), \
+             patch.object(type(session.cdp), 'is_connected', new_callable=PropertyMock, return_value=True), \
+             patch.object(type(session.cdp), 'connection_status', new_callable=PropertyMock,
+                          return_value={'state': 'connected', 'error': ''}):
+            for source in ('owned', 'existing', 'extension'):
+                session.cdp.source = source
+                with self.subTest(source=source):
+                    session.tracker.mode = 'hover'
+                    self.assertIn('Using the pointer', cli._handle_slash_command('status'))
+                    session.tracker.mode = 'webcam'
+                    status = dict(state='running', calibrated=False)
+                    with patch.object(session, 'webcam_status', return_value=status):
+                        self.assertIn('needs calibration', cli._handle_slash_command('status'))
+                        status.update(calibrated=True, delivery_age_seconds=None)
+                        self.assertIn('No fresh gaze', cli._handle_slash_command('status'))
+                        status['delivery_age_seconds'] = .1
+                        self.assertIn('Using gaze', cli._handle_slash_command('status'))
+                        status['delivery_age_seconds'] = 1
+                        self.assertIn('No fresh gaze', cli._handle_slash_command('status'))
+                        status.update(state='failed', error='PRIVATE')
+                        self.assertNotIn('Using gaze', cli._handle_slash_command('status'))
+                        self.assertNotIn('PRIVATE', cli._handle_slash_command('status'))
+
     def test_disconnected_companion_still_reports_independent_camera_activity(self):
         session = GazeSession('http://127.0.0.1:1')
         self.addCleanup(session.close)
