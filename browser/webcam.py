@@ -23,6 +23,7 @@ import time
 import urllib.request
 
 from ..platform_support import apple_silicon_mac
+from ..process_env import minimal_env
 from ..tracker.webcam_gaze import CHECK_OBSERVE_MS, CHECK_ORDERS, CHECK_POINTS, CHECK_SETTLE_MS, AppearanceEstimator, GazeEstimator, LandmarkEstimator, score_check_trial, summarize_check
 
 _ASSETS = {
@@ -42,7 +43,7 @@ _BAD_PROFILE_WINDOW = "Saved calibration could not be read. Start a new calibrat
 
 
 def asset_directory() -> Path:
-    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "hermes-gaze" / "webcam-0.10.32"
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "look" / "webcam-0.10.32"
 
 
 def prepare_assets(directory: Path | None = None, *, download: bool = False,
@@ -102,7 +103,7 @@ class WebcamHost:
         self.on_return, self.on_rehearsed = on_return, on_rehearsed
         self.on_state = on_state
         self.chrome_args = tuple(chrome_args)
-        self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "hermes-gaze" / "webcam-calibration.json"
+        self.profile_path = profile_path or Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "look" / "webcam-calibration.json"
         self.assets = assets
         self.fake_video = fake_video
         self.runtime_source = runtime_source or Path(__file__).with_name("webcam_host.js")
@@ -466,7 +467,7 @@ class WebcamHost:
         if message.get("method") == "Page.frameNavigated" and params.get("frame", {}).get("id") == self._frame:
             self.cancel()  # This owned document's replacement is never trusted.
             return
-        if message.get("method") != "Runtime.bindingCalled" or params.get("name") != "__hermesGazeIntent" or params.get("executionContextId") != self._context:
+        if message.get("method") != "Runtime.bindingCalled" or params.get("name") != "__lookIntent" or params.get("executionContextId") != self._context:
             return
         payload = params.get("payload", "")
         if len(payload) > 4096:
@@ -666,7 +667,8 @@ class WebcamHost:
                 with self._start_lock:
                     if not self._live():
                         return
-                    self._process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    self._process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                                     env=minimal_env(desktop=True))
                 threading.Thread(target=self._read_stderr, args=(self._process.stderr, self._native_notes),
                                  name="hermes-webcam-stderr", daemon=True).start()
                 active = Path(profile) / "DevToolsActivePort"
@@ -691,7 +693,7 @@ class WebcamHost:
                     self._frame = tree["frameTree"]["frame"]["id"]
                     result = self._command("Page.createIsolatedWorld", {"frameId": self._frame, "worldName": "hermes-webcam"})
                     self._context = result["executionContextId"]; self._nonce = secrets.token_hex(32)
-                    self._command("Runtime.addBinding", {"name": "__hermesGazeIntent", "executionContextId": self._context})
+                    self._command("Runtime.addBinding", {"name": "__lookIntent", "executionContextId": self._context})
                     # MediaPipe normally inserts its loader into the main world. Keep it
                     # in this exact isolated context instead; no runtime/nonce in the DOM.
                     loader = (self.assets / "package/wasm/vision_wasm_internal.js").read_text()

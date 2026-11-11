@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
 import tests
-from hermes_gaze.browser.webcam import WebcamHost
+from look.browser.webcam import WebcamHost
 
 
 def run(out):
@@ -34,7 +34,7 @@ def run(out):
             def slow(*_, **__):
                 entered.set(); release.wait(15)
                 return Path(tmp)
-            with patch("hermes_gaze.browser.webcam.prepare_assets", side_effect=slow), patch.object(host, "_run") as launch:
+            with patch("look.browser.webcam.prepare_assets", side_effect=slow), patch.object(host, "_run") as launch:
                 rig.session.start_webcam(download=True)
                 assert entered.wait(2)
                 until(lambda: "Preparing eye tracking" in rig.text())
@@ -57,7 +57,7 @@ def run(out):
             rig.shot("startup-files-missing")
             checks.append("cache-only startup fails with explicit setup and cursor recovery")
             host._thread.join(3)
-            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(tmp)), \
+            with patch("look.browser.webcam.prepare_assets", return_value=Path(tmp)), \
                  patch.object(host, "_run", side_effect=OSError("PRIVATE_NATIVE_DIAGNOSTIC")):
                 rig.session.start_webcam()
                 until(lambda: host.state == "failed")

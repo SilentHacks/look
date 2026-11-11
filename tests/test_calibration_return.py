@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.browser.companion import Companion, NoForegroundTab
-from hermes_gaze.runtime.voice_turns import VoiceTurns
-from hermes_gaze.browser.webcam import WebcamHost
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.browser.companion import Companion, NoForegroundTab
+from look.runtime.voice_turns import VoiceTurns
+from look.browser.webcam import WebcamHost
 
 
 class OwnedReturn(unittest.TestCase):
@@ -31,14 +31,14 @@ class OwnedReturn(unittest.TestCase):
         self.assertEqual(self.companion._last_foreground, self.owner)
         self.tab.eval_js_once.return_value = False
         self.activate.reset_mock()
-        with patch("hermes_gaze.browser.companion.time.monotonic", side_effect=[0, 0, 4]):
+        with patch("look.browser.companion.time.monotonic", side_effect=[0, 0, 4]):
             result = self.companion.return_to_document(self.owner, lambda: True)
         self.assertFalse(result["ok"])
         self.activate.assert_called_once()  # Acknowledged activation is not observed focus.
 
     def test_foreground_with_a_dead_protected_renderer_does_not_succeed(self):
         self.tab.eval_js_once.side_effect = lambda expression, **kwargs: kwargs["context_id"] != "card"
-        with patch("hermes_gaze.browser.companion.time.monotonic", side_effect=[0, 0, 4]):
+        with patch("look.browser.companion.time.monotonic", side_effect=[0, 0, 4]):
             result = self.companion.return_to_document(self.owner, lambda: True)
         self.assertFalse(result["ok"])
         self.activate.assert_called_once()
@@ -109,7 +109,7 @@ class CameraCompletion(unittest.TestCase):
 
     def event(self, kind, context=8, nonce="private", **data):
         self.host._event({"method": "Runtime.bindingCalled", "params": {
-            "name": "__hermesGazeIntent", "executionContextId": context,
+            "name": "__lookIntent", "executionContextId": context,
             "payload": json.dumps(dict(type=kind, nonce=nonce, setup=self.host._setup, **data))}})
 
     def result(self):
@@ -128,7 +128,7 @@ class CameraCompletion(unittest.TestCase):
         self.event("return_browsing", context=7, flow=1)
         old = self.host._setup
         self.host.begin_setup(returned)
-        self.host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+        self.host._event({"method": "Runtime.bindingCalled", "params": {"name": "__lookIntent",
             "executionContextId": 8, "payload": json.dumps(dict(type="return_browsing", nonce="private", setup=old, flow=1))}})
         self.assertEqual(calls, [])
         self.host._practice = {"unfinished": True}
@@ -166,7 +166,7 @@ class CameraCompletion(unittest.TestCase):
 
     def test_dead_camera_restart_changes_generation_but_live_foregrounding_does_not(self):
         from tests.test_webcam import SCREEN, appearance_observations
-        from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator
+        from look.tracker.webcam_gaze import AppearanceEstimator
         with tempfile.TemporaryDirectory() as directory:
             host = self.host = WebcamHost(lambda *_: True, profile_path=Path(directory) / "saved.json",
                                           on_return=lambda *_: {"ok": True})
@@ -177,9 +177,9 @@ class CameraCompletion(unittest.TestCase):
                 host._context, host._nonce = 8, "private"
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
             generations = []
-            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(directory)), \
-                 patch("hermes_gaze.browser.webcam.apple_silicon_mac", return_value=True), \
-                 patch("hermes_gaze.browser.webcam.Path.is_file", return_value=True), \
+            with patch("look.browser.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("look.browser.webcam.apple_silicon_mac", return_value=True), \
+                 patch("look.browser.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 for _ in range(2):
                     host.start(wait=2); generations.append(host._setup)

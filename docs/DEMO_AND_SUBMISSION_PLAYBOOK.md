@@ -47,7 +47,7 @@
 ### Scene 6: Benchmark & Closing Card (1:18 – 1:25)
 - **Visual:** Fast cut to the benchmark table (`19% raw webcam gaze -> 83% Bayesian fusion -> 98% with Semantic Lens`) and the install command:
   ```bash
-  hermes plugins install hermes-gaze
+  hermes plugins install look
   ```
 - **Voiceover:** *"100% local vision. Works with mouse hover too if your camera is off. Available now in the Hermes Marketplace."*
 
@@ -66,7 +66,7 @@ Look at any button, table, or card in Chrome, hold a key, and talk:
 Zero mouse. Zero hardware—just a MacBook webcam.
 
 How it works:
-Webcam gaze alone has ~130px of noise (bigger than a button). So hermes-gaze runs Bayesian reference resolution:
+Webcam gaze alone has ~130px of noise (bigger than a button). So look runs Bayesian reference resolution:
 1. Aligns a 10s fixation buffer to Whisper word-timestamps ("this" / "these")
 2. Integrates 2D gaze covariance over Chrome's live DOM + Accessibility tree
 3. Pops out a Semantic Lens with dwell selection whenever two targets are too close
@@ -80,15 +80,15 @@ Repo & Catalog PR below 👇
 
 ## 3. Hermes Plugin Catalog PR Template
 
-When opening the PR against `NousResearch/hermes-agent`, add `plugin-catalog/entries/hermes-gaze.yaml` (check existing files in `plugin-catalog/entries/` for exact field ordering):
+When opening the PR against `NousResearch/hermes-agent`, add `plugin-catalog/entries/look.yaml` (check existing files in `plugin-catalog/entries/` for exact field ordering):
 
 ### Pre-PR Verification Commands (Run on MacBook)
 ```bash
 # 1. Run the exact catalog validator + security scanner
-hermes plugins validate /path/to/hermes-gaze --install-deps
+hermes plugins validate /path/to/look --install-deps
 
 # 2. Run isolated doctor test
-hermes plugins doctor /path/to/hermes-gaze
+hermes plugins doctor /path/to/look
 
 # 3. Verify no compiled binaries (.task, .onnx, .pyc) are tracked in git
 git status --ignored
@@ -102,15 +102,15 @@ git rev-parse HEAD
 ```markdown
 ## Summary
 
-Adds `hermes-gaze` (**Hermes Gaze / Telepathy**) to the Hermes plugin catalog (Hermes Agent Plugin Hackathon entry).
+Adds `look` (**Look / Look**) to the Hermes plugin catalog (Hermes Agent Plugin Hackathon entry).
 
-`hermes-gaze` brings multimodal deictic reference resolution ("point with your eyes, command with your voice") to Hermes Agent and Chrome:
+`look` brings multimodal deictic reference resolution ("point with your eyes, command with your voice") to Hermes Agent and Chrome:
 - **Webcam gaze + head-pose tracker** (MediaPipe Face Landmarker + 9-point calibration + One-Euro filter + I-VT fixation buffer + online click/selection drift recalibration), plus a no-webcam mouse-hover / simulated-gaze fallback.
 - **Temporal eye-voice alignment** pairing word timestamps (`faster-whisper`) for deictic words (*"this"*, *"these"*, *"that"*) with historical fixations in document coordinates.
 - **Bayesian spatial-semantic resolver** combining 2D Gaussian box integration over Chrome's live DOM & Accessibility tree with verb-role priors and `ctx.llm` re-ranking.
 - **Semantic Lens overlay** rendered in a closed Shadow DOM that expands ambiguous adjacent candidates into separated cards selectable by gaze dwell, voice, keyboard (`1–4`), or click.
 
-- **Repository**: `https://github.com/<your-username>/hermes-gaze`
+- **Repository**: `https://github.com/<your-username>/look`
 - **Version**: `"0.1.0"`
 - **Pinned SHA**: `<40-character-commit-sha>`
 
@@ -120,7 +120,7 @@ Adds `hermes-gaze` (**Hermes Gaze / Telepathy**) to the Hermes plugin catalog (H
 - `ctx.register_hook`: `pre_llm_call` (bounded, labelled browser evidence; pointer highlight on fresh hover activation), plus answer-stream and turn lifecycle hooks
 - `ctx.register_platform`: `gaze` push-to-talk voice + gaze turn adapter
 - `ctx.register_cli_command`: `gaze-chrome`, `gaze-calibrate`, `gaze-benchmark`
-- `ctx.register_skill`: `gaze-telepathy`
+- `ctx.register_skill`: `look`
 - `ctx.llm`: semantic candidate re-ranking and consequence preview generation
 - Desktop SDK (`desktop/plugin.js`): status-bar tracking indicator and calibration launcher using `@hermes/plugin-sdk` only
 
@@ -130,6 +130,6 @@ Adds `hermes-gaze` (**Hermes Gaze / Telepathy**) to the Hermes plugin catalog (H
 - **First-run model weight download:** On first webcam launch, downloads Google's official MediaPipe Face Landmarker model (`face_landmarker.task`, ~3.7 MB, SHA-256 verified) from `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task` into `plugin_data_dir() / "models"`. No binary blobs are committed to the repository.
 
 ## Validation
-- `hermes plugins validate /path/to/hermes-gaze --install-deps` passes with 0 errors.
-- `hermes plugins doctor /path/to/hermes-gaze` passes.
+- `hermes plugins validate /path/to/look --install-deps` passes with 0 errors.
+- `hermes plugins doctor /path/to/look` passes.
 ```

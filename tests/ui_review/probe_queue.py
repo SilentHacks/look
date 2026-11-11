@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import tests
 from tests.test_voice_turns import Chrome,Host,snapshot
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime.voice_turns import VoiceTurns
 out={}
 def state(t,h):return {'paused':t.paused,'host_refused':t.host_refused,'pending':[{'status':r['status'],'question':r['utterance']} for r in t.pending],'active':t.active and t.active['utterance'],'injections':len(h.messages)}
 def rig():

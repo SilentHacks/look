@@ -23,7 +23,7 @@ try:
     results['preinjection_hooks']=r.page('({patches:audit.patches,shadows:audit.shadows.length})')
     r.aim('#first')
     private='PRIVATE-ANSWER-CANARY-48392 with **bold** and [unsafe](javascript:alert(1)) ![remote](https://invalid.test/private.png) <img src=https://invalid.test/x onerror=alert(1)>.'
-    r.iso('window.__HERMES_GAZE_OVERLAY__.showHudMessage('+json.dumps(private)+')')
+    r.iso('window.__LOOK_OVERLAY__.showHudMessage('+json.dumps(private)+')')
     time.sleep(.8)
     results['answer_private_frame']=r.text()
     results['answer_page_harvest']=r.page('harvest()')
@@ -44,7 +44,7 @@ try:
     reset();r.page('window.redirect=true');tap()
     results['replay_retarget_with_plugin']=r.page('({clicks:audit.clicks,events:audit.events})')
     # Control: no overlay, same already-installed page listener and physical input.
-    r.iso('window.__HERMES_GAZE_OVERLAY__.destroy()');reset();r.page('window.redirect=true');tap()
+    r.iso('window.__LOOK_OVERLAY__.destroy()');reset();r.page('window.redirect=true');tap()
     results['replay_retarget_without_plugin']=r.page('({clicks:audit.clicks,events:audit.events})')
     arm();reset()
     r.page("edit.focus()")
@@ -75,7 +75,7 @@ try:
         t.send('Input.dispatchKeyEvent',{'type':kind,'code':'Space','key':' ','windowsVirtualKeyCode':32});time.sleep(.04)
     time.sleep(.8)
     results['disconnected_space']=t.main('({scrollY,events:audit.events})')
-    t.iso('window.__HERMES_GAZE_OVERLAY__.destroy()')
+    t.iso('window.__LOOK_OVERLAY__.destroy()')
     for kind in ['keyDown','keyUp']:
         t.send('Input.dispatchKeyEvent',{'type':kind,'code':'Space','key':' ','windowsVirtualKeyCode':32});time.sleep(.04)
     time.sleep(.8)

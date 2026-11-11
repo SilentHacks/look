@@ -1,18 +1,18 @@
-"""Unit tests for hermes-gaze: Bayesian reference resolution, temporal alignment, data extraction, and plugin registration."""
+"""Unit tests for look: Bayesian reference resolution, temporal alignment, data extraction, and plugin registration."""
 
 from __future__ import annotations
 
 import unittest
 
-from hermes_gaze.benchmark.run_benchmark import build_synthetic_dashboard_candidates
-from hermes_gaze.resolver.bayesian_fusion import resolve_candidates
-from hermes_gaze.resolver.data_extractor import extract_structured_data, render_svg_scatter
-from hermes_gaze.resolver.temporal_aligner import extract_deictic_anchors, has_deictic_pronoun
-from hermes_gaze.tracker.recalibrator import OnlineRecalibrator
-from hermes_gaze.tracker.simulated_gaze import FixationSample
+from look.benchmark.run_benchmark import build_synthetic_dashboard_candidates
+from look.resolver.bayesian_fusion import resolve_candidates
+from look.resolver.data_extractor import extract_structured_data, render_svg_scatter
+from look.resolver.temporal_aligner import extract_deictic_anchors, has_deictic_pronoun
+from look.tracker.recalibrator import OnlineRecalibrator
+from look.tracker.simulated_gaze import FixationSample
 
 
-class TestHermesGazePlugin(unittest.TestCase):
+class TestLookPlugin(unittest.TestCase):
     def test_deictic_detection_and_temporal_anchors(self) -> None:
         self.assertTrue(has_deictic_pronoun("What happens if I press this?"))
         self.assertTrue(has_deictic_pronoun("Export these results"))
@@ -92,7 +92,7 @@ class TestHermesGazePlugin(unittest.TestCase):
         self.assertEqual(res_table.top.candidate.id, "campaigns-table")
 
     def test_leaf_header_vs_container_resolution(self) -> None:
-        from hermes_gaze.resolver.bayesian_fusion import CandidateElement
+        from look.resolver.bayesian_fusion import CandidateElement
 
         section_cand = CandidateElement(
             id="panel-campaigns",

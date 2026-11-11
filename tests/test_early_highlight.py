@@ -8,8 +8,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from hermes_gaze.config import GazeConfig
-from hermes_gaze.runtime.early_highlight import EarlyHighlight, request_payload
+from look.config import GazeConfig
+from look.runtime.early_highlight import EarlyHighlight, request_payload
 
 
 class EarlyHighlightTests(unittest.TestCase):
@@ -100,7 +100,7 @@ class EarlyHighlightTests(unittest.TestCase):
                      patch.dict('os.environ', TYPESAFE_API_KEY='must-not-be-used'), \
                      patch('urllib.request.urlopen') as network, \
                      redirect_stdout(printed), redirect_stderr(printed), \
-                     self.assertNoLogs('hermes_gaze'):
+                     self.assertNoLogs('look'):
                     state = EarlyHighlight(None, {}, GazeConfig(), fallback)
                     state.after_answer('answer')
                 self.assertEqual(state.status, 'failed')

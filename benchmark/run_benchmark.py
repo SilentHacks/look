@@ -1,4 +1,4 @@
-"""Quantitative accuracy benchmark for hermes-gaze across noise levels (sigma = 80, 130, 180 px).
+"""Quantitative accuracy benchmark for look across noise levels (sigma = 80, 130, 180 px).
 
 Evaluates resolution methods on a realistic dense toolbar + table + cards layout:
 1. Raw Gaze Point Hit-Test (elementFromPoint)

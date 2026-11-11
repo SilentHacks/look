@@ -28,10 +28,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests  # Package shell, not installed Hermes.
 from tests.test_first_run import FirstRunTests
 from tests.test_chrome_consent import until
-from hermes_gaze import cli
-from hermes_gaze.runtime import service
-from hermes_gaze.browser import extension as extension_transport, extension_host
-from hermes_gaze.config import GazeConfig
+from look import cli
+from look.runtime import service
+from look.browser import extension as extension_transport, extension_host
+from look.config import GazeConfig
 
 HERE = Path(__file__).resolve().parents[1]
 # The shipped public key keeps setup, relocation and the real Chrome origin in agreement.
@@ -42,7 +42,7 @@ PAGE = b'''<!doctype html><title>Look disposable adapter fixture</title>
 <h1>Local fixture</h1><p id="target">The fixture price is 42 pounds.</p><button id="delete">Delete fixture</button>
 <script>window.keys=[];for(const type of ['keydown','keyup','input','selectionchange'])document.addEventListener(type,e=>keys.push(e.key||String(getSelection())),true);
 window.suppressedFocusEvents=0;for(const [node,type] of [[window,'blur'],[document,'visibilitychange']])node.addEventListener(type,e=>{window.suppressedFocusEvents++;e.stopImmediatePropagation()},true);
-setInterval(()=>fetch('/status',{method:'POST',body:JSON.stringify({root:!!document.getElementById('hermes-gaze-root')})}),100);
+setInterval(()=>fetch('/status',{method:'POST',body:JSON.stringify({root:!!document.getElementById('look-root')})}),100);
 document.querySelector('#delete').onclick=()=>fetch('/mutation',{method:'POST'});</script>'''
 
 
@@ -86,7 +86,7 @@ chrome.debugger.sendCommand = async (target, method, params) => {
   if (fixtureFailure && (!fixtureExpression || fixtureExpression === params.expression) &&
       (fixtureFailure === method ||
       fixtureFailure === 'Look.lease' && method === 'Runtime.evaluate' &&
-      params.expression === 'window.__HERMES_GAZE_OVERLAY__?.transportAlive();true')) {
+      params.expression === 'window.__LOOK_OVERLAY__?.transportAlive();true')) {
     fixtureFailure = ''; fixtureFailures++;
     throw Error(JSON.stringify({code:-32000,message:'Cannot find context with specified id'}));
   }
@@ -281,10 +281,10 @@ def scenario(chrome, mode, out=None):
                 for kind in ('keyDown', 'keyUp'):
                     raw('Input.dispatchKeyEvent', dict(type=kind, code=code, key=text))
             def click(selector):
-                until(lambda: evaluate('(()=>{const a=window.__HERMES_GAZE_OVERLAY__,r=a.uiFrame.getBoundingClientRect(),d=a.debug();return d.sizes.cardH>0 && d.frame.h>0 && Math.abs(r.y-d.frame.y)<1 && Math.abs(r.x-d.card.x)<1})()', tab._context_unique_id))
+                until(lambda: evaluate('(()=>{const a=window.__LOOK_OVERLAY__,r=a.uiFrame.getBoundingClientRect(),d=a.debug();return d.sizes.cardH>0 && d.frame.h>0 && Math.abs(r.y-d.frame.y)<1 && Math.abs(r.x-d.card.x)<1})()', tab._context_unique_id))
                 card = tab._ui_frames['card'][1]
                 point = evaluate(f'(()=>{{const r=document.querySelector({json.dumps(selector)}).getBoundingClientRect();return {{x:r.x+r.width/2,y:r.y+r.height/2}}}})()', card)
-                frame = evaluate('(()=>{const r=window.__HERMES_GAZE_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()', tab._context_unique_id)
+                frame = evaluate('(()=>{const r=window.__LOOK_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()', tab._context_unique_id)
                 for kind in ('mousePressed', 'mouseReleased'):
                     raw('Input.dispatchMouseEvent', dict(type=kind, button='left', clickCount=1, x=point['x']+frame['x'], y=point['y']+frame['y']))
             for name, (_, context) in tab._ui_frames.items():
@@ -292,12 +292,12 @@ def scenario(chrome, mode, out=None):
                 evaluate('window.fixtureTimer=false;setTimeout(()=>window.fixtureTimer=true,0);true', context)
                 time.sleep(.15)
                 check(name + '_timers_disabled', evaluate('!window.fixtureTimer', context))
-            check('website_cannot_access_isolated_api', evaluate('typeof window.__HERMES_GAZE_OVERLAY__ === "undefined"'))
+            check('website_cannot_access_isolated_api', evaluate('typeof window.__LOOK_OVERLAY__ === "undefined"'))
             if mode == 'webcam':
                 from tests.calibration_chrome import HEADLESS, Scripted, Window, fixture as camera_fixture
                 from tests.test_webcam import appearance_observations
-                from hermes_gaze.browser.webcam import WebcamHost
-                from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
+                from look.browser.webcam import WebcamHost
+                from look.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
                 camera_out = out or directory
                 camera_out.mkdir(parents=True, exist_ok=True)
                 video = camera_fixture(directory)
@@ -372,7 +372,7 @@ def scenario(chrome, mode, out=None):
                     check(f'question_{number}_accepted_and_answered_after_rearm', True)
                 question(1)
                 for operation in ('read', 'presentation'):
-                    expression = '!!window.__HERMES_GAZE_OVERLAY__'
+                    expression = '!!window.__LOOK_OVERLAY__'
                     root.command('Test.failRead', {'method':'Runtime.evaluate', 'expression':expression})
                     with unittest_error():
                         tab.eval_js_once(expression, context_id=tab._context_unique_id, operation=operation)
@@ -408,7 +408,7 @@ def scenario(chrome, mode, out=None):
                 check('return_to_selected_product_keeps_connection', root.live and root.generation == generation)
                 for kind in ('mousePressed', 'mouseReleased'):
                     raw('Input.dispatchMouseEvent', dict(type=kind, button='left', clickCount=1, x=105, y=105))
-                with patch('hermes_gaze.audio.voice.recognition_ready', return_value=True), \
+                with patch('look.audio.voice.recognition_ready', return_value=True), \
                      patch.object(session.microphone, 'start', return_value={'ok':True}) as start:
                     raw('Input.dispatchKeyEvent', dict(type='keyDown', code='Space', key=' '))
                     until(lambda: start.called, 3)
@@ -438,7 +438,7 @@ def scenario(chrome, mode, out=None):
                 turns.post(session_id='fixture-session', turn_id='fixture-turn', assistant_response='## Fixture\n\nPRIVATE_LOCAL_ANSWER')
                 until(lambda: evaluate('document.body.textContent.includes("PRIVATE_LOCAL_ANSWER")', card))
                 until(lambda: evaluate('getComputedStyle(document.querySelector(".card")).opacity === "1" && document.querySelector(".body").getBoundingClientRect().height > 0', card)
-                      and evaluate('Number(window.__HERMES_GAZE_OVERLAY__.uiFrame.parentElement.style.opacity) > .99', tab._context_unique_id))
+                      and evaluate('Number(window.__LOOK_OVERLAY__.uiFrame.parentElement.style.opacity) > .99', tab._context_unique_id))
                 check('answer_rendered_in_existing_private_renderer', True)
                 evaluate('(()=>{const r=document.createRange();r.selectNodeContents(document.body);const s=getSelection();s.removeAllRanges();s.addRange(r);return true})()', card)
                 check('page_cannot_read_answer_input_or_selection', evaluate('!document.body.textContent.includes("PRIVATE_LOCAL_ANSWER") && !String(getSelection()).includes("PRIVATE_LOCAL_ANSWER") && !JSON.stringify(keys).includes("PRIVATE_QUESTION")'))
@@ -466,7 +466,7 @@ def scenario(chrome, mode, out=None):
                     tab._submit(tab._render_ui({'frame':'card','view':'compose','title':'BACKGROUND_PRIVATE_MARKER'}), 3)
                 check('background_private_render_refused', not evaluate('document.body.textContent.includes("BACKGROUND_PRIVATE_MARKER")', card))
                 time.sleep(4.2)
-                check('background_liveness_does_not_destroy_selected_surface', evaluate('!!document.getElementById("hermes-gaze-root")'))
+                check('background_liveness_does_not_destroy_selected_surface', evaluate('!!document.getElementById("look-root")'))
                 root.command('Test.focus', {'target': target})
                 old_route = tab._route_id
                 evaluate('history.pushState({},"","/?route=1");history.back();true')
@@ -537,7 +537,7 @@ def scenario(chrome, mode, out=None):
             if server.error:
                 print('FIXTURE_WORKER_ERROR', server.error, file=sys.stderr)
             if root.live and 'raw' in locals():
-                print('FIXTURE_DIAGNOSTIC', evaluate('window.__HERMES_GAZE_OVERLAY__?.debug()', tab._context_unique_id),
+                print('FIXTURE_DIAGNOSTIC', evaluate('window.__LOOK_OVERLAY__?.debug()', tab._context_unique_id),
                       evaluate('({focus:document.hasFocus(),active:document.activeElement?.id,text:document.body.textContent})', tab._ui_frames['card'][1]), file=sys.stderr)
                 if out:
                     (out / 'extension-failure.png').write_bytes(base64.b64decode(raw('Page.captureScreenshot', {'format':'png'})['data']))

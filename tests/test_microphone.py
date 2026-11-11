@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_gaze.audio.microphone import Microphone
+from look.audio.microphone import Microphone
 from tests.test_recording_hold import Input
 
 

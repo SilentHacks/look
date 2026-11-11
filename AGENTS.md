@@ -1,8 +1,8 @@
-# AGENTS.md — hermes-gaze contributor guide
+# AGENTS.md — look contributor guide
 
 Written for coding agents working in this repository. Read this before editing.
 
-Hermes Gaze ("Telepathy") is a Hermes Agent plugin that supplies exact Chrome
+Look ("Look") is a Hermes Agent plugin that supplies exact Chrome
 cursor identity and bounded structural evidence in hover mode. The model decides
 semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 
@@ -11,7 +11,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | Path | What lives here |
 |---|---|
 | `plugin.yaml` | Plugin manifest: tools/hooks/skill declarations, config schema. Keep 1:1 with `register()`. |
-| `__init__.py` | Registration of fourteen tools (the same fourteen in `plugin.yaml` and `tools.ALL_TOOLS`), context/stream/final/turn-end hooks, connected-session tool restrictions, `/gaze` connection, CLI and skill. |
+| `__init__.py` | Registration of fourteen tools (the same fourteen in `plugin.yaml` and `tools.ALL_TOOLS`), context/stream/final/turn-end hooks, connected-session tool restrictions, `/look` connection, CLI and skill. |
 | `tools.py`, `browser/browser_tasks.py` | Operation-specific captured-identity tools and exact user-turn action grants; bounded structure, batch fill/select, click, keys, tabs/navigation, scroll/wait and request-commit. |
 | `runtime/service.py` | Resolution, frozen `submit_snapshot` delivery/fallback, nonce-checked binding dispatch and one-shot explanation. |
 | `runtime/early_highlight.py` | Asynchronous, read-only TypeSafe scope decision; 1.5-second deadline and post-answer fallback, never an inbox admission wait. |
@@ -22,7 +22,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `audio/voice.py` | NVIDIA v3 or explicitly selected Whisper recognition. V3 falls back only to cached Whisper. CoreML/MLX v2 is removed. Registration warms verified caches asynchronously, explicit setup alone downloads. `record_microphone`, `MAX_AUDIO_BYTES`. See `docs/REFERENCE.md`. |
 | `audio/asr/parakeet_v3.py`, `parakeet_v3_worker.py` | Apple Silicon default (`whisper_model: auto` → `parakeet-v3`): NVIDIA NeMo-Speech.cpp v0.3.0 Metal C ABI and official v3 Q8 GGUF. Pinned archive/extracted bytes, warm isolated pipe worker, no microphone/listener. Explicit base.en/tiny.en selects Whisper directly on macOS/Linux. See `docs/PARAKEET_V3.md`. |
 | `runtime/server.py` | `SessionHttpServer`: GET-only static server on `127.0.0.1:9111` for the demo page (`/`, `/index.html`, `/api/status`). No POST, no CORS, no resolution endpoints. |
-| `cli.py` | `hermes gaze` subcommand + `/gaze` slash handler. |
+| `cli.py` | `hermes look` subcommand + `/look` slash handler. |
 | `browser/webcam.py` | Explicit-user-started owned Chrome camera process, exact-context nonce binding, pinned/verified assets and private local calibration persistence. Never attach it to the user's browser. |
 | `browser/webcam_host.js` | Camera/inference and plain nine-point UI in that separate process's isolated world. No website camera, audio, HTTP sample endpoint or image serialization. |
 | `browser/webcam_features.js` | Shared, version-ordered iris/head and normalized eye-appearance extraction for live and offline frames. Live uses the left eye only; saved offline layout remains both eyes then the original eight features. |
@@ -39,9 +39,9 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 | `resolver/cursor_context.py` | PURE exact preceding-hit selection and shared ≤6000-character fenced context; hover never calls Bayesian fusion or the legacy candidate extractor. |
 | `tracker/` | PURE modules — `simulated_gaze.py` (ring buffer + pointer tracker), `recalibrator.py`, `webcam_gaze.py` (swappable estimator, personal ridge calibration and measured screen→viewport mapping). Same purity rule. |
 | `benchmark/` | Self-contained demo dashboard, simulated accuracy suite, saved browser-action summaries, and real-Hermes companion/prompt probes. Retired Phase 0/1 artifacts live only in git history. |
-| `tests/` | stdlib `unittest`, private-Chrome security/recording/webcam probes, `ui_review/probe_*.py` and browser-action acceptance fixtures. `tests/__init__.py` registers a `hermes_gaze` package shell (no `__init__.py` exec), matching Hermes's plugin loader. |
+| `tests/` | stdlib `unittest`, private-Chrome security/recording/webcam probes, `ui_review/probe_*.py` and browser-action acceptance fixtures. `tests/__init__.py` registers a `look` package shell (no `__init__.py` exec), matching Hermes's plugin loader. |
 | `docs/` | Webcam setup, recording/dataset/evaluation guides and browser-action results; also the historical PLAN, prior art/pitch and demo playbook. |
-| `skills/gaze-telepathy/SKILL.md` | Bundled skill for browser evidence, snapshot tools and session setup. Keep simulated decision names/thresholds in sync with `resolver/bayesian_fusion.py`. |
+| `skills/look/SKILL.md` | Bundled skill for browser evidence, snapshot tools and session setup. Keep simulated decision names/thresholds in sync with `resolver/bayesian_fusion.py`. |
 | `audio/asset_cache.py`, `audio/assets.json` | Pinned recognition and read-aloud asset manifest and checksum-verified local cache loading. |
 | `runtime/release_timing.py` | Bounded local timing instrumentation for release evidence. |
 
@@ -56,7 +56,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   an escaped `<browser_context>` envelope with `<page_data>`, relative pointer age
   and the labelled question. `stamp_resolution` changes only its trusted epoch
   slot. Never slice a rendered packet: its fences and suffix share the 6000-char bound.
-- **Overlay → Python only via `__hermesGazeIntent`.** No `fetch()` to `runtime/server.py`, no
+- **Overlay → Python only via `__lookIntent`.** No `fetch()` to `runtime/server.py`, no
   new HTTP endpoints, no `Runtime.evaluate` polling for decisions. The binding keeps a
   single ordered channel that works on file:// and any origin without CORS. Replies
   are callback-style (`reply({...})` → `api.onIntentResult`) — intents return nothing.
@@ -143,7 +143,7 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
 - **Inbox `speak` resolves server-owned item/request text, never client-supplied speech.**
   It speaks `speech_text`, no markup characters. One cancellable worker lazy-loads
   and caches Phonon-31M English q8, default catalogue voice Russell (`tts_voice`).
-  Pinned assets are fetched only by explicit setup (`hermes gaze setup-speech` or
+  Pinned assets are fetched only by explicit setup (`hermes look setup-speech` or
   `scripts/setup_speech.py`); playback
   uses local paths and must work offline. Native `sounddevice` output uses bounded
   writes; Stop/Esc, supersession and disconnect signal cancellation without joining
@@ -159,9 +159,9 @@ semantic scope from the utterance; noisy simulated mode retains Bayesian fusion.
   The temporal aligner compares anchors against fixation epochs — unshifted word
   times silently collapse alignment onto the latest fixation.
 - **Relative imports only inside the package.** Hermes loads this plugin as
-  `hermes_plugins.hermes_gaze`; `import hermes_gaze` inside a module would exec a
+  `hermes_plugins.look`; `import look` inside a module would exec a
   SECOND copy of the package (the split-brain singleton bug this refactor removed).
-  `tests/test_layering.py` fails on any `import hermes_gaze` / `from hermes_gaze`
+  `tests/test_layering.py` fails on any `import look` / `from look`
   outside `tests/`.
 - **`resolver/` and `tracker/` stay pure.** No `websockets`, `urllib.request`,
   `http.server`, `subprocess`, `socket`, or imports of `browser`/`service`/`server`.
@@ -353,13 +353,13 @@ ruff check                                        # if ruff is installed
 # whole flow on a real Hermes backend, serial, free model; run with the Hermes venv's Python:
 # HERMES_DISABLE_LAZY_INSTALLS=1 <venv>/bin/python benchmark/probe_companion_ui.py --out DIR --headless
 # accuracy table — benchmark has package-relative imports, so load the tests shell first:
-python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_benchmark_suite, format_benchmark_markdown; print(format_benchmark_markdown(run_benchmark_suite()))"
+python3 -c "import tests; from look.benchmark.run_benchmark import run_benchmark_suite, format_benchmark_markdown; print(format_benchmark_markdown(run_benchmark_suite()))"
 ```
 
 ## Known limits
 
-- `hermes gaze` CLI subcommand is unavailable under `plugins.isolation: host` —
-  Hermes skips `register_cli_command` in host isolation. The `/gaze` slash command
+- `hermes look` CLI subcommand is unavailable under `plugins.isolation: host` —
+  Hermes skips `register_cli_command` in host isolation. The `/look` slash command
   is unaffected.
 - `get_shared_session()`'s `GazeSession` is deliberately machine-scoped: the owned
   companion Chrome and microphone are OS resources shared across Hermes profiles. Do not
@@ -382,7 +382,7 @@ python3 -c "import tests; from hermes_gaze.benchmark.run_benchmark import run_be
   or absent gaze yields no fixation. No cursor fallback or gaze click authority.
   See `docs/WEBCAM_GAZE.md`; `tests/webcam_chrome.py` and headless
   `tests/calibration_chrome.py` use fake devices only.
-  `/gaze tracker` reports cumulative numeric per-reason `drops`, including missing
+  `/look tracker` reports cumulative numeric per-reason `drops`, including missing
   features, off-screen predictions, missing/changed page anchors, outside-page
   mapping and absent foreground tabs. Never expose features/coordinates there.
   Pointer advice appears only for missing/changed anchors, not every stale gaze.

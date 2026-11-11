@@ -190,19 +190,19 @@ P=/tmp/look-v3-venv/bin/python
 $P -m pip install 'numpy>=1.26,<3' 'huggingface_hub>=0.23,<2' \
   'faster-whisper>=1,<2' 'websockets>=15,<16' pyarrow soundfile
 # Explicitly prepare Whisper for comparison (no microphone).
-$P -c 'import tests; from hermes_gaze.audio.asset_cache import prepare,WHISPER; prepare(WHISPER["base.en"],download=True)'
+$P -c 'import tests; from look.audio.asset_cache import prepare,WHISPER; prepare(WHISPER["base.en"],download=True)'
 # Isolated v3 product setup, without importing plugin registration.
 V3_HOME=/tmp/look-v3-home
 V3_HF=/tmp/look-v3-hf
-env HOME="$V3_HOME" HF_HOME="$V3_HF" $P -c 'import tests; from hermes_gaze.audio.asr.parakeet_v3 import get_runner; get_runner(download=True).close()'
+env HOME="$V3_HOME" HF_HOME="$V3_HF" $P -c 'import tests; from look.audio.asr.parakeet_v3 import get_runner; get_runner(download=True).close()'
 # Explicit public fixture fetch, then compare (use the selected local GGUF path).
 R="$V3_HOME/Library/Caches/Look/nemo-speech/0.3.0/nemo-speech-0.3.0-macos-aarch64-metal"
 M="$V3_HF/hub/models--nvidia--parakeet-tdt-0.6b-v3/snapshots/541d1f99c6b0c3cd0b11a95167540bb8edefd82b/parakeet-tdt-0.6b-v3.q8_0.gguf"
-$P -c 'import tests; from hermes_gaze.benchmark.asr_compare import main; main()' \
+$P -c 'import tests; from look.benchmark.asr_compare import main; main()' \
   --fetch --fixtures /tmp/look-reference.parquet --backend v3 --runtime "$R" \
   --model "$M" --out /tmp/look-v3.json
 # Run serially against the existing Whisper cache.
-$P -c 'import tests; from hermes_gaze.benchmark.asr_compare import main; main()' \
+$P -c 'import tests; from look.benchmark.asr_compare import main; main()' \
   --fixtures /tmp/look-reference.parquet --backend whisper --out /tmp/look-whisper.json
 $P -m unittest tests.test_parakeet_v3 tests.test_pinned_downloads \
   tests.test_voice_decode tests.test_session_delivery

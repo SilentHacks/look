@@ -1,10 +1,9 @@
-"""Test bootstrap for hermes-gaze.
+"""Test bootstrap for look.
 
-The plugin directory is named ``hermes-gaze`` (hyphenated — Hermes loads it by
-path, not by package name), so ``import hermes_gaze`` cannot resolve normally.
+Hermes loads the plugin by path, not by an installed Python package name.
 This registers a package *shell* without executing ``__init__.py`` (the same
 shape Hermes's own ``register_synthetic_package`` produces), so submodule
-imports like ``from hermes_gaze.resolver.bayesian_fusion import ...`` work in
+imports like ``from look.resolver.bayesian_fusion import ...`` work in
 tests exactly as they do inside Hermes. Runs for both unittest and pytest.
 """
 
@@ -16,7 +15,7 @@ import sys
 from pathlib import Path
 
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-_PKG_NAME = "hermes_gaze"
+_PKG_NAME = "look"
 
 if _PKG_NAME not in sys.modules:
     spec = importlib.machinery.ModuleSpec(_PKG_NAME, None, is_package=True)

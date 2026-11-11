@@ -5,8 +5,8 @@ import threading
 import unittest
 from types import SimpleNamespace
 
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.resolver.cursor_context import build_context
+from look.browser.cdp_bridge import GazeSession
+from look.resolver.cursor_context import build_context
 
 
 class BrowserActions:
@@ -34,7 +34,7 @@ class BrowserActions:
         self.approvals = {}
 
     def eval_js_once(self, expression, timeout=6, *, target=None, document=None, route=None):
-        call = expression.split("window.__HERMES_GAZE_OVERLAY__.", 1)[1]
+        call = expression.split("window.__LOOK_OVERLAY__.", 1)[1]
         method, args = call.split("(", 1)
         args = json.loads("[" + args.rsplit(")", 1)[0] + "]")
         if method == "clearActionConfirmation":

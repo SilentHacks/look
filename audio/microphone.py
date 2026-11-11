@@ -136,9 +136,9 @@ class Microphone:
                     return  # The waveform is decoration; capture never depends on it.
 
         if on_level is not None:
-            threading.Thread(target=levels, name="hermes-gaze-mic-level", daemon=True).start()
-        threading.Thread(target=check_foreground, name="hermes-gaze-mic-focus", daemon=True).start()
-        threading.Thread(target=watch, name="hermes-gaze-mic", daemon=True).start()
+            threading.Thread(target=levels, name="look-mic-level", daemon=True).start()
+        threading.Thread(target=check_foreground, name="look-mic-focus", daemon=True).start()
+        threading.Thread(target=watch, name="look-mic", daemon=True).start()
         return {"ok": True, "ready_ms": round((time.monotonic() - started) * 1000)}
 
     def stop(self, owner: str, timing=None, before_stop=None) -> tuple[bytes, float]:

@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.audio import asset_cache as cache, speech, voice
-from hermes_gaze import cli
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
+from look.audio import asset_cache as cache, speech, voice
+from look import cli
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
 from tests import test_first_run
 from tests.test_cursor_context import capture
 
@@ -68,7 +68,7 @@ class PinnedDownloadsTests(unittest.TestCase):
     def fake_loaders(self):
         coreml, mlx, whisper = Mock(), Mock(), Mock()
         self.enterContext(patch.dict(sys.modules, {
-            "hermes_gaze.audio.asr.parakeet_coreml": SimpleNamespace(ParakeetCoreML=coreml),
+            "look.audio.asr.parakeet_coreml": SimpleNamespace(ParakeetCoreML=coreml),
             "parakeet_mlx": SimpleNamespace(from_pretrained=mlx),
             "faster_whisper": SimpleNamespace(WhisperModel=whisper),
         }))
@@ -110,8 +110,8 @@ class PinnedDownloadsTests(unittest.TestCase):
         self.download.assert_not_called()
 
     def test_old_explicit_choices_and_v3_fallback_ignore_installed_v2_and_caches(self):
-        from hermes_gaze import config
-        from hermes_gaze.audio.asr import parakeet_v3 as v3
+        from look import config
+        from look.audio.asr import parakeet_v3 as v3
         # Make both removed loaders and their old cache files available.
         coreml, mlx, whisper = self.fake_loaders()
         coreml.side_effect = mlx.side_effect = AssertionError("removed backend executed")
@@ -348,7 +348,7 @@ class PinnedDownloadsTests(unittest.TestCase):
 
     def test_registration_never_downloads_and_cached_primary_warms_offline(self):
         _, _, whisper = self.fake_loaders()
-        from hermes_gaze import config
+        from look import config
         for cached in (False, True):
             with self.subTest(cached=cached), patch.object(config, "apple_silicon_mac", return_value=False):
                 if cached:
@@ -380,7 +380,7 @@ class PinnedDownloadsTests(unittest.TestCase):
                 self.addCleanup(fixture.doCleanups)
                 events = []
                 try:
-                    from hermes_gaze import config
+                    from look import config
                     with patch.object(config, "apple_silicon_mac", return_value=False), \
                             patch.object(voice, "prepare"), patch.object(voice, "get_whisper_model", side_effect=load):
                         _, session, ctx, _, _ = fixture.register(None, warm=True)

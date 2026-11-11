@@ -20,6 +20,7 @@ import urllib.request
 
 from ..asset_cache import AssetIntegrityError, AssetsMissing, prepare, verify
 from ...platform_support import apple_silicon_mac
+from ...process_env import minimal_env
 
 MODEL = "nvidia/parakeet-tdt-0.6b-v3"
 MODEL_FILE = "parakeet-tdt-0.6b-v3.q8_0.gguf"
@@ -83,8 +84,7 @@ class Runner:
             [sys.executable, "-u", str(Path(__file__).with_name("parakeet_v3_worker.py")),
              str(runtime / "lib/libnemo_speech_asr_c.dylib"), str(model)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            env={k: v for k, v in os.environ.items()
-                 if not k.startswith(("NEMO_SPEECH_", "DYLD_"))},
+            env=minimal_env(),
         )
         try:
             self._reply(time.monotonic() + 90)

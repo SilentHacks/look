@@ -5,8 +5,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from hermes_gaze.browser.companion import Companion
-from hermes_gaze.audio.microphone import Microphone
+from look.browser.companion import Companion
+from look.audio.microphone import Microphone
 
 
 class Input:

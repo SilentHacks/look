@@ -7,9 +7,9 @@ import tempfile
 import threading
 from unittest.mock import patch
 
-from hermes_gaze.runtime.native_input import NativeError, NativeInput
+from look.runtime.native_input import NativeError, NativeInput
 
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime.voice_turns import VoiceTurns
 from tests.test_voice_turns import Chrome, snapshot
 
 
@@ -101,7 +101,7 @@ class NativeReceiptOwnership(unittest.TestCase):
         self.assertEqual(len(self.native.messages), 1)
 
     def test_stop_retains_partial_and_exact_receipt_ownership(self):
-        from hermes_gaze.browser.browser_tasks import BrowserTasks
+        from look.browser.browser_tasks import BrowserTasks
         self.turns.session.tasks = BrowserTasks(self.turns.session)
         self.turns.submit("first", snapshot("10"))
         first = self.turns.active
@@ -141,7 +141,7 @@ class NativeReceiptOwnership(unittest.TestCase):
         self.turns.native_receipt(first, dict(status="terminal", outcome="cancelled"))
 
     def test_stop_transport_failure_still_revokes_exact_browser_task(self):
-        from hermes_gaze.browser.browser_tasks import BrowserTasks
+        from look.browser.browser_tasks import BrowserTasks
         self.turns.session.tasks = BrowserTasks(self.turns.session)
         self.turns.submit("first", snapshot("10"))
         run = self.turns.active
@@ -165,7 +165,7 @@ class NativeCancellationTransport(unittest.IsolatedAsyncioTestCase):
         client.receipt_admission = ""
         client.identity = ("instance", 7)
         client.home = "/profile"
-        client.plugin_id = "hermes-gaze"
+        client.plugin_id = "look"
         client.changed = asyncio.Event()
         run = dict(request_id="request", wire="exact wire", cancel_requested=True)
         client._rpc = AsyncMock(side_effect=[
@@ -174,7 +174,7 @@ class NativeCancellationTransport(unittest.IsolatedAsyncioTestCase):
             {"status": "terminal", "ref": {"profile_id": "/profile", "session_id": "owned"},
              "authority_epoch": 7, "outcome": "cancelled"}])
         receipts = []
-        with patch("hermes_gaze.runtime.native_input.consent", return_value=True):
+        with patch("look.runtime.native_input.consent", return_value=True):
             await asyncio.wrap_future(client.submit(run, lambda r, receipt: receipts.append(receipt)))
         self.assertEqual(client._rpc.await_args_list[1].args, ("prompt.cancel",))
         self.assertEqual(client._rpc.await_args_list[1].kwargs,
@@ -221,7 +221,7 @@ class NativeAuthTransport(unittest.TestCase):
             self.addCleanup(server.server_close)
             self.addCleanup(server.shutdown)
         with tempfile.TemporaryDirectory() as home:
-            client = NativeInput(home, "hermes-gaze", "logical")
+            client = NativeInput(home, "look", "logical")
             with patch.object(client, "_bootstrap", return_value=(
                     ("fixture", 1), f"ws://127.0.0.1:{redirect.server_port}/api/ws", "private-ticket")):
                 with self.assertRaises(NativeError):

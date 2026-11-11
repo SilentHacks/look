@@ -5,9 +5,9 @@ import json
 import unittest
 from unittest import mock
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.resolver.cursor_context import MAX_CONTEXT, build_context, cursor_result, stamp_resolution
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.resolver.cursor_context import MAX_CONTEXT, build_context, cursor_result, stamp_resolution
 
 
 def capture():
@@ -308,7 +308,7 @@ class TestCursorContext(unittest.TestCase):
         self.assertEqual(replies[0]["error"], "model timed out")
 
     def test_record_voice_freezes_before_transcription(self):
-        from hermes_gaze.audio import voice
+        from look.audio import voice
         session = GazeSession(cdp_http_url="http://127.0.0.1:1")
         self.addCleanup(session.close)
         original = capture()
@@ -323,7 +323,7 @@ class TestCursorContext(unittest.TestCase):
         self.assertEqual(result["top"]["id"], "@1")
 
     def test_hover_rejects_fabricated_coordinate_hints(self):
-        from hermes_gaze import tools
+        from look import tools
         session = GazeSession(cdp_http_url="http://127.0.0.1:1")
         self.addCleanup(session.close)
         with mock.patch.object(tools, "get_shared_session", return_value=session):

@@ -24,8 +24,8 @@ sys.path.insert(0, str(ROOT))
 os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
 import tests
 from benchmark.probe_companion_ui import Tab, make_recording
-from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, LandmarkEstimator, ScreenPoint
-from hermes_gaze.browser.webcam import WebcamHost
+from look.tracker.webcam_gaze import AppearanceEstimator, LandmarkEstimator, ScreenPoint
+from look.browser.webcam import WebcamHost
 from tests.webcam_chrome import PORTRAIT, PORTRAIT_HASH, tracker_tab, until
 
 HEADLESS = ("--headless=new", "--window-size=1440,900", "--screen-info={1440x900}")

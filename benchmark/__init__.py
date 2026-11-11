@@ -1,1 +1,1 @@
-"""Benchmark suite package for hermes-gaze."""
+"""Benchmark suite package for look."""

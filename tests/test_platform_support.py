@@ -4,8 +4,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze import cli, platform_support
-from hermes_gaze.audio import voice
+from look import cli, platform_support
+from look.audio import voice
 
 
 class PlatformSupport(unittest.TestCase):

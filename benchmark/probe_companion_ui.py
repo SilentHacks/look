@@ -4,9 +4,9 @@ model, real overlay and bridge, private Chrome, real pages, trusted CDP input.
 Run with a self-contained virtualenv containing Hermes and its dependencies:
   HERMES_DISABLE_LAZY_INSTALLS=1 <venv>/bin/python benchmark/probe_companion_ui.py --out DIR
 
-Isolated: temporary HERMES_HOME and Chrome profile, own debugging port. Hermes's own auth is
-copied into that temporary home with 0600 and deleted with it. Optional early-highlight
-credentials are resolved by Hermes; this probe never imports a TypeSafe key file.
+Isolated: temporary HERMES_HOME and Chrome profile, own debugging port. Requires
+LOOK_PROBE_API_KEY, a dedicated test-only inference key; never copies account auth.
+Optional early-highlight calls use only that dedicated probe credential.
 Audio is a stub sounddevice that plays synthesized speech; the real microphone is not exercised.
 Serial by design: the configured free model is quota-limited.
 """
@@ -144,7 +144,7 @@ class Tab:
 
     def world(self, frame_id=None):
         frame_id = frame_id or self.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
-        return self.send("Page.createIsolatedWorld", {"frameId": frame_id, "worldName": "hermes-gaze"})["executionContextId"]
+        return self.send("Page.createIsolatedWorld", {"frameId": frame_id, "worldName": "look"})["executionContextId"]
 
     def iso(self, expr, context=None):
         result = self.send("Runtime.evaluate", {"expression": expr, "contextId": context or self.world(), "returnByValue": True, "awaitPromise": True})
@@ -153,12 +153,12 @@ class Tab:
         return result["result"].get("value")
 
     def panel(self, frame, expr):
-        remote = self.send("Runtime.evaluate", {"expression": f"window.__HERMES_GAZE_OVERLAY__.uiFrames.{frame}", "contextId": self.world()})
+        remote = self.send("Runtime.evaluate", {"expression": f"window.__LOOK_OVERLAY__.uiFrames.{frame}", "contextId": self.world()})
         node = self.send("DOM.describeNode", {"objectId": remote["result"]["objectId"]})
         return self.iso(expr, self.world(node["node"]["frameId"]))
 
     def debug(self):
-        return self.iso("window.__HERMES_GAZE_OVERLAY__.debug()")
+        return self.iso("window.__LOOK_OVERLAY__.debug()")
 
 
 class Flow:
@@ -219,7 +219,7 @@ class Flow:
             r = self.tab.panel("card", f"(()=>{{const e=document.querySelector({json.dumps(selector)});if(!e)return null;const r=e.getBoundingClientRect();return {{x:r.x+r.width/2,y:r.y+r.height/2}}}})()")
             if not r:
                 return None
-            f = self.tab.iso("(()=>{const r=window.__HERMES_GAZE_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()")
+            f = self.tab.iso("(()=>{const r=window.__LOOK_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()")
             return r["x"] + f["x"], r["y"] + f["y"]
         time.sleep(.5)
         x, y = self.until(locate, 10, selector)
@@ -248,39 +248,37 @@ def own_port():
 
 
 def run(args):
-    import yaml
+    sys.path.insert(0, str(ROOT))
+    import tests  # Register the plugin package shell without executing registration.
+    from look.benchmark.probe_profile import probe_key, prepare_profile
+    from look.process_env import minimal_env
+    probe_key()
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
-    home = Path.home() / ".hermes"
     temp = Path(tempfile.mkdtemp(prefix="gaze-ui-"))
     chrome = rpc = None
     try:
         (temp / "plugins").mkdir()
         (temp / "skills").mkdir()
-        (temp / "plugins" / "hermes-gaze").symlink_to(ROOT, target_is_directory=True)
-        shutil.copy2(home / "auth.json", temp / "auth.json")
-        (temp / "auth.json").chmod(0o600)
-        config = yaml.safe_load((home / "config.yaml").read_text())
+        (temp / "plugins" / "look").symlink_to(ROOT, target_is_directory=True)
         port = own_port()
-        config["plugins"] = {"enabled": ["hermes-gaze"], "isolation": "in_process", "entries": {"hermes-gaze": {
-            "allow_gateway_injection": True, "settings": {"cdp_url": f"http://127.0.0.1:{port}", **json.loads(args.settings)}}}}
-        config["mcp_servers"] = {}
-        config["fallback_model"] = None
-        (temp / "config.yaml").write_text(yaml.safe_dump(config))
-        (temp / "config.yaml").chmod(0o600)
+        config, env = prepare_profile(temp, plugin_id="look",
+                                      settings={"cdp_url": f"http://127.0.0.1:{port}", **json.loads(args.settings)})
         model = {k: config.get("model", {}).get(k) for k in ("default", "provider")}
         print("model", model, flush=True)
         # Speech for the follow-up, through the real ASR path.
-        subprocess.run(["say", "-o", str(temp / "speech.aiff"), "Why does that matter?"], check=True)
-        subprocess.run(["ffmpeg", "-v", "error", "-i", str(temp / "speech.aiff"), "-ar", "16000", "-ac", "1", "-f", "s16le", str(temp / "speech.pcm")], check=True)
+        subprocess.run(["say", "-o", str(temp / "speech.aiff"), "Why does that matter?"],
+                       check=True, env=minimal_env())
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(temp / "speech.aiff"), "-ar", "16000", "-ac", "1", "-f", "s16le", str(temp / "speech.pcm")],
+                       check=True, env=minimal_env())
         (temp / "stub").mkdir()
         (temp / "stub" / "sounddevice.py").write_text(STUB)
-        env = {**os.environ, "HOME": str(temp), "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1", "HERMES_IGNORE_RULES": "1",
-               "PYTHONPATH": f"{temp / 'stub'}:{home / 'hermes-agent'}", "GAZE_FAKE_SPEECH": str(temp / "speech.pcm"), "GAZE_CWD": str(temp)}
+        env.update(PYTHONPATH=os.pathsep.join((str(temp / "stub"), env["PYTHONPATH"])),
+                   GAZE_FAKE_SPEECH=str(temp / "speech.pcm"), GAZE_CWD=str(temp))
         sys.path.insert(0, str(ROOT))
         import tests  # Register the plugin package shell without executing registration.
         from tests.owned_chrome import private_session
-        companion = private_session(temp / ".cache/hermes-gaze/chrome-profile", port=port,
+        companion = private_session(temp / ".cache/look/chrome-profile", port=port,
             chrome_args=("--window-size=1440,900", *(["--headless=new", "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"] if args.headless else [])))
         chrome = companion.cdp.chrome.process
         companion.close()  # Browser stays warm; the host must acquire its own exclusive runtime lease.
@@ -296,7 +294,7 @@ def run(args):
             rpc.call("prompt.submit", session_id=sid, text="Reply with Ready.")
             ready = rpc.wait(lambda f: f.get("params", {}).get("session_id") == sid and f.get("params", {}).get("type") in ("message.complete", "error"), 240)["params"]
             print("first turn", ready.get("type"), str(ready.get("payload", {}).get("status")), flush=True)
-            print(str(rpc.call("command.dispatch", session_id=sid, name="gaze", arg="connect").get("output"))[:160], flush=True)
+            print(str(rpc.call("command.dispatch", session_id=sid, name="look", arg="connect").get("output"))[:160], flush=True)
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list") as r:
                 page = next(t for t in json.load(r) if t["type"] == "page")
             tab = Tab(page["webSocketDebuggerUrl"])
@@ -334,7 +332,7 @@ def setup_page(tab, url, width=1440, height=900):
     for _ in range(150):
         time.sleep(.2)
         try:
-            if tab.main("document.readyState") == "complete" and tab.panel("pill", "!!window.__HERMES_GAZE_PANEL__"):
+            if tab.main("document.readyState") == "complete" and tab.panel("pill", "!!window.__LOOK_PANEL__"):
                 break
         except Exception:
             continue
@@ -531,6 +529,7 @@ def scenario(flow, tab, rpc, sid, args):
 
 
 def make_recording(tab, out):
+    from look.process_env import minimal_env
     frames = list(tab.frames)
     if len(frames) < 2:
         return
@@ -543,7 +542,8 @@ def make_recording(tab, out):
             listing.append(f"file '{path}'\nduration {min(max(gap, .01), 2.5):.3f}\n")
         (Path(d) / "list.txt").write_text("".join(listing))
         subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(Path(d) / "list.txt"),
-                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p", str(out / "flow.mp4")], check=False)
+                        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p", str(out / "flow.mp4")],
+                       check=False, env=minimal_env())
 
 
 if __name__ == "__main__":

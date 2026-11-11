@@ -36,7 +36,7 @@ in the device label or notes. Video itself is identifiable face data: an anonymo
 ID does not anonymize the face.
 
 Private files live outside the repo at:
-`~/.cache/hermes-gaze-eval/recordings/<ID>/<session>/`. Directories are `0700`,
+`~/.cache/look-eval/recordings/<ID>/<session>/`. Directories are `0700`,
 files `0600`. Each session retains original face/background `camera.webm`,
 `targets.jsonl` and `recording.json`. The participant folder also holds `consent.json`.
 Check free disk space before recording. At 1.5 Mbit/s, allow roughly 20 MB per
@@ -170,7 +170,7 @@ reported. A later repeat can test the opposite temporal direction.
 ## 5. Inventory, load and score
 
 ```bash
-CACHE="$HOME/.cache/hermes-gaze-eval"
+CACHE="$HOME/.cache/look-eval"
 .venv/bin/python scripts/gaze.py data list --person p-a7c4
 .venv/bin/python scripts/gaze.py data load --person p-a7c4 --stride 2 --out "$CACHE/p-a7c4-frames"
 .venv/bin/python scripts/gaze.py eval extract "$CACHE/p-a7c4-frames/manifest.json" --out "$CACHE/p-a7c4-features"
@@ -200,7 +200,7 @@ One person, all finalized sessions (including clearly marked partials), raw vide
 and target timestamps plus consent. No fitted model or machine-local frame paths:
 
 ```bash
-CACHE="$HOME/.cache/hermes-gaze-eval"
+CACHE="$HOME/.cache/look-eval"
 .venv/bin/python scripts/gaze.py data export --person p-a7c4 --out "$CACHE/p-a7c4.zip"
 # On this or another machine, from its repository root:
 .venv/bin/python scripts/gaze.py data import "$CACHE/p-a7c4.zip"
@@ -226,7 +226,7 @@ remove this ID's local recordings, consent and the derived outputs created in th
 guide.** Run them only for the participant whose data you intend to delete:
 
 ```bash
-CACHE="$HOME/.cache/hermes-gaze-eval"
+CACHE="$HOME/.cache/look-eval"
 rm -r -- "$CACHE/recordings/p-a7c4"
 rm -r -- "$CACHE/p-a7c4-frames" "$CACHE/p-a7c4-features" "$CACHE/p-a7c4-scores" "$CACHE/p-a7c4-tuning"
 rm -- "$CACHE/p-a7c4.zip"

@@ -1,4 +1,4 @@
-# Historical Hermes Gaze design plan — not a release contract
+# Historical Look design plan — not a release contract
 
 > Original proposal, retained for provenance. The deadline and product promises
 > below are historical notes, not independently verified current organizer rules.
@@ -18,7 +18,7 @@
 
 ```mermaid
 flowchart TB
-  subgraph Mac["MacBook Local Runtime (hermes-gaze plugin)"]
+  subgraph Mac["MacBook Local Runtime (look plugin)"]
     direction TB
     CAM["FaceTime Camera (AVFoundation 30fps)<br/>MediaPipe Face Landmarker (478 pts + iris + head pose)"]
     TRACK["Gaze Estimator<br/>Eye-in-head + Head pose -> Ridge Regressor<br/>One-Euro Filter -> I-VT Fixation Detector"]
@@ -208,10 +208,10 @@ As noted in our initial review, continuous fisheye magnification driven by live 
 
 ## 3. Repository Structure & Hermes Catalog Compliance
 
-To pass `hermes plugins validate /path/to/hermes-gaze --install-deps` and the human catalog review on the first try, the plugin will follow every rule in `plugin-catalog/README.md`:
+To pass `hermes plugins validate /path/to/look --install-deps` and the human catalog review on the first try, the plugin will follow every rule in `plugin-catalog/README.md`:
 
 ```text
-hermes-gaze/
+look/
 ├── plugin.yaml                 # Hermes plugin manifest (exact capabilities + SemVer requires_hermes)
 ├── pyproject.toml              # Bounded dependency ranges (no bare >= floors)
 ├── __init__.py                 # register(ctx): tools, hooks, platform, CLI commands, skill
@@ -234,7 +234,7 @@ hermes-gaze/
 ├── platform_adapter.py         # Push-to-talk hotkey + mic -> Hermes gateway turn + TTS/HUD reply
 ├── tools.py                    # gaze_resolve, gaze_choose, gaze_highlight, gaze_calibrate, gaze_benchmark
 ├── skills/
-│   └── gaze-telepathy/
+│   └── look/
 │       └── SKILL.md            # Teaches Hermes how to act on resolved [gaze_ref] handles & tables
 ├── desktop/
 │   └── plugin.js               # Optional Hermes Desktop status-bar indicator & calibration launcher (@hermes/plugin-sdk only)
@@ -299,7 +299,7 @@ Running `python -m benchmark.run_benchmark` evaluates 50 trials across varying n
 ## 6. Day-by-Day Execution Plan (6 Days)
 
 ### Day 1 (Thu Nov 5) — Skeleton, Chrome CDP Bridge & Overlay HUD
-- [ ] Initialize repo `hermes-gaze` on your MacBook; verify `hermes plugins validate .` and `hermes plugins doctor .` pass.
+- [ ] Initialize repo `look` on your MacBook; verify `hermes plugins validate .` and `hermes plugins doctor .` pass.
 - [ ] Build `browser/cdp_bridge.py` + `browser/overlay.js`: connect to Chrome `:9222`, inject closed Shadow-DOM overlay, verify `Runtime.addBinding` hotkey events (`hold Space/Option`), spotlight rendering, and candidate bounding-box extraction (`DOMSnapshot` + `AXTree`).
 - [ ] Implement `tracker/simulated_gaze.py` (mouse + configurable Gaussian noise $\sigma = 120\text{ px}$) so the entire UI and resolver can be tested immediately without turning on the webcam.
 
@@ -324,6 +324,6 @@ Running `python -m benchmark.run_benchmark` evaluates 50 trials across varying n
 - [ ] Add optional Hermes Desktop status bar item (`desktop/plugin.js`) showing live tracking status & calibration accuracy badge.
 
 ### Day 6 (Tue Nov 10) & Morning of Wed Nov 11 — Video, Catalog PR & Submission
-- [ ] Run `hermes plugins validate /path/to/hermes-gaze --install-deps` on a clean checkout; verify zero errors and zero unhandled warnings.
-- [ ] Push final commit, copy full 40-char SHA, open PR adding `plugin-catalog/entries/hermes-gaze.yaml` to `NousResearch/hermes-agent`.
+- [ ] Run `hermes plugins validate /path/to/look --install-deps` on a clean checkout; verify zero errors and zero unhandled warnings.
+- [ ] Push final commit, copy full 40-char SHA, open PR adding `plugin-catalog/entries/look.yaml` to `NousResearch/hermes-agent`.
 - [ ] Record & edit the **<90-second demo video** (see [`DEMO_AND_SUBMISSION_PLAYBOOK.md`](./DEMO_AND_SUBMISSION_PLAYBOOK.md)), post on X tagging `@NousResearch`, and submit the Typeform well before 5:00 PM EST on Nov 11.

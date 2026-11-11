@@ -1,4 +1,4 @@
-"""Pointing & gaze stream abstractions for hermes-gaze."""
+"""Pointing & gaze stream abstractions for look."""
 
 from __future__ import annotations
 

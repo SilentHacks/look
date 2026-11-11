@@ -38,7 +38,7 @@ No live inference, native Chrome consent or physical-device proof is implied.
 The README install command and local catalog entry now reference that separately
 published source. This later documentation commit cannot pin itself. The pinned
 source's README installs its runtime-identical predecessor `a5a9715bbf7d23261b901098283f0f68ab70eb0b`.
-The upstream submission changes only `plugin-catalog/hermes-gaze.yaml`.
+The upstream submission changes only `plugin-catalog/look.yaml`.
 
 Current official catalog requirements were read at Hermes
 `95fc3e668fc1e13ad05d22a4f02fccc6a6d6ce02`; latest release was `v0.23.1`.
@@ -69,7 +69,7 @@ scanner result and no warnings. This did not change installed Hermes.
   with fixture inference/browser attachment. Hermes 0.22.0 lacks that protocol.
 - README and [PR draft](SUBMISSION_DRAFT.md) disclose action allow-all, network
   calls/costs, filesystem access, processes, background service, retention and
-  asset provenance. The [entry draft](catalog/hermes-gaze.yaml) declares community
+  asset provenance. The [entry draft](catalog/look.yaml) declares community
   tier, macOS beta limits and all 14 tools, 7 hooks and 2 middleware entries.
 
 ## Rule 17: source-policy finding
@@ -175,7 +175,7 @@ physical-device performance.
 ## Local verification receipts
 
 Machine-local logs are retained outside the product tree under
-`/Users/Abid/.agents/coordinator/hermes-gaze/catalog-implementation`.
+`/Users/Abid/.agents/coordinator/look/catalog-implementation`.
 The coordinator's final report there records the exact committed candidate,
 commands, results, stderr, failures and cost limits. Do not copy isolated runtimes,
 caches or temporary build output into the source submission.

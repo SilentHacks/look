@@ -1,4 +1,4 @@
-"""Built-in lightweight HTTP session server for hermes-gaze.
+"""Built-in lightweight HTTP session server for look.
 
 Serves the interactive demo page (benchmark_page.html) and a read-only
 ``/api/status`` endpoint on http://127.0.0.1:9111 for the Chrome HUD.

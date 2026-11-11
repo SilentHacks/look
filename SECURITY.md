@@ -44,6 +44,16 @@ History cleanup requires a separately approved plan.
   that mode. Detached identities fail. Missing mutation replies are
   unknown outcomes, never safe automatic retries. Typing/GET navigation can still
   have effects on unusual sites.
+- **Destination checks happen before dispatch.** Model navigation, new tabs and
+  anchor clicks require exclusively public resolved addresses by default; DNS
+  errors, mixed answers, nonpublic and metadata addresses fail closed. Only owner
+  configuration `allow_private_network: true` permits local destinations.
+  The companion debugging port stays blocked in either mode. Chrome can resolve
+  again or follow redirects: this is not request-level network containment.
+- **Child processes do not inherit secrets.** Native recognition, Chrome, ffmpeg
+  and say receive allowlisted path/home/temp/locale values; Linux Chrome also gets
+  its display/session variables. This does not sandbox those processes or prevent
+  them from accessing files permitted to the OS account.
 - **Stop has limits.** It cancels local capture/output/tasks/approvals, not an
   already admitted Hermes turn or an action that already executed. It is not data
   erasure. Transport loss releases intercepted input through a bounded lease.

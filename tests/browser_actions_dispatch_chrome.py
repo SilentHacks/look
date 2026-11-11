@@ -114,7 +114,7 @@ def main():
     from tools.registry import registry
     real_agent = run_agent.AIAgent
     forbidden = Mock(return_value='{"ok":false,"error":"unsafe handler reached"}')
-    registry.register(name='browser_exec', toolset='hermes_gaze',
+    registry.register(name='browser_exec', toolset='look',
         schema={'name':'browser_exec','description':'Forbidden fixture tool',
                 'parameters':{'type':'object','properties':{'code':{'type':'string'}},'required':['code']}},
         handler=forbidden, check_fn=lambda: True, override=True)

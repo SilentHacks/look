@@ -7,11 +7,11 @@ import unittest
 
 import numpy as np
 
-from hermes_gaze.benchmark.gaze_eval import EvalRidge, evaluate, private_directory, screen, split_frames
-from hermes_gaze.benchmark.gaze_tuning import Regression, jitter_score
-from hermes_gaze.benchmark.gaze_record import RecordingHost
-from hermes_gaze.benchmark.run_benchmark import run_benchmark_suite
-from hermes_gaze.tracker.webcam_gaze import LandmarkEstimator
+from look.benchmark.gaze_eval import EvalRidge, evaluate, private_directory, screen, split_frames
+from look.benchmark.gaze_tuning import Regression, jitter_score
+from look.benchmark.gaze_record import RecordingHost
+from look.benchmark.run_benchmark import run_benchmark_suite
+from look.tracker.webcam_gaze import LandmarkEstimator
 from tests.test_webcam import observations, SCREEN
 
 
@@ -126,7 +126,7 @@ class GazeEvaluationTests(unittest.TestCase):
             host._context, host._nonce = 7, "owned"
             self.addCleanup(host.stop)
             def event(kind, nonce="owned", context=7, **fields):
-                host._event(dict(method="Runtime.bindingCalled", params=dict(name="__hermesGazeIntent", executionContextId=context,
+                host._event(dict(method="Runtime.bindingCalled", params=dict(name="__lookIntent", executionContextId=context,
                     payload=json.dumps(dict(type=kind, nonce=nonce, **fields)))))
             event("record_start", nonce="forged", screen=SCREEN)
             event("record_start", context=8, screen=SCREEN)

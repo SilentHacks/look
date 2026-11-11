@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 from .asset_cache import ASSETS, AssetIntegrityError, prepare
+from ..process_env import minimal_env
 
 MODEL_REPO = "gradium/phonon-31m-en"
 MODEL_REVISION = "8c64b55ec301728e2d1695bfea87a08a267d0c2d"
@@ -20,7 +21,7 @@ MODEL_FILES = ("config.json", "tokenizer.json", "model.q8.gguf", "default-voice.
 
 
 def asset_root():
-    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "hermes-gaze" / "phonon"
+    return Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "look" / "phonon"
 
 
 def setup(voice="Russell"):
@@ -114,7 +115,7 @@ class SpeechPlayback:
             return
         process = subprocess.Popen(["/usr/bin/say", "-f", "-"], stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   text=True, encoding="utf-8")
+                                   text=True, encoding="utf-8", env=minimal_env())
         try:
             first = True
             while not cancel.is_set():

@@ -503,7 +503,7 @@ def probe(rig, tools, fixtures, *, approval_only=False):
     checks.append('visible confirmation Stop revokes pending approval after model completion')
 
     # Exercise actual inbox admission from both protected typing and fake native speech.
-    from hermes_gaze.audio import voice
+    from look.audio import voice
     import threading
     from tests.browser_actions.browser_actions_production import FORM_ASK
     admitted, errors = [], []

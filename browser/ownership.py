@@ -16,6 +16,7 @@ import time
 import urllib.request
 
 from ..config import local_cdp_url
+from ..process_env import minimal_env
 
 
 class OwnershipError(ConnectionError):
@@ -24,7 +25,7 @@ class OwnershipError(ConnectionError):
 
 def companion_profile() -> Path:
     # Browser/microphone ownership is account-wide, not scoped to a Hermes profile.
-    return Path.home() / ".cache" / "hermes-gaze" / "chrome-profile"
+    return Path.home() / ".cache" / "look" / "chrome-profile"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -90,7 +91,7 @@ class OwnedChrome:
         args = result.get("arguments", [])
         expected = {"--enable-automation", f"--user-data-dir={self.profile}",
                     f"--remote-debugging-port={self.http_url.rsplit(':', 1)[1]}",
-                    f"--hermes-gaze-owner={self._token}"}
+                    f"--look-owner={self._token}"}
         if not self._token or not isinstance(args, list) or not expected.issubset(args):
             raise OwnershipError("Debugging endpoint is another browser, not Look's owned companion. "
                                  "Leave it running. Choose a free local cdp_url port, or close only Look's old companion and retry.")
@@ -186,9 +187,10 @@ class OwnedChrome:
                 mac = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
                 exe = executable or (str(mac) if sys.platform == "darwin" else "google-chrome")
                 args = [exe, f"--remote-debugging-port={port}", "--remote-debugging-address=127.0.0.1",
-                        f"--user-data-dir={self.profile}", "--enable-automation", f"--hermes-gaze-owner={self._token}",
+                        f"--user-data-dir={self.profile}", "--enable-automation", f"--look-owner={self._token}",
                         "--no-first-run", "--no-default-browser-check", *chrome_args, url]
-                self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                env=minimal_env(desktop=True))
                 deadline = time.monotonic() + 10
                 while time.monotonic() < deadline:
                     if self.process.poll() is not None:

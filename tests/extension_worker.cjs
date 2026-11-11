@@ -25,7 +25,7 @@ function fixture() {
     tabs.set(1,{id:1,window:7,session:'selected',closed:false,scripts:new Set(),contexts:new Map([[1,'doc']]),document:'doc',route:2});
   `, context);
   const command = (method = 'Runtime.evaluate', operation = 'mutation') => {
-    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',frameId:'main',expression:'mutation',worldName:'hermes-gaze',_look_operation:operation,_look_owner:{document:'doc',route:2}}};
+    context.request = {id:1,sessionId:'selected',method,params:{uniqueContextId:'doc',frameId:'main',expression:'mutation',worldName:'look',_look_operation:operation,_look_owner:{document:'doc',route:2}}};
     return vm.runInContext('dispatch(request)', context);
   };
   return {context, messages, commands, listeners, command,
@@ -46,7 +46,7 @@ function fixture() {
   const reused = fixture();
   vm.runInContext("tabs.get(1).document='';tabs.get(1).mainFrame=''", reused.context);
   reused.listeners.debugger({tabId:1}, 'Runtime.executionContextCreated',
-    {context:{id:1,name:'hermes-gaze',uniqueId:'doc',auxData:{frameId:'main'}}});
+    {context:{id:1,name:'look',uniqueId:'doc',auxData:{frameId:'main'}}});
   reused.context.chrome.debugger.sendCommand = async (_, method) => method === 'Page.getFrameTree'
     ? {frameTree:{frame:{id:'main'}}} : {executionContextId:1};
   await reused.command('Page.getFrameTree');

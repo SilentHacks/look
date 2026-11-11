@@ -40,7 +40,7 @@ not a guarantee against a single expensive browser layout or selector operation.
 All browser reads still run synchronously at release; the returned evidence is
 plain data and later page edits do not update it.
 
-`/gaze timing` now accepts only finite, bounded numbers for
+`/look timing` now accepts only finite, bounded numbers for
 `cursor_history_ms`, `cursor_targets_ms`, `cursor_blocks_ms`,
 `cursor_controls_ms`, `noisy_history_ms`, `noisy_discovery_ms`,
 `noisy_candidates_ms` and `noisy_actions_ms`. These are durations, not offsets;
@@ -244,7 +244,7 @@ this deliberately adversarial fake alone.
 
 ## Reading real-machine diagnostics
 
-`/gaze timing` retains the last eight releases in memory. Look for the largest
+`/look timing` retains the last eight releases in memory. Look for the largest
 adjacent stage interval and inspect `slow_release`:
 
 - Browser evidence start/frozen/sent: synchronous page evidence work.

@@ -72,13 +72,16 @@ In separate-Chrome mode, Stop leaves its local debugging port live until Chrome
 exits. It keeps that dedicated profile and sign-ins. It never kills a browser.
 Start can reuse that verified browser, including after a Hermes process restart.
 
-**Compatibility:** `/gaze` and `hermes gaze` remain aliases. `connect` means `start`,
-`disconnect` now performs the full `stop`, and `tracker stop` means `cursor`.
-`timing`, `voice`, `mode`, `resolve`, `listen`, `demo` and `benchmark` remain available.
-The plugin/install/config key is still `hermes-gaze`. Public `gaze_*` tool schemas,
-caches, Chrome profile, calibration and bundled skill identifiers are unchanged.
-Existing configuration and saved calibration need no migration.
-Bare `/look` and `/gaze` keep the chosen source for this process. An existing
+`connect` means `start`, `disconnect` performs the full `stop`, and `tracker stop`
+means `cursor`. `timing`, `voice`, `mode`, `resolve`, `listen`, `demo` and
+`benchmark` remain available.
+
+The plugin, configuration entry, Python package, bundled skill and cache directory
+now use `look`. Public `gaze_*` tool schemas retain their gaze-specific names.
+After updating, enable `look` and set `plugins.entries.look.allow_gateway_injection`
+again. Old caches, calibration and Chrome profiles are not copied or deleted;
+prepare assets, recalibrate and sign in to the new separate profile as needed.
+Bare `/look` keeps the chosen source for this process. An existing
 Chrome reconnect requires explicit acceptance again. Only explicit `setup`
 prepares downloads. Detailed tracker counters moved from
 ordinary `tracker`/`status` output to `diagnostics`.
@@ -158,7 +161,7 @@ hermes look setup-speech
 
 Restart Hermes, obtain an answer and choose **Read aloud** when you want sound.
 The model is approximately 65 MB plus its voice files. Assets stay in
-`${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon`. Automatic reading starts off.
+`${XDG_CACHE_HOME:-~/.cache}/look/phonon`. Automatic reading starts off.
 Missing or unusable assets can select macOS `say` before any audio starts.
 See [offline read-aloud details](#offline-read-aloud-setup).
 
@@ -186,7 +189,7 @@ The shared Hugging Face hub defaults to `${HF_HOME:-${XDG_CACHE_HOME:-~/.cache}/
 `HF_HUB_CACHE` (or legacy `HUGGINGFACE_HUB_CACHE`) overrides it. Downloads use the
 official `https://huggingface.co` endpoint with `token=False`, without resolving
 Hugging Face login credentials, and may follow publisher storage redirects.
-Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze/phonon` and
+Phonon and webcam use `${XDG_CACHE_HOME:-~/.cache}/look/phonon` and
 `webcam-0.10.32`. Warm model caches stay offline. Do not delete shared caches wholesale.
 
 `whisper_model` supports **auto (default), base.en, tiny.en and parakeet-v3**.
@@ -228,11 +231,11 @@ alone does not reload Gaze. Stop the gateway before replacing files or repairing
 the environment, then restart Hermes and start a new conversation.
 
 `hermes plugins check-updates` checks for updates. A GitHub SHA install is
-intentionally pinned: `hermes plugins update hermes-gaze` will not move that pin.
+intentionally pinned: `hermes plugins update look` will not move that pin.
 For a new published release, use the same install command with the new full SHA
 and add `--force` to replace the old checkout. Review the new code and prompts
 before doing so. Once installed through an accepted catalogue entry,
-`hermes plugins update hermes-gaze` follows its reviewed pin. Restart Hermes and
+`hermes plugins update look` follows its reviewed pin. Restart Hermes and
 start a new conversation after updates. `hermes pm install` repairs/prepares
 Hermes's environment. It is not a plugin updater or a speech-asset downloader.
 
@@ -240,14 +243,14 @@ Stop Look and uninstall its native host with `/look setup extension uninstall`,
 then remove Look in Chrome before quitting Hermes/removing the plugin:
 
 ```bash
-hermes plugins remove hermes-gaze
+hermes plugins remove look
 ```
 
 Removal is **not forgetting all data**. It does not erase Hermes history, provider
 records, shared Hugging Face recognition-model caches, local calibration
-(`${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`), downloaded
-Gaze assets under `${XDG_CACHE_HOME:-~/.cache}/hermes-gaze`, or the companion's
-account-scoped Chrome profile/sign-ins at `~/.cache/hermes-gaze/chrome-profile`.
+(`${XDG_CONFIG_HOME:-~/.config}/look/webcam-calibration.json`), downloaded
+Gaze assets under `${XDG_CACHE_HOME:-~/.cache}/look`, or the companion's
+account-scoped Chrome profile/sign-ins at `~/.cache/look/chrome-profile`.
 Earlier Hermes-profile Chrome directories stay untouched. Restart every Hermes
 process after upgrading the ownership change. Plugin first-run state still lives
 under Hermes `plugin-data`. Remove only the data you intend to forget. Shared caches
@@ -293,6 +296,28 @@ freezes at recording stop before ASR. Real word timestamps select preceding
 cursor identities, including two spoken referents. Detached or replaced nodes
 never rematch selectors. Password/payment fields and associated labels are
 filtered before serialization. Page text stays inside an escaped untrusted fence.
+
+Browser tasks resolve navigation, new-tab and anchor destinations before dispatch.
+All resolved addresses must be public; private, loopback, link-local, CGNAT,
+metadata, reserved/multicast and mapped IPv6 addresses are rejected, as are DNS
+failures and mixed public/private answers. Use ASCII/punycode hostnames.
+Only the owner can enable local pages:
+
+```sh
+hermes config set plugins.entries.look.settings.allow_private_network true
+```
+
+Restart Hermes after changing that setting. Page/model/tool arguments cannot
+enable it. The companion debugging port remains blocked even when enabled.
+This is a DNS preflight check, not network isolation: Chrome can resolve again,
+follow redirects, run page scripts or load subresources after the check.
+Manually opened pages and general browser traffic are not contained by it.
+
+Native recognition workers, Chrome, ffmpeg and say receive only allowlisted
+path/home/temp/locale environment variables, plus display/session variables needed
+by Linux Chrome. Provider keys, proxy settings, Python startup paths and dynamic
+library injection variables are not forwarded. OS-account filesystem access is
+unchanged.
 
 Fresh hover evidence highlights the pointed handles. On question acceptance,
 an asynchronous TypeSafe decision selects the intended captured scope, without
@@ -426,7 +451,7 @@ There is no second decision provider. Failure uses the existing configured Herme
 model and its existing evidence flow. Provider retention is not established here.
 
 Set the optional **TypeSafe API key** in Hermes Desktop → Settings → Plugins →
-hermes-gaze. The manifest declares `typesafe_api_key` as `type: secret`, with
+look. The manifest declares `typesafe_api_key` as `type: secret`, with
 `env: TYPESAFE_API_KEY`. Hermes owns credential storage, not plugin settings.
 There is no `requires_env` gate or install-time key prompt. Disabled early
 highlighting does not read the key or call TypeSafe. Missing keys, unavailable
@@ -453,7 +478,7 @@ Use in-process plugin isolation and grant injection in the intended profile:
 plugins:
   isolation: in_process
   entries:
-    hermes-gaze:
+    look:
       allow_gateway_injection: true
 ```
 

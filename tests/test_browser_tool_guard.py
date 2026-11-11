@@ -8,14 +8,14 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.runtime import service
-from hermes_gaze.audio import voice
+from look.browser.cdp_bridge import GazeSession
+from look.runtime import service
+from look.audio import voice
 
 
 class BrowserToolGuardTests(unittest.TestCase):
     def test_connected_session_excludes_code_and_vetoes_raw_calls(self):
-        name = 'hermes_gaze.guard_entry'
+        name = 'look.guard_entry'
         loader = importlib.machinery.SourceFileLoader(name, str(Path(__file__).parents[1] / '__init__.py'))
         spec = importlib.util.spec_from_loader(name, loader, is_package=False)
         plugin = importlib.util.module_from_spec(spec)

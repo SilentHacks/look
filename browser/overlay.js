@@ -4,9 +4,9 @@
   if (window.top !== window.self) return;
 
   // Always tear down any prior overlay instance cleanly (removing window listeners & streams)
-  const prevApi = window.__HERMES_GAZE_OVERLAY__;
+  const prevApi = window.__LOOK_OVERLAY__;
   const prevState = prevApi && prevApi.state ? prevApi.state : null;
-  const existingRoot = document.getElementById("hermes-gaze-root");
+  const existingRoot = document.getElementById("look-root");
   if (prevApi && typeof prevApi.destroy === "function") {
     try {
       prevApi.destroy();
@@ -101,7 +101,7 @@
   // ---------- geometry-only DOM: rings and text-free glass plates, in a closed shadow ----------
   // Words, voice level and input all live in the two sandboxed frames, reached only over CDP.
   const host = document.createElement("div");
-  host.id = "hermes-gaze-root";
+  host.id = "look-root";
   host.setAttribute("popover", "manual");
   host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;margin:0!important;padding:0!important;border:0!important;pointer-events:none!important;background:transparent!important;overflow:visible!important;contain:none!important";
   const hostStyle = host.style.cssText;
@@ -161,7 +161,7 @@
   const P = {pill: box(0, 0, 0, PILL_H)};
   const lift = new Spring(0, {k: 500, c: 30}); // nudge when you hit the end of the stack
 
-  function rawSend(message) { try { window.__hermesGazeIntent(JSON.stringify(message)); } catch (_) {} }
+  function rawSend(message) { try { window.__lookIntent(JSON.stringify(message)); } catch (_) {} }
   function trustedUi(event) { return event.isTrusted === true; }
 
   // A website dialog opened after us would otherwise sit on top of the top layer.
@@ -381,7 +381,7 @@
     const walker = document.createTreeWalker(el.shadowRoot || el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         if (node.nodeType === 1 && (excluded?.has(node) ||
-            node.matches('input,textarea,select,[contenteditable],script,style,#hermes-gaze-root') || sensitive(node) ||
+            node.matches('input,textarea,select,[contenteditable],script,style,#look-root') || sensitive(node) ||
             !rendered(node) && getComputedStyle(node).display !== "contents"))
           return NodeFilter.FILTER_REJECT;
         if (node.nodeType === 1 && node.matches("label") && node.htmlFor &&
@@ -415,7 +415,7 @@
       if (!link || links.length >= 3) continue;
       let excluded = false;
       for (let node = link; node; node = node.parentElement || node.getRootNode?.().host) {
-        if (sensitive(node) || node.matches("input,textarea,select,[contenteditable],#hermes-gaze-root") ||
+        if (sensitive(node) || node.matches("input,textarea,select,[contenteditable],#look-root") ||
             node.matches("label") && node.htmlFor && sensitive(node.getRootNode?.().getElementById?.(node.htmlFor) || document.getElementById(node.htmlFor))) {
           excluded = true;
           break;
@@ -447,7 +447,7 @@
   function hitNode(x, y) {
     if (typeof x !== "number" || typeof y !== "number") return null;
     let el = document.elementFromPoint(x, y);
-    if (el?.closest("#hermes-gaze-root")) return null;
+    if (el?.closest("#look-root")) return null;
     for (let depth = 0; el?.shadowRoot && depth < 16; depth++) {
       const inner = el.shadowRoot.elementFromPoint(x, y);
       if (!inner || inner === el) break;
@@ -734,7 +734,7 @@
     const controls = document.querySelectorAll('button,a,input,select,[role=button]');
     for (let i = 0; i < controls.length && i < 120 && capture.controls.length < 12; i++) {
       const el = controls[i];
-      if (el.closest("#hermes-gaze-root") || sensitive(el) || !rendered(el) || !inView(el)) continue;
+      if (el.closest("#look-root") || sensitive(el) || !rendered(el) || !inView(el)) continue;
       const r = el.getBoundingClientRect();
       const top = hitNode(Math.max(0, r.left) + Math.min(r.width, window.innerWidth - Math.max(0, r.left)) / 2,
         Math.max(0, r.top) + Math.min(r.height, window.innerHeight - Math.max(0, r.top)) / 2);
@@ -773,7 +773,7 @@
     const nodes = document.querySelectorAll('button,a,input,textarea,select,[contenteditable],[role=button],[role=link],[role=tab],[role=checkbox],[role=radio]');
     for (const inView of [true, false]) for (const node of nodes) {
       if (identities.size >= 64) break;
-      if (node.closest("#hermes-gaze-root") || sensitive(node) || !rendered(node) ||
+      if (node.closest("#look-root") || sensitive(node) || !rendered(node) ||
           node.matches('[contenteditable="false"]') || node.type === "hidden") continue;
       const r = node.getBoundingClientRect();
       if ((r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth) !== inView) continue;
@@ -967,7 +967,7 @@
     const fields = [], summary = [];
     let size = 0;
     for (const node of document.querySelectorAll("input,textarea,select,[contenteditable]")) {
-      if (!scope.contains(node) && node.form !== scope || node.closest("#hermes-gaze-root") || sensitive(node) ||
+      if (!scope.contains(node) && node.form !== scope || node.closest("#look-root") || sensitive(node) ||
           node.type === "hidden" || node.matches('[contenteditable="false"]')) continue;
       const value = node.isContentEditable ? node.textContent : String(node.value || "");
       const label = safeLabel(node) || node.labels?.[0]?.textContent?.trim().slice(0, 100) || "Field";
@@ -2537,11 +2537,11 @@
   function _emit(intent) {
     intent.id = ++_intentSeq;
     intent.nonce = _intentNonce;
-    if (typeof window.__hermesGazeIntent !== "function") {
+    if (typeof window.__lookIntent !== "function") {
       coachLine("Look isn’t connected. Run /look in Hermes, then try again", 4600);
       return false;
     }
-    window.__hermesGazeIntent(JSON.stringify(intent));
+    window.__lookIntent(JSON.stringify(intent));
     return true;
   }
 
@@ -2944,7 +2944,7 @@
     };
     const scopeId = (el) => buildSelector(el);
     const addCandidate = (el, {scope, id, selector, rect, summary, parent} = {}) => {
-      if (!el || sensitive(el) || !rendered(el) || el.closest("#hermes-gaze-root")) return null;
+      if (!el || sensitive(el) || !rendered(el) || el.closest("#look-root")) return null;
       const actualSelector = selector || buildSelector(el);
       if (!actualSelector) return null;
       const r = rect || el.getBoundingClientRect();
@@ -2995,7 +2995,7 @@
     for (const el of nodes) {
       const required = priority.has(el);
       if (!required && (++scanned > 4096 || nearbyCount >= 64 || performance.now() > deadline)) break;
-      if (el.closest("#hermes-gaze-root")) continue;
+      if (el.closest("#look-root")) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 8 || r.height < 8) continue;
       const cx = Math.max(r.left, Math.min(x, r.right));
@@ -3076,7 +3076,7 @@
           for (const control of controls) {
             const associated = table && (control.getAttribute("aria-controls") || "").split(/\s+/).includes(table.id);
             if (!actionRoot.contains(control) && !associated) continue;
-            if (sensitive(control) || !rendered(control) || control.closest("#hermes-gaze-root")) continue;
+            if (sensitive(control) || !rendered(control) || control.closest("#look-root")) continue;
             const label = getAccessibleLabel(control);
             actions.push({label, selector: buildSelector(control), consequence: label,
               is_destructive: /delete|remove|purge|drop|destroy|pay|revoke/i.test(label + " " + (control.className || ""))});
@@ -3381,6 +3381,6 @@
     },
   };
 
-  window.__HERMES_GAZE_OVERLAY__ = api;
+  window.__LOOK_OVERLAY__ = api;
   return api;
 })();

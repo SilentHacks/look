@@ -24,7 +24,7 @@ import numpy as np
 from ..tracker.webcam_gaze import GazeEstimator, LandmarkEstimator
 from ..browser.webcam import WebcamHost
 
-CACHE = Path.home() / ".cache" / "hermes-gaze-eval"
+CACHE = Path.home() / ".cache" / "look-eval"
 BROWSER = Path(__file__).resolve().parents[1] / "browser"
 
 
@@ -108,7 +108,7 @@ def load_recording(directory: Path, out: Path, stride: int = 2) -> dict:
 class FrameExtractor:
     """Same pinned WASM, model, features and VIDEO mode; step every selected frame exactly once."""
     def __enter__(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="hermes-gaze-offline-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="look-offline-")
         self.host = WebcamHost(lambda *_: False, profile_path=Path(self.tmp.name) / "unused.json",
                                runtime_source=BROWSER / "gaze_eval.js")
         try:

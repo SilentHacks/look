@@ -27,7 +27,7 @@ The owned window requests video only, never audio. It captures and infers locall
 Images never leave it in ordinary tracking mode. The separate, explicit
 [guided dataset recorder](GAZE_RECORDING.md) saves camera video locally.
 Only 130 bounded numeric biometric features cross an exact-context, nonce-checked
-`__hermesGazeIntent` CDP binding: 128 normalized left-eye appearance values followed
+`__lookIntent` CDP binding: 128 normalized left-eye appearance values followed
 by that eye's two iris coordinates. No raw pixels, canvas patches or images cross
 the live binding. Features are never logged or included in `/look diagnostics`.
 There is no HTTP sample endpoint. The camera
@@ -138,7 +138,7 @@ If the window closes or startup returns `stopped`, the command offers
 **Try again** with `/look calibrate`. It does not claim calibration is ready.
 
 The accepted profile is stored atomically at
-`${XDG_CONFIG_HOME:-~/.config}/hermes-gaze/webcam-calibration.json`, mode `0600`
+`${XDG_CONFIG_HOME:-~/.config}/look/webcam-calibration.json`, mode `0600`
 in a `0700` directory. No images, audio, raw calibration samples or profile values
 are logged or committed. Delete that file to forget calibration. The profile is
 versioned to the estimator and one display. Old iris/head-only profiles are refused

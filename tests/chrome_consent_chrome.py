@@ -17,9 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
 from tests.owned_chrome import private_session
 from tests.test_chrome_consent import until
-from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
-from hermes_gaze.browser.consent import ConsentChrome
-from hermes_gaze.browser.ownership import acquire_runtime_lease
+from look.browser.cdp_bridge import CdpSession, GazeSession
+from look.browser.consent import ConsentChrome
+from look.browser.ownership import acquire_runtime_lease
 from websockets.sync.client import connect
 
 
@@ -77,13 +77,13 @@ def run():
             second = owner.command("Target.createTarget", {"url": url})["targetId"]
             product = approve_owned_fixture(root, owner)
             ready = threading.Event()
-            with patch("hermes_gaze.browser.companion.ConsentChrome", return_value=root):
+            with patch("look.browser.companion.ConsentChrome", return_value=root):
                 session.cdp.start_existing(on_ready=ready.set)
                 assert ready.wait(15), "flattened renderer readiness failed"
             until(lambda: len(session.cdp._tabs) == 2 and all(t.is_connected for t in session.cdp._tabs.values()), 15)
             tabs = list(session.cdp._tabs.values())
             assert all(set(tab._ui_frames) == {"card", "pill"} for tab in tabs)
-            assert all(tab.eval_js("!!window.__HERMES_GAZE_OVERLAY__") for tab in tabs)
+            assert all(tab.eval_js("!!window.__LOOK_OVERLAY__") for tab in tabs)
             assert tabs[0]._context_unique_id != tabs[1]._context_unique_id
             print("PASS flattened two-tab isolated overlay and opaque script-disabled renderer:", product)
             source = session.cdp._tabs[second]
@@ -103,12 +103,12 @@ def run():
             with connect(endpoint, proxy=None, close_timeout=1) as inspector:
                 def read(expression):
                     return command(inspector, "Runtime.evaluate", dict(expression=expression, returnByValue=True))["result"].get("value")
-                assert read("!document.getElementById('hermes-gaze-root')") is True
+                assert read("!document.getElementById('look-root')") is True
                 assert read("document.querySelector('#draft').value === 'retained' && document.cookie.includes('look_fixture=retained')")
                 origin = read("performance.timeOrigin")
                 command(inspector, "Page.reload")
                 until(lambda: read(f"performance.timeOrigin !== {origin} && document.readyState === 'complete'"))
-                assert read("!document.getElementById('hermes-gaze-root')") is True
+                assert read("!document.getElementById('look-root')") is True
             print("PASS Stop detaches overlays/new-document scripts; Chrome, tabs, draft and fixture cookie remain")
             root = ConsentChrome(lease_dir=Path(directory) / "look")
             approve_owned_fixture(root, owner)
@@ -118,7 +118,7 @@ def run():
                 while not tab._closed:
                     await asyncio.sleep(.01)
                 raise ConnectionError("Stopped during renderer initialization")
-            with patch("hermes_gaze.browser.companion.ConsentChrome", return_value=root), \
+            with patch("look.browser.companion.ConsentChrome", return_value=root), \
                  patch.object(CdpSession, "_init_ui", blocked_ui):
                 session.cdp.start_existing()
                 assert entered.wait(10), "overlay injection barrier not reached"
@@ -127,7 +127,7 @@ def run():
                 endpoint = owner.http_url.replace("http://", "ws://") + "/devtools/page/" + target
                 with connect(endpoint, proxy=None, close_timeout=1) as inspector:
                     result = command(inspector, "Runtime.evaluate", {
-                        "expression": "!document.getElementById('hermes-gaze-root')", "returnByValue": True})
+                        "expression": "!document.getElementById('look-root')", "returnByValue": True})
                     assert result["result"]["value"] is True, "Stop left partial-startup DOM installed"
             print("PASS Stop during renderer startup removes actual injected DOM before root closure")
             assert session.webcam is None and session.microphone._stream is None

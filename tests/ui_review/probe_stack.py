@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 
-OUT = Path(os.environ.get('GAZE_REVIEW_OUT', '/private/tmp/hermes-gaze-stack-review'))
+OUT = Path(os.environ.get('GAZE_REVIEW_OUT', '/private/tmp/look-stack-review'))
 OUT.mkdir(parents=True, exist_ok=True)
 os.environ.update(REVIEW_START_URL=Path(__file__).with_name('hostile.html').as_uri(),
                   SHOTS=str(OUT), HERMES_DISABLE_LAZY_INSTALLS='1')
@@ -51,7 +51,7 @@ def reset():
     r.move(10, 850)
     r.press('Escape', 'Escape')
     until(lambda: not r.turns.selected)
-    r.iso('window.__HERMES_GAZE_OVERLAY__.Configure({answerTurnMs: 3500})')
+    r.iso('window.__LOOK_OVERLAY__.Configure({answerTurnMs: 3500})')
     time.sleep(.3)
 
 
@@ -68,7 +68,7 @@ try:
     r.front(r.tab)
     r.aim('#first')
     r.move(10, 850)
-    r.iso('window.__HERMES_GAZE_OVERLAY__.Configure({answerTurnMs: 3500})')
+    r.iso('window.__LOOK_OVERLAY__.Configure({answerTurnMs: 3500})')
     a = settled('Alpha')
     b = ask('Beta')
     # Thinking retains the actual old renderer, even past its original reading deadline.
@@ -165,11 +165,11 @@ try:
     a = settled('Stop old')
     b = ask('Stop new')
     begin(b, '')
-    r.iso('window.__HERMES_GAZE_OVERLAY__.onSessionEvent({type:"action_task",status:"doing",label:"Working"})')
+    r.iso('window.__LOOK_OVERLAY__.onSessionEvent({type:"action_task",status:"doing",label:"Working"})')
     r.turns.delta(session_id='s', turn_id=b['request_id'], delta='First words ')
     time.sleep(.5)
     assert r.dbg()['view'] == 'doing' and 'Stop' in r.text()
-    r.iso('window.__HERMES_GAZE_OVERLAY__.onSessionEvent({type:"action_task",status:"stopped"})')
+    r.iso('window.__LOOK_OVERLAY__.onSessionEvent({type:"action_task",status:"stopped"})')
     wait_shown('Stop new')
     finish(b)
     results.append('Stop task retains surface, queued answer resumes afterward')
@@ -188,7 +188,7 @@ try:
     finish(b)
     time.sleep(.5)
     assert r.dbg()['view'] == 'confirm' and r.panel('card', '!!document.querySelector(".choice.yes")')
-    r.iso('window.__HERMES_GAZE_OVERLAY__.clearActionConfirmation()')
+    r.iso('window.__LOOK_OVERLAY__.clearActionConfirmation()')
     wait_shown('Confirm new')
     results.append('confirmation retains surface, queued answer resumes afterward')
 

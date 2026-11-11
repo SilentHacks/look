@@ -2,7 +2,7 @@
 (async function (opts) {
   "use strict";
   let flow = 0, setup = opts.setup || "";
-  const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, setup, flow, ...data}));
+  const emit = (type, data = {}) => __lookIntent(JSON.stringify({type, nonce: opts.nonce, setup, flow, ...data}));
   const make = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = text; if (cls) n.className = cls; return n; };
   const style = make("style");
   // Material values are the companion's glass plate (browser/overlay.js) and type (browser/panel.js).
@@ -444,7 +444,7 @@
     try {
       const lm = model.detectForVideo(video, now).faceLandmarks[0];
       const featureStart = performance.now();
-      const f = globalThis.__hermesGazeAppearance(video, lm, globalThis.__hermesGazeFeatures(lm), true);
+      const f = globalThis.__lookAppearance(video, lm, globalThis.__lookFeatures(lm), true);
       const done = performance.now();
       frameMs += done - now; featureMs += done - featureStart;
       if (!lm) faceAt = 0;

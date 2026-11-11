@@ -1,6 +1,6 @@
 'use strict';
 // Private implementation transport, never a content-script, external-message or model API.
-const WORLD = 'hermes-gaze', BINDING = '__hermesGazeIntent';
+const WORLD = 'look', BINDING = '__lookIntent';
 const tabs = new Map();
 let port = null, generation = '', ready = null, pairing = null, dead = true;
 let closing = Promise.resolve(), lastPython = 0;
@@ -31,7 +31,7 @@ async function cleanup(tab) {
   try {
     for (const identifier of tab.scripts) await direct(tab, 'Page.removeScriptToEvaluateOnNewDocument', {identifier});
     for (const uniqueContextId of tab.contexts.values()) {
-      await direct(tab, 'Runtime.evaluate', {expression: 'window.__HERMES_GAZE_OVERLAY__?.destroy();true', uniqueContextId});
+      await direct(tab, 'Runtime.evaluate', {expression: 'window.__LOOK_OVERLAY__?.destroy();true', uniqueContextId});
     }
     await direct(tab, 'Runtime.removeBinding', {name: BINDING});
   } catch (_) { /* Navigation or detach may have destroyed every context already. */ }
@@ -203,7 +203,7 @@ async function dispatch(message) {
         } else if (method === 'Look.lease') {
           if (params.uniqueContextId !== tab.document) fail('Lease belongs to another document.');
           result = await direct(tab, 'Runtime.evaluate', {
-            expression: '(() => {const api=window.__HERMES_GAZE_OVERLAY__;if(!api)return false;api.transportAlive();return api.inputReady()})()', uniqueContextId: tab.document});
+            expression: '(() => {const api=window.__LOOK_OVERLAY__;if(!api)return false;api.transportAlive();return api.inputReady()})()', uniqueContextId: tab.document});
           if (params.uniqueContextId === tab.document) tab.armedAt = result.result?.value === true ? Date.now() : 0;
         } else result = await direct(tab, method, params);
       } catch (error) {

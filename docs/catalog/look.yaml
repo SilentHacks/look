@@ -1,5 +1,5 @@
 # Source snapshot. The upstream PR may pin a later documentation-only commit.
-name: hermes-gaze
+name: look
 title: Look
 repo: https://github.com/SilentHacks/look
 sha: "3d0b8fe246905dfda2573efbced5b477c7f241ef"

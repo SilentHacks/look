@@ -8,12 +8,12 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze import cli
-from hermes_gaze.runtime import service
-from hermes_gaze.audio import voice
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.runtime.naming import plain_error
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look import cli
+from look.runtime import service
+from look.audio import voice
+from look.browser.cdp_bridge import GazeSession
+from look.runtime.naming import plain_error
+from look.runtime.voice_turns import VoiceTurns
 
 
 class FirstRunTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class FirstRunTests(unittest.TestCase):
 
     def register(self, state, *, warm=False):
         loader = importlib.machinery.SourceFileLoader(
-            'hermes_gaze.first_run_entry', str(Path(__file__).parents[1] / '__init__.py'))
+            'look.first_run_entry', str(Path(__file__).parents[1] / '__init__.py'))
         plugin = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader, is_package=False))
         loader.exec_module(plugin)
         commands, hooks = {}, {}
@@ -58,17 +58,16 @@ class FirstRunTests(unittest.TestCase):
             start.assert_not_called()
             ctx.inject_message.assert_not_called()
 
-    def test_start_and_legacy_alias_share_lifecycle_without_implicit_downloads(self):
+    def test_start_preserves_lifecycle_without_implicit_downloads(self):
         from unittest.mock import PropertyMock
         plugin, session, ctx, command, hooks = self.register(None)
         with patch.object(plugin, '_handle_slash_command', return_value='Ready') as start, \
              patch.object(type(session.cdp), 'is_connected', new_callable=PropertyMock, return_value=True):
-            for alias in ('look', 'gaze'):
-                for action in ('', 'start', 'connect', ' START '):
-                    ctx.commands[alias](action, session_key='key', session_id='session')
-                    self.assertTrue(ctx.turns.connected)
-                    self.assertEqual(ctx.turns.binding['session_id'], 'session')
-            self.assertEqual(start.call_count, 8)
+            for action in ('', 'start', 'connect', ' START '):
+                command(action, session_key='key', session_id='session')
+                self.assertTrue(ctx.turns.connected)
+                self.assertEqual(ctx.turns.binding['session_id'], 'session')
+            self.assertEqual(start.call_count, 4)
             voice.prepare_recognition.assert_not_called()
             ctx.inject_message.assert_not_called()
 
@@ -165,8 +164,8 @@ class FirstRunTests(unittest.TestCase):
                 self.assertIs(ctx.turns.binding, binding)
 
     def test_stop_releases_resources_and_binding_but_retains_host_admission(self):
-        for alias, action in (('look', 'stop'), ('gaze', 'disconnect')):
-            with self.subTest(alias=alias, action=action):
+        for action in ('stop', 'disconnect'):
+            with self.subTest(action=action):
                 plugin, session, ctx, command, _ = self.register(None)
                 ctx.turns.bind(session_key='key', session_id='owner')
                 ctx.turns.host_session, ctx.turns.host_turn = 'owner', 'active'
@@ -182,7 +181,7 @@ class FirstRunTests(unittest.TestCase):
                 server = Mock()
                 with patch.object(cli, 'get_shared_session', return_value=session), \
                      patch.object(cli, 'get_shared_server', return_value=server):
-                    ctx.commands[alias](action, session_key='other', session_id='other')
+                    command(action, session_key='other', session_id='other')
                 self.assertFalse(ctx.turns.connected)
                 self.assertTrue(cancelled.is_set())
                 self.assertEqual(ctx.turns.host_turn, 'active')

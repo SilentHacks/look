@@ -9,8 +9,8 @@ import threading
 import time
 
 import numpy as np
-from hermes_gaze.audio import voice
-from hermes_gaze.audio.asr import parakeet_v3 as v3
+from look.audio import voice
+from look.audio.asr import parakeet_v3 as v3
 
 
 def main():

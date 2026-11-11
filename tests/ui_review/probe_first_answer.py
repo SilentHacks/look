@@ -12,7 +12,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 os.environ.update(REVIEW_START_URL=Path(__file__).with_name('hostile.html').as_uri(),
                   SHOTS=str(OUT), HERMES_DISABLE_LAZY_INSTALLS='1')
 from devlib import Rig, until, service
-from hermes_gaze.browser.cdp_bridge import CdpSession
+from look.browser.cdp_bridge import CdpSession
 
 r = Rig(scale=1)
 results, failures = {}, []
@@ -62,7 +62,7 @@ def wheel_over(selector, stage):
         n=document.querySelector({json.dumps(selector)}).getBoundingClientRect();
       return {{x:(Math.max(b.left,n.left)+Math.min(b.right,n.right))/2,
         y:(Math.max(b.top,n.top)+Math.min(b.bottom,n.bottom))/2}};}})()''')
-    frame = r.iso('(()=>{const f=window.__HERMES_GAZE_OVERLAY__.uiFrame.getBoundingClientRect();return {x:f.x,y:f.y}})()')
+    frame = r.iso('(()=>{const f=window.__LOOK_OVERLAY__.uiFrame.getBoundingClientRect();return {x:f.x,y:f.y}})()')
     x, y = point['x'] + frame['x'], point['y'] + frame['y']
     assert abs(x - rect['cx']) < rect['w'] / 2
     assert abs(y - rect['cy']) < rect['h'] / 2

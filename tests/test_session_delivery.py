@@ -10,10 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.config import GazeConfig
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.config import GazeConfig
+from look.runtime.voice_turns import VoiceTurns
 
 from tests.test_cursor_context import capture
 
@@ -119,7 +119,7 @@ class TestSessionDelivery(unittest.TestCase):
             self.assertFalse(refused["ok"])
 
     def test_inbox_research_cannot_click_and_new_capture_revokes_confirmation(self):
-        from hermes_gaze.resolver.cursor_context import build_context
+        from look.resolver.cursor_context import build_context
         from tests.test_snapshot_actions import BrowserActions
 
         browser = BrowserActions()
@@ -226,7 +226,7 @@ class TestSessionDelivery(unittest.TestCase):
                   "cursor_context": capture()}
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
                 mock.patch.object(self.session, "display_session_event", side_effect=display), \
-                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer", return_value=("", [])):
+                mock.patch("look.audio.voice.transcribe_audio_buffer", return_value=("", [])):
             worker = threading.Thread(target=service.handle_intent, args=(intent, replies.append))
             started = time.monotonic()
             worker.start()
@@ -240,7 +240,7 @@ class TestSessionDelivery(unittest.TestCase):
 
     def test_native_shutdown_waits_for_protected_release_render_not_inbox_publication(self):
         import asyncio
-        from hermes_gaze.browser.cdp_bridge import CdpSession
+        from look.browser.cdp_bridge import CdpSession
 
         rendered, stopping, unblock = (threading.Event() for _ in range(3))
         native_saw_ui = []
@@ -282,7 +282,7 @@ class TestSessionDelivery(unittest.TestCase):
                 mock.patch.object(self.session, "display_session_event"), \
                 mock.patch.object(tab, "_eval_coro", side_effect=evaluate), \
                 mock.patch.object(tab, "_deliver_reply", side_effect=reply), \
-                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer", return_value=("", [])):
+                mock.patch("look.audio.voice.transcribe_audio_buffer", return_value=("", [])):
             tab._ensure_thread()
             tab._dispatch_intent(json.dumps({"type": "record_stop", "id": 42,
                                             "nonce": tab.intent_nonce, "cursor_context": capture()}))
@@ -311,7 +311,7 @@ class TestSessionDelivery(unittest.TestCase):
         trace.ui_ready = ready
         replies = []
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
-                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer") as transcribe:
+                mock.patch("look.audio.voice.transcribe_audio_buffer") as transcribe:
             service.handle_intent({"type": "record_stop", "nonce": self.session._intent_nonce,
                                    "_browser_target": "source", "_browser_document": "document",
                                    "cursor_context": capture(), "_release_trace": trace.turn}, replies.append)
@@ -325,7 +325,7 @@ class TestSessionDelivery(unittest.TestCase):
 
     def test_unrelated_or_replaced_private_render_cannot_release_native_work(self):
         import asyncio
-        from hermes_gaze.browser.cdp_bridge import CdpSession
+        from look.browser.cdp_bridge import CdpSession
 
         tab = CdpSession("http://127.0.0.1:1")
         self.addCleanup(tab.close)
@@ -396,7 +396,7 @@ class TestSessionDelivery(unittest.TestCase):
                   "cursor_context": capture()}
         with mock.patch.object(service, "_VOICE_TURNS", turns), \
                 mock.patch.object(mic, "stop", side_effect=stop), \
-                mock.patch("hermes_gaze.audio.voice.transcribe_audio_buffer", return_value=("", [])):
+                mock.patch("look.audio.voice.transcribe_audio_buffer", return_value=("", [])):
             binding = threading.Thread(target=rebind, daemon=True)
             release = threading.Thread(target=service.handle_intent, args=(intent, replies.append), daemon=True)
             binding.start()
@@ -411,7 +411,7 @@ class TestSessionDelivery(unittest.TestCase):
 
     def test_slow_transcription_releases_intents_and_preserves_capture_order(self):
         import threading
-        from hermes_gaze.audio import voice
+        from look.audio import voice
         entered, release, finished = threading.Event(), threading.Event(), threading.Event()
         replies = []
         turns = VoiceTurns(SimpleNamespace(inject_message=lambda *_, **__: True), self.session)

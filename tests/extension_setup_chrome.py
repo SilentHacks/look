@@ -21,10 +21,10 @@ import tests
 from tests.test_first_run import FirstRunTests
 from tests.extension_chrome import EXTENSION, Page
 from tests.test_chrome_consent import until as wait_until
-from hermes_gaze import cli
-from hermes_gaze.audio import voice
-from hermes_gaze.runtime import service
-from hermes_gaze.browser import extension as transport, extension_host
+from look import cli
+from look.audio import voice
+from look.runtime import service
+from look.browser import extension as transport, extension_host
 from websockets.sync.client import connect
 
 def until(predicate, timeout=10):
@@ -96,7 +96,7 @@ def run(chrome, out, headed=False):
         stack.enter_context(patch.object(extension_host, 'install_directory', return_value=native))
         stack.enter_context(patch.object(extension_host, 'manifest_directory', return_value=profile / 'NativeMessagingHosts'))
         stack.enter_context(patch.object(voice, '_WHISPER_MODELS', {}))
-        stack.enter_context(patch('hermes_gaze.config.apple_silicon_mac', return_value=False))
+        stack.enter_context(patch('look.config.apple_silicon_mac', return_value=False))
         stack.enter_context(patch.object(voice, 'prepare'))
         stack.enter_context(patch.object(voice, 'get_whisper_model', side_effect=load))
         fixture = FirstRunTests()

@@ -3,8 +3,8 @@ import unittest
 
 import numpy as np
 
-from hermes_gaze.benchmark.gaze_eval import EvalRidge
-from hermes_gaze.benchmark.gaze_research import Candidate, Filter, Fit, run
+from look.benchmark.gaze_eval import EvalRidge
+from look.benchmark.gaze_research import Candidate, Filter, Fit, run
 from tests.test_webcam import observations, SCREEN
 
 

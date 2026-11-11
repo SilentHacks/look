@@ -16,13 +16,13 @@ Branch: `research/gaze-tuning`. Evaluation-only files:
 
 No changes to `tracker/webcam_gaze.py`, live calibration, registration, assets or dependencies. No Chrome, webcam, microphone or speakers were opened. No recordings/frames, live calibration directories, `.env` or Hermes state were read or modified. The missing worktree `.venv` was linked to the existing project environment; no installation.
 
-Local outputs: `~/.cache/hermes-gaze-eval/p-a7c4-tuning/` (existing tuning), with new research aggregates under `research/`. Existing tuning writes its normal private traces there; **none are included in Git or this report**. Research output contains only per-session aggregates and configuration metadata, not features, predictions or fitted weights.
+Local outputs: `~/.cache/look-eval/p-a7c4-tuning/` (existing tuning), with new research aggregates under `research/`. Existing tuning writes its normal private traces there; **none are included in Git or this report**. Research output contains only per-session aggregates and configuration metadata, not features, predictions or fitted weights.
 
 ## 3. Verification and separation
 
 ### Runs actually completed
 
-- Existing tool first: `.venv/bin/python scripts/gaze.py tune FEATURES --points 9 16 25 --out ~/.cache/hermes-gaze-eval/p-a7c4-tuning` — **792 rows**, **6.98 s**.
+- Existing tool first: `.venv/bin/python scripts/gaze.py tune FEATURES --points 9 16 25 --out ~/.cache/look-eval/p-a7c4-tuning` — **792 rows**, **6.98 s**.
 - Research `--stage select` — **329 distinct specifications**, **869 point/protocol configurations**, **5,214 development fit/target rows**, **656 failed fits retained as zero hits**; **18 frozen choices**, **61.13 s**.
 - Research `--stage report` — **108 final per-session rows**, **36 aggregate comparisons**, **1.59 s**.
 - `research-safety` — **126 fixed per-session ablation rows**, **1.10 s**; no new search.
@@ -155,7 +155,7 @@ Before the later shipping decision, the user should run the candidate on the act
 From repository root, using the existing project environment:
 
 ```bash
-CACHE="$HOME/.cache/hermes-gaze-eval"
+CACHE="$HOME/.cache/look-eval"
 FEATURES="$CACHE/p-a7c4-features/features.json"
 OUT="$CACHE/p-a7c4-tuning"
 .venv/bin/python scripts/gaze.py tune "$FEATURES" --points 9 16 25 --out "$OUT"

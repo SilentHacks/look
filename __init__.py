@@ -3,8 +3,8 @@
 Registers:
 - 14 tools, including bounded browser structure and guarded general actions.
 - Session-bound voice context, streaming answer hooks, and turn lifecycle hooks.
-- In-session ``/look`` and CLI ``hermes look`` (``gaze`` compatibility aliases)
-- Bundled skill ``gaze-telepathy``
+- In-session ``/look`` and CLI ``hermes look``
+- Bundled skill ``look``
 
 Transport: ONE persistent CDP websocket per pinned Chrome tab; the overlay ->
 Python channel is a ``Runtime.addBinding`` intent channel (browser/cdp_bridge.py),
@@ -30,7 +30,7 @@ from .tools import ALL_TOOLS, check_gaze_requirements
 logger = logging.getLogger(__name__)
 
 _PLUGIN_DIR = Path(__file__).resolve().parent
-_SKILL_PATH = _PLUGIN_DIR / "skills" / "gaze-telepathy" / "SKILL.md"
+_SKILL_PATH = _PLUGIN_DIR / "skills" / "look" / "SKILL.md"
 
 
 def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str, str]]:
@@ -55,7 +55,7 @@ def _on_pre_llm_call(user_message: Any = "", **kwargs: Any) -> Optional[Dict[str
             service.start_question_highlight(session, res)
         return {"context": res["context"]} if res.get("context") else None
     except Exception as exc:
-        logger.debug("hermes-gaze pre_llm_call resolution skipped: %s", exc)
+        logger.debug("look pre_llm_call resolution skipped: %s", exc)
         return None
 
 
@@ -63,7 +63,7 @@ def register(ctx: Any) -> None:
     """Entry point invoked by Hermes PluginManager."""
     cfg = GazeConfig.from_ctx(ctx)
     rules = EVIDENCE_RULES + TOOL_RULES
-    ctx.register_system_prompt_section("hermes_gaze", rules, position="after_memory", max_chars=2200)
+    ctx.register_system_prompt_section("look", rules, position="after_memory", max_chars=2200)
 
     session = get_shared_session()
     session.cdp_http_url = cfg.cdp_url
@@ -85,7 +85,7 @@ def register(ctx: Any) -> None:
     for name, schema, handler, emoji in ALL_TOOLS:
         ctx.register_tool(
             name=name,
-            toolset="hermes_gaze",
+            toolset="look",
             schema=schema,
             handler=handler,
             check_fn=check_gaze_requirements,
@@ -400,23 +400,22 @@ def register(ctx: Any) -> None:
     ctx.register_hook("on_session_end", turns.end)
     ctx.register_hook("on_session_reset", turns.session_changed)
     ctx.register_hook("post_compaction", turns.session_changed)
-    for name in ("look", "gaze"):
-        ctx.register_command(
-            name,
-            handler=gaze_command,
-            description="Start or stop Look in Chrome." if name == "look" else "Compatibility alias for /look.",
-            args_hint="[start|stop|status|calibrate|cursor|setup|diagnostics|help]",
-        )
-        ctx.register_cli_command(
-            name=name,
-            help="Look: private questions and guarded actions in Chrome" if name == "look" else "Alias for hermes look",
-            setup_fn=_setup_cli,
-            handler_fn=_run_cli,
-            description="Use /look inside Hermes to start or stop the companion.",
-        )
+    ctx.register_command(
+        "look",
+        handler=gaze_command,
+        description="Start or stop Look in Chrome.",
+        args_hint="[start|stop|status|calibrate|cursor|setup|diagnostics|help]",
+    )
+    ctx.register_cli_command(
+        name="look",
+        help="Look: private questions and guarded actions in Chrome",
+        setup_fn=_setup_cli,
+        handler_fn=_run_cli,
+        description="Use /look inside Hermes to start or stop the companion.",
+    )
     if _SKILL_PATH.is_file():
         ctx.register_skill(
-            name="gaze-telepathy",
+            name="look",
             path=_SKILL_PATH,
             description="Resolve deictic pronouns ('this', 'these', 'that') in Chrome via pointer/gaze + DOM semantics.",
         )

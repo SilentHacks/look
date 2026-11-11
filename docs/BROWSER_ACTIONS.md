@@ -8,14 +8,14 @@ Final gates: 183 unit tests, 27 DOM tests, seven JS syntax checks, 33 action che
 No-send-without-click and independent `browser_exec` isolation passed; paid spend **$0**.
 Scores and provenance: [`browser_actions_production_summary.json`](../benchmark/browser_actions_production_summary.json).
 Raw transcripts (including superseded runs) are retained in git history and locally
-under `~/.cache/hermes-gaze-dev/transcripts/`, not in the installable tree.
+under `~/.cache/look-dev/transcripts/`, not in the installable tree.
 
 ## Production policy and tools
 
 The production path is B: a fixed captured-identity broker, not arbitrary browser
 code and not site adapters. Historical A/B evidence below explains the choice.
 
-Connect a new Hermes conversation with `/gaze connect`. Voice, the private typed
+Connect a new Hermes conversation with `/look connect`. Voice, the private typed
 question card and typed Hermes questions can run multi-step tasks. Saved inbox
 evidence remains immutable; an exact user session/turn gets a separate fresh
 action capture on its foreground source document. A recalled answer or page text
@@ -118,7 +118,7 @@ Hermes `browser.cdp_url` to the companion, or give `browser_exec`/`browser_cdp`
 its endpoint.** Connected sessions remove unsafe code/browser/terminal/delegate
 tools from model requests and veto their calls. Guarded direct tools or the
 constrained native `tool_describe`/`tool_call` bridge remain.
-Disconnect `/gaze` to restore normal Hermes tool use.
+Disconnect `/look` to restore normal Hermes tool use.
 The companion's own debugging port is reserved and cannot be a model navigation
 destination, including through loopback aliases. Exact tool-call identity is
 bound by execution middleware; Hermes policy hooks run on separate workers.
@@ -129,7 +129,7 @@ comparison demonstrated. This plugin cannot sandbox an arbitrary local process.
 
 ### Hands-on checklist (user only)
 
-1. Start a new Hermes conversation, send one ordinary message, then `/gaze connect`.
+1. Start a new Hermes conversation, send one ordinary message, then `/look connect`.
    Use the new companion Chrome, not your everyday Chrome. Wait for Listening
    before speaking.
 2. In that Chrome, sign into Gmail yourself once. Enter passwords and 2FA yourself.
@@ -348,7 +348,7 @@ Five fresh conversations per approach × fixture, **40 attempts**, one free mode
 
 The correct recommendation is **B's architecture, not a claim that the product already “just works.”** Fix/measure the generic schema/new-tab failure and content-bound approval before a production build. A is not a safe same-browser shortcut, even though it succeeded on two email turns. Neither unrestricted A nor the current B prototype is a finished general-and-safe product; no production rollout is approved by this experiment.
 
-Structured scores and provenance: [`browser_actions_compare_summary.json`](../benchmark/browser_actions_compare_summary.json). Executable source: [`browser_actions_compare.py`](../tests/browser_actions/browser_actions_compare.py), [`browser_actions_compare.js`](../tests/browser_actions/browser_actions_compare.js), and the original/extra HTML fixtures alongside them. Full traces, memory questions and pilots remain in git history and locally under `~/.cache/hermes-gaze-dev/transcripts/`.
+Structured scores and provenance: [`browser_actions_compare_summary.json`](../benchmark/browser_actions_compare_summary.json). Executable source: [`browser_actions_compare.py`](../tests/browser_actions/browser_actions_compare.py), [`browser_actions_compare.js`](../tests/browser_actions/browser_actions_compare.js), and the original/extra HTML fixtures alongside them. Full traces, memory questions and pilots remain in git history and locally under `~/.cache/look-dev/transcripts/`.
 
 ## Previous milestone (f5ac560)
 

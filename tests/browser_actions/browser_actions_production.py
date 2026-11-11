@@ -94,8 +94,9 @@ class Fixtures:
 class ProductionTools:
     """Trace production handlers; real model calls retain Hermes's session-only kwargs."""
     def __init__(self, rig):
-        from hermes_gaze import tools
-        from hermes_gaze.runtime import service
+        from look import tools
+        from look.runtime import service
+        from look.config import GazeConfig
         self.rig, self.calls = rig, []
         self.turn_number, self.turn_id = 0, ''
         self.host_hooks, self.host_middlewares = [], []
@@ -111,6 +112,7 @@ class ProductionTools:
             return owner
         self.patches = [patch.object(tools, 'get_shared_session', return_value=rig.session),
                         patch.object(service, 'get_shared_session', return_value=rig.session),
+                        patch.object(service, '_CONFIG', GazeConfig(allow_private_network=True)),
                         patch.object(rig.session.cdp, 'action_navigate', side_effect=navigate_with_headless_focus)]
         for p in self.patches:
             p.start()
@@ -145,12 +147,12 @@ class ProductionTools:
         from unittest.mock import Mock
         from hermes_cli.plugins import get_plugin_manager
         from tools.registry import registry
-        from hermes_gaze.runtime import service
-        from hermes_gaze.audio import voice
+        from look.runtime import service
+        from look.audio import voice
         manager = get_plugin_manager()
         manager.discover_and_load()
         self.manager = manager
-        name = 'hermes_gaze.production_trial_entry'
+        name = 'look.production_trial_entry'
         loader = importlib.machinery.SourceFileLoader(name, str(ROOT / '__init__.py'))
         spec = importlib.util.spec_from_loader(name, loader, is_package=False)
         plugin = importlib.util.module_from_spec(spec)
@@ -164,9 +166,10 @@ class ProductionTools:
         def prompt(name, text, **kwargs):
             self.rules = text
         def register_tool(name, schema, **kwargs):
-            registry.register(name=name, toolset='hermes_gaze', schema=schema,
+            registry.register(name=name, toolset='look', schema=schema,
                               handler=partial(self.call, name), check_fn=lambda: True)
-        overrides = {'cdp_url': self.rig.session.cdp_http_url, 'early_highlight': False}
+        overrides = {'cdp_url': self.rig.session.cdp_http_url, 'early_highlight': False,
+                     'allow_private_network': True}  # Owned loopback fixtures only.
         ctx = SimpleNamespace(get_config=lambda name, default: overrides.get(name, default),
             register_system_prompt_section=prompt, register_tool=register_tool,
             register_hook=hook, register_middleware=middleware, register_command=Mock(),
@@ -281,7 +284,7 @@ def run_turn(rig, tools, ask, key, origin, ingress='terminal', *,
     original_inject = tools.plugin_turns.ctx.inject_message
     try:
         agent = AIAgent(model=model, provider=provider, api_mode='chat_completions', api_key=key,
-            base_url=base_url, enabled_toolsets=['hermes_gaze'],
+            base_url=base_url, enabled_toolsets=['look'],
             max_iterations=14, max_tokens=10000, reasoning_config={'enabled': True}, fallback_model=None,
             quiet_mode=True, skip_context_files=True, skip_memory=False, skip_background_review=True,
             load_soul_identity=False, cwd=os.environ['HERMES_HOME'],
@@ -306,7 +309,7 @@ def run_turn(rig, tools, ask, key, origin, ingress='terminal', *,
                 return True
             tools.plugin_turns.ctx.inject_message = inject
             rig.aim('#form-heading')
-            from hermes_gaze.audio import voice
+            from look.audio import voice
             with patch.object(voice, 'transcribe_audio_buffer', return_value=(ask, [])):
                 if ingress == 'typed':
                     rig.press('AltRight', 'Alt')

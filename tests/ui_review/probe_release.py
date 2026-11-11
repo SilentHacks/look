@@ -12,9 +12,9 @@ from unittest.mock import patch
 os.environ['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
 os.environ['SHOTS'] = os.environ.get('GAZE_REVIEW_OUT', '/tmp/hermes-release-probe')
 from devlib import FakeInput, Rig, until
-from hermes_gaze import cli
-from hermes_gaze.audio import voice
-from hermes_gaze.runtime.release_timing import TIMINGS
+from look import cli
+from look.audio import voice
+from look.runtime.release_timing import TIMINGS
 
 r = Rig(headless=True, scale=1)
 results = []
@@ -61,7 +61,7 @@ try:
             r.press('Escape', 'Escape')
             r.aim('#topic')
             if blocked == 'webcam-gaze':
-                assert r.iso("window.__HERMES_GAZE_OVERLAY__.acceptWebcamSample("
+                assert r.iso("window.__LOOK_OVERLAY__.acceptWebcamSample("
                              "{source:'webcam',x_vp:100,y_vp:90,t:Date.now()/1000})")
             r.space_down()
             until(lambda: r.session.microphone._stream is not None)
@@ -99,7 +99,7 @@ try:
                       and not r.turns.pending, 8, 'answer completed')
             with patch.object(cli.Path, 'home', return_value=Path(r.tmp)):
                 cli._handle_slash_command('timing')
-            timing_file = Path(r.tmp) / '.cache/hermes-gaze/release-timing.json'
+            timing_file = Path(r.tmp) / '.cache/look/release-timing.json'
             trace = json.loads(timing_file.read_text())['turns'][-1]
             assert timing_file.stat().st_mode & 0o777 == 0o600
             assert 'first_ui_push' in trace['python_ms'], trace

@@ -5,10 +5,10 @@ import tempfile
 import unittest
 import zipfile
 
-from hermes_gaze.benchmark.gaze_dataset import export_person, import_person, inventory, pseudonym
-from hermes_gaze.benchmark.gaze_eval import summaries, validation_metrics
-from hermes_gaze.benchmark.gaze_record import completed_blocks
-from hermes_gaze.tracker.webcam_gaze import ScreenPoint
+from look.benchmark.gaze_dataset import export_person, import_person, inventory, pseudonym
+from look.benchmark.gaze_eval import summaries, validation_metrics
+from look.benchmark.gaze_record import completed_blocks
+from look.tracker.webcam_gaze import ScreenPoint
 
 
 class DatasetTests(unittest.TestCase):

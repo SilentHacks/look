@@ -12,7 +12,7 @@ import unittest
 import weakref
 from unittest.mock import patch
 
-from hermes_gaze.runtime.release_timing import ReleaseTimings
+from look.runtime.release_timing import ReleaseTimings
 
 
 class ReleaseTimingTests(unittest.TestCase):
@@ -121,8 +121,8 @@ class ReleaseTimingTests(unittest.TestCase):
         self.assertFalse(worker.is_alive())
 
     def test_disconnect_and_unload_stop_unfinished_release(self):
-        from hermes_gaze.browser import cdp_bridge
-        from hermes_gaze.runtime import voice_turns
+        from look.browser import cdp_bridge
+        from look.runtime import voice_turns
         from tests.test_voice_turns import Host
 
         timings = ReleaseTimings()
@@ -156,7 +156,7 @@ class ReleaseTimingTests(unittest.TestCase):
             self.assertIsNone(module.TIMINGS.thread)
         script = """import tests, threading
 from unittest.mock import patch
-from hermes_gaze.audio import voice
+from look.audio import voice
 with patch.object(voice, 'prepare', side_effect=voice.AssetsMissing('empty test cache')):
     voice.prewarm()
     for thread in threading.enumerate():

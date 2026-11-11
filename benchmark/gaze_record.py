@@ -70,7 +70,7 @@ class RecordingHost(WebcamHost):
 
     def _event(self, message):
         params = message.get("params", {})
-        if message.get("method") != "Runtime.bindingCalled" or params.get("name") != "__hermesGazeIntent" or params.get("executionContextId") != self._context:
+        if message.get("method") != "Runtime.bindingCalled" or params.get("name") != "__lookIntent" or params.get("executionContextId") != self._context:
             return super()._event(message)
         payload = params.get("payload", "")
         if not isinstance(payload, str) or len(payload) > 70000:

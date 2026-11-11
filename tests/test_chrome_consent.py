@@ -13,12 +13,12 @@ from unittest.mock import Mock, patch
 
 from websockets.sync.server import serve
 
-from hermes_gaze import cli
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
-from hermes_gaze.browser.consent import ConsentChrome, discovery_port
-from hermes_gaze.browser.ownership import OwnedChrome, OwnershipError
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look import cli
+from look.runtime import service
+from look.browser.cdp_bridge import CdpSession, GazeSession
+from look.browser.consent import ConsentChrome, discovery_port
+from look.browser.ownership import OwnedChrome, OwnershipError
+from look.runtime.voice_turns import VoiceTurns
 
 
 GUID = "12345678-1234-1234-1234-123456789abc"
@@ -138,7 +138,7 @@ class FakeChrome:
                     context = {"main": 7, "card": 8, "pill": 9}[name]
                     # Deliberately collide both numeric AND unique context IDs between targets.
                     self.emit(session, "Runtime.executionContextCreated", dict(context=dict(
-                        id=context, uniqueId="document-" + name, name="hermes-gaze")), ws=ws)
+                        id=context, uniqueId="document-" + name, name="look")), ws=ws)
                     result = dict(executionContextId=context)
                 elif method == "DOM.describeNode":
                     result = dict(node=dict(frameId=params["objectId"]))
@@ -186,7 +186,7 @@ class Discovery(unittest.TestCase):
             with self.assertRaises(OwnershipError):
                 discovery_port(path)
             path.chmod(0o600)
-            with patch("hermes_gaze.browser.consent.os.getuid", return_value=os.getuid() + 1):
+            with patch("look.browser.consent.os.getuid", return_value=os.getuid() + 1):
                 with self.assertRaises(OwnershipError):
                     discovery_port(path)
             link = Path(directory) / "link"
@@ -277,7 +277,7 @@ class ConsentWire(unittest.IsolatedAsyncioTestCase):
         self.fake.reply(held_a, dict(result=dict(value="A")))
         self.assertEqual(await asyncio.gather(pending_a, pending_b), ["A", "B"])
         payload = json.dumps(dict(type="ask", nonce="nonce", utterance="question"))
-        params = dict(name="__hermesGazeIntent", executionContextId=7, payload=payload)
+        params = dict(name="__lookIntent", executionContextId=7, payload=payload)
         self.fake.emit("unknown-session", "Runtime.bindingCalled", params)
         self.fake.emit(b._ws.session, "Runtime.bindingCalled", params)
         await asyncio.to_thread(until, lambda: len(events_b) == 1)
@@ -428,7 +428,7 @@ class Integration(unittest.TestCase):
         with patch.object(cli, "get_shared_session", return_value=session), \
              patch.object(cli.platform, "system", return_value="Darwin"), \
              patch.object(cli.platform, "machine", return_value="arm64"), \
-             patch("hermes_gaze.browser.consent.discovery_port", side_effect=AssertionError("personal read")):
+             patch("look.browser.consent.discovery_port", side_effect=AssertionError("personal read")):
             result = cli._handle_slash_command("start --existing")
             self.assertIn("--extension", result)
             self.assertEqual(session.cdp.source, "owned")
@@ -448,7 +448,7 @@ class Integration(unittest.TestCase):
             def failed(text):
                 errors.append(text)
                 reported.set()
-            with patch("hermes_gaze.browser.consent.discovery_port", side_effect=discover), \
+            with patch("look.browser.consent.discovery_port", side_effect=discover), \
                  patch("websockets.sync.client.connect") as request:
                 try:
                     session.cdp.start_existing(metadata_path=Path(directory) / "missing", on_error=failed)

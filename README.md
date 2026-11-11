@@ -23,8 +23,8 @@ Parakeet v2 CoreML/MLX support. Catalog admission remains under review.
 ```sh
 hermes plugins install https://github.com/SilentHacks/look.git --ref 3d0b8fe246905dfda2573efbced5b477c7f241ef --enable
 hermes config set plugins.isolation in_process
-hermes config set plugins.entries.hermes-gaze.allow_gateway_injection true
-hermes plugins doctor hermes-gaze --ci
+hermes config set plugins.entries.look.allow_gateway_injection true
+hermes plugins doctor look --ci
 ```
 
 For a named profile, use `hermes -p NAME` instead of `hermes` throughout.
@@ -78,6 +78,12 @@ approval prompts for this connection. This can send, buy or delete immediately,
 including if page instructions mislead the model. `/look actions confirm` restores
 prompts. Stopping or reconnecting resets the mode.
 
+Model-requested navigation and link clicks resolve hosts and reject private,
+loopback, link-local, CGNAT and metadata destinations by default. To allow local
+pages, the owner can set `plugins.entries.look.settings.allow_private_network`
+to `true` and restart Hermes. The debugger port remains blocked. This preflight
+check does not contain redirects or DNS rebinding.
+
 ## Optional voice and eyes
 
 - **Speak:** run `/look setup` to download local English recognition. Grant
@@ -118,7 +124,9 @@ Screen-reader compatibility is unverified.
   registration under your user account. It does not read vendor login stores.
 - Separate-browser and eye modes launch Chrome processes. Speech may launch
   `ffmpeg` to decode audio or macOS `/usr/bin/say` before playback starts.
-  Python/native dependencies are installed separately through Hermes.
+  These children and the native recognition worker receive allowlisted runtime
+  environments, not inherited provider keys. Python/native dependencies are
+  installed separately through Hermes.
 - Explicit setup downloads public, pinned, checksum-verified assets anonymously.
   New native Apple Silicon installs use NVIDIA's Parakeet v3 Q8 GGUF (714 MB)
   from Hugging Face and official NeMo-Speech.cpp v0.3.0 Metal runtime (7.24 MB

@@ -1,8 +1,8 @@
 """Live prompt-semantics probes in disposable Hermes sessions and private Chrome.
 
-Requires --prompt-only and configured inference; not an offline acceptance suite.
-Uses private config/credential copies. No dummy warm-up turn, microphone capture,
-or retired HUD automation. Protected-UI scenarios live in probe_companion_ui.py.
+Requires --prompt-only and LOOK_PROBE_API_KEY, a dedicated test-only inference key.
+Uses a minimal disposable profile, never account auth stores. No dummy warm-up turn,
+microphone capture, or retired HUD automation. Protected-UI scenarios live in probe_companion_ui.py.
 """
 from __future__ import annotations
 
@@ -10,11 +10,9 @@ import argparse
 import base64
 import json
 import logging
-import os
 from pathlib import Path
 import queue
 import re
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -91,7 +89,7 @@ def chrome_command(port, method, params):
 def chrome_eval(port: int, expression: str):
     frame = chrome_command(port, "Page.getFrameTree", {})["frameTree"]["frame"]["id"]
     world = chrome_command(port, "Page.createIsolatedWorld",
-                           {"frameId": frame, "worldName": "hermes-gaze"})["executionContextId"]
+                           {"frameId": frame, "worldName": "look"})["executionContextId"]
     result = chrome_command(port, "Runtime.evaluate", {
         "expression": expression, "contextId": world, "returnByValue": True, "awaitPromise": True})
     if result.get("exceptionDetails"):
@@ -140,12 +138,12 @@ def prompt_trials(args, rpc, root, temp, report):
             for name in args.cases:
                 selector, question = cases[name]
                 sid = rpc.call("session.create", source=source, cwd=str(cwd),
-                               title=f"Gaze {name} {trial + 1}")["session_id"]
+                               title=f"Look {name} {trial + 1}")["session_id"]
                 try:
-                    rpc.call("command.dispatch", session_id=sid, name="gaze", arg="connect")
-                    browser_wait(args.port, "!!window.__HERMES_GAZE_OVERLAY__")
+                    rpc.call("command.dispatch", session_id=sid, name="look", arg="connect")
+                    browser_wait(args.port, "!!window.__LOOK_OVERLAY__")
                     chrome_eval(args.port, """(() => {
-                      const api=window.__HERMES_GAZE_OVERLAY__, originals={};
+                      const api=window.__LOOK_OVERLAY__, originals={};
                       window.__promptOps=[];window.__promptEvents=[];window.__promptCaptures=[];
                       for(const name of ['activateSnapshot','highlightSnapshot','clickSnapshot','onSessionEvent']){
                         originals[name]=api[name];api[name]=(...args)=>{
@@ -168,11 +166,11 @@ def prompt_trials(args, rpc, root, temp, report):
                       const e=document.querySelector({json.dumps(selector)});
                       e.scrollIntoView({{block:'nearest'}});
                       const r=e.getBoundingClientRect();
-                      window.__HERMES_GAZE_OVERLAY__.recordPoint(r.x+r.width/2,r.y+r.height/2);
+                      window.__LOOK_OVERLAY__.recordPoint(r.x+r.width/2,r.y+r.height/2);
                       return true}})()""")
                     if name == "stale":
                         chrome_eval(args.port, """(() => {
-                          const api=window.__HERMES_GAZE_OVERLAY__, capture=api.captureCursorContext;
+                          const api=window.__LOOK_OVERLAY__, capture=api.captureCursorContext;
                           api.captureCursorContext=()=>{const value=capture();
                             value.history.forEach(h=>{h.start-=300;h.end-=300;h.last_seen-=300});return value};
                           return true})()""")
@@ -240,41 +238,28 @@ def prompt_trials(args, rpc, root, temp, report):
 
 
 def run(args) -> dict:
-    import psutil
-    import yaml
-    from hermes_cli.config import load_config
-    from hermes_constants import get_hermes_home
-
     root = args.plugin_root.resolve() if args.plugin_root else Path(__file__).resolve().parents[1]
-    config = load_config()
-    home = get_hermes_home()
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import tests  # Register the plugin package shell without executing registration.
+    from look.benchmark.probe_profile import probe_key, prepare_profile
+    probe_key()
+    import psutil
     report = {"scope": "live Hermes TUI/desktop prompt semantics in private Chrome",
-              "model_config": {k: config.get("model", {}).get(k) for k in ("default", "provider")}}
+              "model_config": {}}
     with tempfile.TemporaryDirectory(prefix="gaze-sessions-") as directory:
         temp = Path(directory)
         (temp / "plugins").mkdir()
         (temp / "skills").mkdir()  # Hermes omits even plugin skill hints when this directory is absent.
-        (temp / "plugins" / "hermes-gaze").symlink_to(root, target_is_directory=True)
-        for name in (".env", "auth.json"):
-            if (home / name).exists():
-                shutil.copy2(home / name, temp / name)
-                (temp / name).chmod(0o600)
-        config["plugins"] = {"enabled": ["hermes-gaze"], "isolation": "in_process",
-                             "entries": {"hermes-gaze": {"allow_gateway_injection": True,
-                                                        "settings": {"cdp_url": f"http://127.0.0.1:{args.port}"}}}}
-        config["mcp_servers"] = {}
-        config["fallback_model"] = None
-        (temp / "config.yaml").write_text(yaml.safe_dump(config))
-        (temp / "config.yaml").chmod(0o600)
-        env = {**os.environ, "HOME": str(temp), "HERMES_HOME": str(temp), "HERMES_DISABLE_LAZY_INSTALLS": "1"}
+        (temp / "plugins" / "look").symlink_to(root, target_is_directory=True)
+        config, env = prepare_profile(temp, plugin_id="look",
+                                      settings={"cdp_url": f"http://127.0.0.1:{args.port}"})
+        report["model_config"] = {k: config["model"].get(k) for k in ("default", "provider")}
         if args.repo_folder:
             env.pop("HERMES_IGNORE_RULES", None)
-        else:
-            env["HERMES_IGNORE_RULES"] = "1"
         sys.path.insert(0, str(root))
         import tests  # Register the plugin package shell without executing registration.
         from tests.owned_chrome import private_session
-        companion = private_session(temp / ".cache/hermes-gaze/chrome-profile", port=args.port,
+        companion = private_session(temp / ".cache/look/chrome-profile", port=args.port,
             executable=args.chrome, chrome_args=("--headless=new", "--window-size=1440,1100"),
             url=(root / "benchmark/benchmark_page.html").as_uri())
         chrome = companion.cdp.chrome.process
@@ -304,7 +289,7 @@ def run(args) -> dict:
                         with sqlite3.connect(temp / "state.db") as db:
                             report["gaze_system_sections"] = []
                             for prompt_hash, prompt in db.execute("SELECT hash, prompt FROM system_prompts"):
-                                section = re.search(r"## Plugin Context: hermes_gaze\n"
+                                section = re.search(r"## Plugin Context: look\n"
                                                     r"<!-- hermes-plugin-section-chars:(\d+) -->\n\n", prompt)
                                 if section:
                                     report["gaze_system_sections"].append(

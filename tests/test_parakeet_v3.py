@@ -8,9 +8,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from hermes_gaze.audio import voice
-from hermes_gaze.audio.asset_cache import AssetIntegrityError, AssetsMissing
-from hermes_gaze.audio.asr import parakeet_v3 as v3
+from look.audio import voice
+from look.audio.asset_cache import AssetIntegrityError, AssetsMissing
+from look.audio.asr import parakeet_v3 as v3
 
 
 class ParakeetV3Tests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ParakeetV3Tests(unittest.TestCase):
 
     def test_configuration_defaults_preserve_explicit_model_choices(self):
         from types import SimpleNamespace
-        from hermes_gaze import config
+        from look import config
         for apple in (False, True):
             with patch.object(config, "apple_silicon_mac", return_value=apple):
                 expected = "parakeet-v3" if apple else "base.en"

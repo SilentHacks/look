@@ -96,11 +96,11 @@ def child(args):
         from hermes_cli.gateway_client import connect_gateway
         from run_agent import AIAgent
         from openai.types.chat import ChatCompletion
-        from hermes_gaze.runtime import service
-        from hermes_gaze import cli
-        from hermes_gaze.audio import voice
-        from hermes_gaze.browser.cdp_bridge import GazeSession
-        from hermes_gaze.runtime.native_input import NativeInput
+        from look.runtime import service
+        from look import cli
+        from look.audio import voice
+        from look.browser.cdp_bridge import GazeSession
+        from look.runtime.native_input import NativeInput
         home = Path(os.environ["HERMES_HOME"]).resolve()
         runner = GatewayRunner(GatewayConfig())
         runner._running = True
@@ -115,9 +115,9 @@ def child(args):
         authority = runner.session_authority
         manager = plugins.get_plugin_manager()
         manager._discovered = True  # Empty fixture registry; no personal installed plugins.
-        ctx = PluginContext(PluginManifest(name="hermes-gaze", key="hermes-gaze", source="user"), manager)
+        ctx = PluginContext(PluginManifest(name="look", key="look", source="user"), manager)
         manager.set_gateway_message_injector(runner, runner._schedule_plugin_message_injection)
-        loader = importlib.machinery.SourceFileLoader("hermes_gaze.stock_entry", str(ROOT / "__init__.py"))
+        loader = importlib.machinery.SourceFileLoader("look.stock_entry", str(ROOT / "__init__.py"))
         plugin = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader, is_package=False))
         loader.exec_module(plugin)
         browser = GazeSession(profile_dir=base / "chrome")
@@ -169,7 +169,7 @@ def child(args):
                     (patch.object(type(browser.cdp), "is_connected", property(lambda _: True))
                      if not args.journey_chrome else nullcontext()), \
                     patch.object(voice, "_WHISPER_MODELS", {}), \
-                    patch("hermes_gaze.config.apple_silicon_mac", return_value=False), \
+                    patch("look.config.apple_silicon_mac", return_value=False), \
                     patch.object(voice, "prepare"), patch.object(voice, "get_whisper_model", side_effect=load_asr), \
                     patch.object(AIAgent, "_interruptible_api_call", inference), \
                     patch("agent.turn_api_call._should_stream", return_value=False):
@@ -183,7 +183,7 @@ def child(args):
                         return await operator.rpc(method, **params)
                     async def create(name):
                         made = await rpc("session.create", request_id=name, source="tui", cwd=str(base),
-                                         toolsets=["hermes_gaze", "terminal"])
+                                         toolsets=["look", "terminal"])
                         return made["session_id"]
                     async def look(sid, arg="start"):
                         return await rpc("command.dispatch", session_id=sid, name="look", arg=arg)
@@ -213,7 +213,7 @@ def child(args):
                         blocked = json.loads(config_path.read_text())
                         if isolation is not None:
                             blocked["plugins"]["isolation"] = isolation
-                        entry = blocked["plugins"]["entries"]["hermes-gaze"]
+                        entry = blocked["plugins"]["entries"]["look"]
                         if grant is None:
                             entry.pop("allow_gateway_injection")
                         else:
@@ -353,13 +353,13 @@ def child(args):
 
                     # Consent revocation at handoff is a definite refusal, never SDK fallback.
                     config = json.loads((home / "config.yaml").read_text())
-                    config["plugins"]["entries"]["hermes-gaze"]["allow_gateway_injection"] = False
+                    config["plugins"]["entries"]["look"]["allow_gateway_injection"] = False
                     (home / "config.yaml").write_text(json.dumps(config))
                     denied = await asyncio.to_thread(question, "Explain this denied input")
                     await until(lambda: turns.active is None)
                     assert denied["status"] == "failed" and len(calls) == before
                     output["denied_consent"] = denied["error"]
-                    config["plugins"]["entries"]["hermes-gaze"]["allow_gateway_injection"] = True
+                    config["plugins"]["entries"]["look"]["allow_gateway_injection"] = True
                     (home / "config.yaml").write_text(json.dumps(config))
 
                     # Stop does not pretend to cancel a handed-off input or transfer its owner.
@@ -378,7 +378,7 @@ def child(args):
                     output["stop_retains_owner"] = dict(no_rebind=True, final=held["status"])
 
                     # Revoked/tampered one-use native auth is rejected by the real stock socket.
-                    from hermes_gaze.runtime import native_input
+                    from look.runtime import native_input
                     real_control = native_input._control
                     def invalid_ticket(home, verb, params=None):
                         answer = real_control(home, verb, params)
@@ -471,7 +471,7 @@ def child(args):
                         await native.ws.close()
                     await asyncio.to_thread(lambda: asyncio.run_coroutine_threadsafe(drop_socket(), native.loop).result(5))
                     await until(lambda: held.get("outcome_unknown"))
-                    config["plugins"]["entries"]["hermes-gaze"]["allow_gateway_injection"] = False
+                    config["plugins"]["entries"]["look"]["allow_gateway_injection"] = False
                     (home / "config.yaml").write_text(json.dumps(config))
                     recovery = await look(boot)
                     assert not turns.connected and "saved question" in str(recovery), recovery
@@ -480,7 +480,7 @@ def child(args):
                     await until(lambda: turns.active is None)
                     assert held["status"] == "complete" and len(calls) == before, held
                     assert not turns.connected
-                    config["plugins"]["entries"]["hermes-gaze"]["allow_gateway_injection"] = True
+                    config["plugins"]["entries"]["look"]["allow_gateway_injection"] = True
                     (home / "config.yaml").write_text(json.dumps(config))
                     output["revoked_consent_receipt_recovery"] = dict(no_resubmit=True, input_disabled=True)
 
@@ -539,7 +539,7 @@ def main():
             "model": {"default": "offline-fixture", "provider": "custom", "base_url": "http://127.0.0.1:9/v1"},
             "gateway": {"multiplex_profiles": False}, "streaming": {"enabled": False},
             "auxiliary": {"title_generation": {"enabled": False}},
-            "plugins": {"entries": {"hermes-gaze": {
+            "plugins": {"entries": {"look": {
                 "allow_gateway_injection": True, "settings": {"early_highlight": False}}}}}))
         env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ") if k in os.environ}
         env.update(HOME=str(root / "home"), HERMES_HOME=str(root / "state"), TMPDIR=str(root / "tmp"),

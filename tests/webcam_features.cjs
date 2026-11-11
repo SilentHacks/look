@@ -38,7 +38,7 @@ Object.defineProperty(globalThis, "navigator", {value: {mediaDevices: {
 globalThis.setInterval = callback => { if (callback.name === "tick") interval = callback; return 1; };
 globalThis.clearInterval = () => {};
 const messages = [];
-globalThis.__hermesGazeIntent = text => messages.push(JSON.parse(text));
+globalThis.__lookIntent = text => messages.push(JSON.parse(text));
 const lm = Array.from({length: 478}, () => ({x: .5, y: .5, z: 0}));
 for (const [a, b, iris, up, down, cx] of [[33, 133, 468, 159, 145, .35], [362, 263, 473, 386, 374, .65]]) {
   lm[a] = {x: cx - .06, y: .4, z: 0}; lm[b] = {x: cx + .06, y: .42, z: 0};

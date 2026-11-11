@@ -9,8 +9,8 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
 from tests.owned_chrome import private_session
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.browser.ownership import OwnedChrome, OwnershipError
+from look.browser.cdp_bridge import GazeSession
+from look.browser.ownership import OwnedChrome, OwnershipError
 from websockets.sync.client import connect
 
 
@@ -34,7 +34,7 @@ def run():
             assert session.ensure_overlay(), "owned Chrome must attach"
             tab = next(tab for tab in session.cdp._tabs.values() if tab.is_connected)
             target = tab._target_id
-            assert tab.eval_js("!!window.__HERMES_GAZE_OVERLAY__")
+            assert tab.eval_js("!!window.__LOOK_OVERLAY__")
             assert set(tab._ui_frames) == {"card", "pill"}
             browser_id = session.cdp.chrome.command("Browser.getVersion")["product"]
             print("PASS owned launch and exact-context protected renderers:", browser_id)
@@ -65,7 +65,7 @@ def run():
             assert chrome.poll() is None
             with connect(ws_url, proxy=None) as inspector:
                 result = command(inspector, "Runtime.evaluate", {
-                    "expression": "!document.getElementById('hermes-gaze-root')", "returnByValue": True})
+                    "expression": "!document.getElementById('look-root')", "returnByValue": True})
                 assert result["result"]["value"] is True, result
                 origin = command(inspector, "Runtime.evaluate", {
                     "expression": "performance.timeOrigin", "returnByValue": True})["result"]["value"]
@@ -80,11 +80,11 @@ def run():
                     time.sleep(.05)
                 assert state
                 assert command(inspector, "Runtime.evaluate", {
-                    "expression": "!document.getElementById('hermes-gaze-root')",
+                    "expression": "!document.getElementById('look-root')",
                     "returnByValue": True})["result"]["value"]
             print("PASS Stop removes overlay/input; Chrome, tabs and profile remain")
             subprocess.run([sys.executable, "-B", "-c",
-                "import tests; from pathlib import Path; from hermes_gaze.browser.cdp_bridge import GazeSession; "
+                "import tests; from pathlib import Path; from look.browser.cdp_bridge import GazeSession; "
                 f"s=GazeSession({endpoint!r}, profile_dir=Path({str(profile)!r})); "
                 "assert s.cdp.start(); assert s.cdp.chrome.process is None; s.close(); "
                 "print('PASS separate-process warm ownership and clean lock handoff')"], check=True, timeout=25)

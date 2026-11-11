@@ -1,4 +1,4 @@
-"""Look slash commands and shell diagnostics; internal Gaze identifiers stay stable."""
+"""Look slash commands and shell diagnostics."""
 from __future__ import annotations
 
 import argparse
@@ -40,8 +40,7 @@ ADVANCED_HELP = """/look demo                         Open the practice dashboar
 /look listen                       Record and resolve a short question
 /look benchmark                    Run the simulated benchmark
 /look diagnostics timing           Save recent release traces
-/gaze is an alias for /look.
-Other aliases: connect=start, disconnect=stop, voice=listen, timing=diagnostics timing.
+Aliases: connect=start, disconnect=stop, voice=listen, timing=diagnostics timing.
 Shell: hermes look status|diagnostics|setup-extension [--uninstall]|setup-speech|demo|resolve|listen|benchmark.
 Use start and stop inside Hermes to control the current conversation."""
 
@@ -69,7 +68,7 @@ def _first_run_guide(session, *, report=None) -> str:
         lines.append("Install Google Chrome in Applications.")
     if _missing_modules():
         lines.append("Some dependencies are missing. Quit Hermes, run hermes pm install and "
-                     "hermes plugins enable hermes-gaze, then restart Hermes.")
+                     "hermes plugins enable look, then restart Hermes.")
     voice.prepare_recognition(_config().whisper_model, report=report)
     lines.append(voice.recognition_status(_config().whisper_model))
     if not session.cdp.is_connected:
@@ -169,7 +168,7 @@ def _handle_slash_command(raw_args: str, *, on_ready=None, on_error=None) -> str
     if sub == "timing" and not tail:
         from .runtime.release_timing import TIMINGS
         snapshot = TIMINGS.snapshot()
-        path = Path.home() / ".cache" / "hermes-gaze" / "release-timing.json"
+        path = Path.home() / ".cache" / "look" / "release-timing.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as handle:

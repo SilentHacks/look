@@ -38,7 +38,7 @@ class SnapshotActions:
         self._pending: dict[str, Any] | None = None
 
     def _browser(self, method: str, *args: Any) -> dict[str, Any]:
-        expression = f"window.__HERMES_GAZE_OVERLAY__.{method}({','.join(json.dumps(arg) for arg in args)})"
+        expression = f"window.__LOOK_OVERLAY__.{method}({','.join(json.dumps(arg) for arg in args)})"
         try:
             result = self.session.eval_js_once(expression)
         except Exception as exc:
@@ -81,7 +81,7 @@ class SnapshotActions:
             self._pending = None
             if had_pending:
                 try:
-                    self.session.eval_js_once("window.__HERMES_GAZE_OVERLAY__.clearActionConfirmation()")
+                    self.session.eval_js_once("window.__LOOK_OVERLAY__.clearActionConfirmation()")
                 except Exception:
                     logger.debug("Confirmation UI unavailable after revocation", exc_info=True)
 

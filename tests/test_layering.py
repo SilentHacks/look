@@ -1,10 +1,10 @@
-"""Structural invariants for the hermes-gaze package (post-refactor layering contract).
+"""Structural invariants for the look package (post-refactor layering contract).
 
 1. No absolute self-imports inside the package: Hermes loads this plugin as
-   ``hermes_plugins.hermes_gaze``, so ``import hermes_gaze`` inside a source file
+   ``hermes_plugins.look``, so ``import look`` inside a source file
    executes a SECOND copy of the package — the split-brain bug this refactor removed.
    Only ``from .x import y`` relative imports are allowed. (tests/ is exempt: its
-   bootstrap registers a hermes_gaze package *shell* under that sys.modules name.)
+   bootstrap registers a look package *shell* under that sys.modules name.)
 2. resolver/ and tracker/ stay pure: no I/O or sibling-layer imports — all Chrome,
    HTTP, process, and voice plumbing lives in browser/, runtime/ and audio/.
 """
@@ -25,7 +25,7 @@ _SKIP_DIRS = {
 }
 _PURE_DIRS = {"resolver", "tracker"}
 
-_ABS_SELF_IMPORT = re.compile(r"^\s*(?:import|from)\s+hermes_gaze\b")
+_ABS_SELF_IMPORT = re.compile(r"^\s*(?:import|from)\s+look\b")
 _IMPORT_STMT = re.compile(r"^\s*(?:from\s+([.\w]+)\s+)?import\s+(.+)")
 _BANNED_MODULE = re.compile(
     r"^\.{0,2}(?:websockets|urllib(?!\.parse$)|subprocess|socket|http\.server|server|service|browser)(?:\.|$)"

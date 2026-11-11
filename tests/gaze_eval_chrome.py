@@ -10,10 +10,10 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import tests
-from hermes_gaze.benchmark.gaze_eval import extract_manifest, private_directory, save_json, evaluate, PROTOCOLS, summaries
-from hermes_gaze.benchmark.gaze_dataset import export_person, import_person, inventory, load_dataset
-from hermes_gaze.benchmark.gaze_record import RecordingHost, CONDITIONS, completed_blocks
-from hermes_gaze.benchmark.gaze_tuning import Regression
+from look.benchmark.gaze_eval import extract_manifest, private_directory, save_json, evaluate, PROTOCOLS, summaries
+from look.benchmark.gaze_dataset import export_person, import_person, inventory, load_dataset
+from look.benchmark.gaze_record import RecordingHost, CONDITIONS, completed_blocks
+from look.benchmark.gaze_tuning import Regression
 from tests.webcam_chrome import fixture, tracker_tab, until
 
 

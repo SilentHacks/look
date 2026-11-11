@@ -1,5 +1,5 @@
 // One feature order for the live tracker and frame-exact offline evaluation.
-globalThis.__hermesGazeFeatures = function (lm) {
+globalThis.__lookFeatures = function (lm) {
   if (!lm || lm.length !== 478) return null;
   const out = [];
   for (const [a, b, iris, up, down] of [[33, 133, 468, 159, 145], [362, 263, 473, 386, 374]]) {
@@ -16,7 +16,7 @@ globalThis.__hermesGazeFeatures = function (lm) {
 // Version-ordered appearance: first-eye 16×8 row-major standardized grayscale,
 // second eye likewise, then the original eight iris/head values (saved-file layout).
 // leftOnly is the live model's 128 values + that eye's two iris coordinates.
-globalThis.__hermesGazeAppearance = (() => {
+globalThis.__lookAppearance = (() => {
   let patch, ctx;
   return function (image, lm, features, leftOnly = false) {
     if (!features || !lm || lm.length !== 478) return null;

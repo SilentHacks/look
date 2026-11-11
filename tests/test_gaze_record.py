@@ -10,9 +10,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from hermes_gaze.benchmark import gaze_record
-from hermes_gaze.benchmark.gaze_dataset import load_dataset
-from hermes_gaze.benchmark.gaze_eval import evaluate, EvalRidge, screen
+from look.benchmark import gaze_record
+from look.benchmark.gaze_dataset import load_dataset
+from look.benchmark.gaze_eval import evaluate, EvalRidge, screen
 from tests.test_webcam import observations
 
 
@@ -86,7 +86,7 @@ console.log(JSON.stringify(totals));
                     host._context, host._nonce = 7, "owned"
                     def event(kind, **fields):
                         host._event(dict(method="Runtime.bindingCalled", params=dict(
-                            name="__hermesGazeIntent", executionContextId=7,
+                            name="__lookIntent", executionContextId=7,
                             payload=json.dumps(dict(type=kind, nonce="owned", **fields)))))
                     try:
                         event("record_consent", accepted=True)
@@ -129,7 +129,7 @@ console.log(JSON.stringify(totals));
                 for i in range(len(observations()) + 2):
                     Path(command[-1].replace("%06d", f"{i + 1:06d}")).write_bytes(b"synthetic frame")
                 return subprocess.CompletedProcess(command, 0)
-            with patch("hermes_gaze.benchmark.gaze_eval.subprocess.run", side_effect=decode):
+            with patch("look.benchmark.gaze_eval.subprocess.run", side_effect=decode):
                 data = load_dataset(root, Path(tmp) / "frames", stride=1)
             self.assertEqual(gaze_record.completed_blocks(root, "p-demo", "glasses", "laptop"),
                              {"upright", "distance"})

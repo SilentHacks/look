@@ -1,5 +1,5 @@
 [project]
-name = "hermes-gaze"
+name = "look"
 version = "0.1.0"
 description = "Look: private questions and guarded browser actions for Chrome and Hermes Agent"
 readme = "README.md"

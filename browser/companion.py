@@ -151,7 +151,7 @@ class Companion:
                     raise OwnershipError("Look is still stopping. Retry /look start.")
                 if self._thread is None or not self._thread.is_alive():
                     self._stop = threading.Event()
-                    self._thread = threading.Thread(target=self._watch, name="hermes-gaze-tabs", daemon=True)
+                    self._thread = threading.Thread(target=self._watch, name="look-tabs", daemon=True)
                     self._thread.start()
             # Admission waits for the first attachment, not every background page.
             for _ in range(80):
@@ -283,10 +283,10 @@ class Companion:
                 try:
                     ready = tab.eval_js_once(
                         "document.visibilityState === 'visible' && document.hasFocus() && "
-                        "!!window.__HERMES_GAZE_OVERLAY__?.returnFromCalibration()",
+                        "!!window.__LOOK_OVERLAY__?.returnFromCalibration()",
                         timeout=.4, context_id=owner["browser_document"], operation="presentation")
                     if (ready and set(frames) == {"card", "pill"} and
-                            all(tab.eval_js_once("!!window.__HERMES_GAZE_PANEL__", timeout=.4, context_id=context[1], operation="read")
+                            all(tab.eval_js_once("!!window.__LOOK_PANEL__", timeout=.4, context_id=context[1], operation="read")
                                 for context in frames.values()) and frames == tab._ui_frames
                             and tab.eval_js_once("document.visibilityState === 'visible' && document.hasFocus()",
                                                  timeout=.4, context_id=owner["browser_document"], operation="read")
@@ -353,7 +353,7 @@ class Companion:
                 try:
                     capture = tab.eval_js_once(
                         "document.visibilityState === 'visible' && document.hasFocus() ? "
-                        "window.__HERMES_GAZE_OVERLAY__?.captureActionContext() : {foreground:false}",
+                        "window.__LOOK_OVERLAY__?.captureActionContext() : {foreground:false}",
                         timeout=1., context_id=document)
                 except (ConnectionError, RuntimeError, TimeoutError):
                     pass  # Retriable read while the owned document rearms, never another click.
@@ -467,7 +467,7 @@ class Companion:
                 tab._attaching = False
                 tab._attach_after = time.monotonic() + 2.
 
-        threading.Thread(target=run, name="hermes-gaze-attach", daemon=True).start()
+        threading.Thread(target=run, name="look-attach", daemon=True).start()
 
     def _dispatch(self, key: str, intent: dict, reply) -> None:
         if self._handler is None:
@@ -504,7 +504,7 @@ class Companion:
     def eval_js(self, expression: str, timeout: float = 6.) -> Any:
         return self._target().eval_js(expression, timeout)
 
-    def capture(self, expression: str = "window.__HERMES_GAZE_OVERLAY__?.captureCursorContext()") -> dict:
+    def capture(self, expression: str = "window.__LOOK_OVERLAY__?.captureCursorContext()") -> dict:
         tab = self._target()
         document, route = tab._context_unique_id, tab._route_id
         capture = tab.eval_js_once(expression, context_id=document) or {}
@@ -584,7 +584,7 @@ class Companion:
                 return
             delivered = tab.eval_js_once(
                 "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
-                "window.__HERMES_GAZE_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");return true})()",
+                "window.__LOOK_OVERLAY__?.onSessionEvent(" + json.dumps(event) + ");return true})()",
                 timeout=1., context_id=document, operation="presentation")
             if delivered:
                 tab._displayed_event = event

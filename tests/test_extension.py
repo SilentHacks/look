@@ -16,13 +16,13 @@ import time
 import unittest
 from unittest.mock import patch
 
-from hermes_gaze import cli
-from hermes_gaze.browser import extension, extension_host
-from hermes_gaze.browser.cdp_bridge import CdpSession
-from hermes_gaze.browser.extension import ExtensionChrome
-from hermes_gaze.browser.extension_host import (MAX_MESSAGE, configuration, install, read_message,
+from look import cli
+from look.browser import extension, extension_host
+from look.browser.cdp_bridge import CdpSession
+from look.browser.extension import ExtensionChrome
+from look.browser.extension_host import (MAX_MESSAGE, configuration, install, read_message,
                                                 relay, send_message, uninstall)
-from hermes_gaze.browser.ownership import OwnershipError
+from look.browser.ownership import OwnershipError
 from tests.test_chrome_consent import until
 
 KEY = json.loads((Path(__file__).resolve().parents[1] / 'extension/manifest.json').read_text())['key']
@@ -61,7 +61,7 @@ class Peer:
                 elif method == 'Page.createIsolatedWorld':
                     context = {'main': 1, 'card': 2, 'pill': 3}[params['frameId']]
                     send_message(self.stream, dict(sessionId=session, method='Runtime.executionContextCreated',
-                        params=dict(context=dict(id=context, name='hermes-gaze', uniqueId='doc-' + str(context)))))
+                        params=dict(context=dict(id=context, name='look', uniqueId='doc-' + str(context)))))
                     result = dict(executionContextId=context)
                 elif method == 'Page.addScriptToEvaluateOnNewDocument':
                     result = dict(identifier='script')
@@ -254,7 +254,7 @@ class NativeHostTests(unittest.TestCase):
 
     def test_setup_commands_use_current_environment_and_refuse_live_runtime(self):
         from tests.test_first_run import FirstRunTests
-        from hermes_gaze.browser.ownership import acquire_runtime_lease
+        from look.browser.ownership import acquire_runtime_lease
         fixture = FirstRunTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
@@ -284,7 +284,7 @@ class NativeHostTests(unittest.TestCase):
     def test_different_hermes_profiles_cannot_update_or_remove_waiting_extension(self):
         from types import SimpleNamespace
         from unittest.mock import Mock
-        from hermes_gaze.browser.cdp_bridge import GazeSession
+        from look.browser.cdp_bridge import GazeSession
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             storage = SimpleNamespace(plugin_data_dir=Mock(return_value=root / 'hermes-profile-a'))
@@ -492,7 +492,7 @@ class PairingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extension_host.pending_request()['request'], self.root.generation)
 
     async def test_stop_can_start_fresh_generation_while_cancelled_worker_unwinds(self):
-        from hermes_gaze.browser.companion import Companion
+        from look.browser.companion import Companion
         self.root.close()
         companion = Companion('http://127.0.0.1:1', profile_dir=self.root.lease_dir)
         released, started = threading.Event(), threading.Event()

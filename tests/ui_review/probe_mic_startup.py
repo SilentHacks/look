@@ -8,7 +8,7 @@ from unittest.mock import patch
 os.environ['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
 os.environ['SHOTS'] = os.environ.get('GAZE_REVIEW_OUT', '/tmp/hermes-mic-startup')
 from devlib import FakeInput, Rig, until
-from hermes_gaze.audio import voice
+from look.audio import voice
 
 r = Rig(headless=True, scale=1)
 release = threading.Event()

@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.config import GazeConfig
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.config import GazeConfig
 
 
 class TestScopeContext(unittest.TestCase):

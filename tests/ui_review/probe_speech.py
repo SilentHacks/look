@@ -11,7 +11,7 @@ os.environ['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
 os.environ['SHOTS'] = os.environ.get('GAZE_REVIEW_OUT', '/tmp/hermes-speech-probe')
 from devlib import Rig, until
 from tests.test_speech import Output, Stream
-from hermes_gaze.audio.speech import SpeechPlayback
+from look.audio.speech import SpeechPlayback
 
 outdir = Path(os.environ.get('GAZE_REVIEW_OUT', '/tmp/hermes-speech-probe'))
 outdir.mkdir(parents=True, exist_ok=True)

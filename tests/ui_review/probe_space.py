@@ -13,7 +13,7 @@ try:
     r.page('document.body.tabIndex=-1;document.body.focus();window.redirect=false;audit.events=[]')
     r.press('Space',' ');time.sleep(.3)
     out['media_with_plugin']=r.page('({playing,toggles,events:audit.events})')
-    r.iso('window.__HERMES_GAZE_OVERLAY__.destroy()');r.page('playing=false;toggles=0;audit.events=[]')
+    r.iso('window.__LOOK_OVERLAY__.destroy()');r.page('playing=false;toggles=0;audit.events=[]')
     r.press('Space',' ');time.sleep(.3)
     out['media_without_plugin']=r.page('({playing,toggles,events:audit.events})')
     r.tab._submit(r.tab._on_new_context(force=True),30)
@@ -37,7 +37,7 @@ try:
             raw.send('Input.dispatchKeyEvent',{'type':k,'key':' ','code':'Space','windowsVirtualKeyCode':32});time.sleep(.03)
         time.sleep(.3)
     tap();out['closed_transport_focused_button_clicks']=raw.main('audit.clicks')
-    raw.iso('window.__HERMES_GAZE_OVERLAY__.destroy()');tap();out['destroyed_overlay_focused_button_clicks']=raw.main('audit.clicks')
+    raw.iso('window.__LOOK_OVERLAY__.destroy()');tap();out['destroyed_overlay_focused_button_clicks']=raw.main('audit.clicks')
     raw.send('Browser.close');raw.ws.close()
 except Exception:out['error']=traceback.format_exc();print(out['error'])
 finally:

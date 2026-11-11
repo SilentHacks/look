@@ -6,13 +6,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from hermes_gaze.runtime import service
-from hermes_gaze.audio import voice
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.browser.companion import Companion
-from hermes_gaze.config import GazeConfig
-from hermes_gaze.audio.microphone import Microphone
-from hermes_gaze.resolver.cursor_context import safe_url
+from look.runtime import service
+from look.audio import voice
+from look.browser.cdp_bridge import GazeSession
+from look.browser.companion import Companion
+from look.config import GazeConfig
+from look.audio.microphone import Microphone
+from look.resolver.cursor_context import safe_url
 
 
 class TrustBoundaries(unittest.TestCase):

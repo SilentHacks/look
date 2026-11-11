@@ -1,7 +1,7 @@
 """Offline same-audio comparison. Explicit --fetch downloads public LibriSpeech data.
 
 Run via the tests package shell, without executing the plugin registration:
-python -c 'import tests; from hermes_gaze.benchmark.asr_compare import main; main()' --help
+python -c 'import tests; from look.benchmark.asr_compare import main; main()' --help
 Benchmark-only dependencies: pyarrow, soundfile. Never opens an audio device.
 """
 import argparse

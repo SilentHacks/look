@@ -8,7 +8,7 @@ from devlib import ROOT, Rig
 
 baseline = os.environ.get('CAPTURE_BASELINE')
 if baseline:
-    from hermes_gaze.browser import cdp_bridge
+    from look.browser import cdp_bridge
     source = subprocess.check_output(['git', 'show', f'{baseline}:browser/overlay.js'], cwd=ROOT, text=True)
     cdp_bridge._overlay_source = lambda: source
 
@@ -39,14 +39,14 @@ try:
     r.aim('#pointed')
     for mode in ('hover', 'webcam'):
         r.session.configure(mode=mode)
-        r.iso('''(() => {const a=window.__HERMES_GAZE_OVERLAY__;
+        r.iso('''(() => {const a=window.__LOOK_OVERLAY__;
           if(a.state.mode==='webcam') {
             a.acceptWebcamSample({source:'webcam',x_vp:50,y_vp:110,t:Date.now()/1000});
             a.acceptWebcamSample({source:'webcam',x_vp:500,y_vp:220,t:Date.now()/1000});
           }
           else a.recordPoint(500,220);return true})()''')
         results[mode] = r.tab._submit(r.tab._eval_coro('''(() => {
-          const a=window.__HERMES_GAZE_OVERLAY__, counts={}, originals=[];
+          const a=window.__LOOK_OVERLAY__, counts={}, originals=[];
           for(const [obj,key] of [[Element.prototype,'getBoundingClientRect'],[Element.prototype,'checkVisibility'],[Document.prototype,'querySelectorAll']]) {
             const fn=obj[key]; originals.push(()=>obj[key]=fn);
             obj[key]=function(...args){counts[key]=(counts[key]||0)+1;return fn.apply(this,args)};

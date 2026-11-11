@@ -2,7 +2,7 @@
 import socket
 from pathlib import Path
 
-from hermes_gaze.browser.cdp_bridge import GazeSession
+from look.browser.cdp_bridge import GazeSession
 
 
 def private_session(profile, *, chrome_args=(), url="about:blank", port=None, executable=None):

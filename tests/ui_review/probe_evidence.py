@@ -27,7 +27,7 @@ try:
         r.move(280,70)
         r.page('scrollTo(0,80)');time.sleep(.3)
         out['scrolled_pointer_hit']=r.page('document.elementFromPoint(280,70)?.textContent')
-        out['pointer_before_scroll_hold']=r.iso('({x:window.__HERMES_GAZE_OVERLAY__.state.pointerX,y:window.__HERMES_GAZE_OVERLAY__.state.pointerY})')
+        out['pointer_before_scroll_hold']=r.iso('({x:window.__LOOK_OVERLAY__.state.pointerX,y:window.__LOOK_OVERLAY__.state.pointerY})')
         r.space_down();time.sleep(.6);out['scrolled_hold']=r.dbg();r.space_up();time.sleep(.8)
         out['scrolled_request']={k:v for k,v in captured[-1].items() if k!='cursor_context'}
         out['scrolled_run_top']=r.turns.runs[-1]['snapshot'].get('top')
@@ -56,13 +56,13 @@ try:
     # Browser engine check: unfinished hostile markdown can recurse beyond intended depth limit.
     out['markdown_browser']=r.panel('card',"(()=>{const out=[];for(const n of [1000,6000,11999]){const t=performance.now();try{window.__HG_MD__.view('['.repeat(n)+' ',{streaming:true});out.push({n,ok:true,ms:performance.now()-t})}catch(e){out.push({n,error:e.name,message:e.message,ms:performance.now()-t})}}return out})()")
     # Observe the actual renderer, not only the parser.
-    out['markdown_render']=r.panel('card',"(()=>{try{window.__HERMES_GAZE_PANEL__.render({kind:'card',view:'answer',item:{id:'adversarial',subject:'Model response',turns:[{id:'turn',q:'Question',a:'['.repeat(11999)+' ',status:'streaming'}]}});return {ok:true}}catch(e){return {error:e.name,message:e.message,visible:document.body.innerText}}})()")
+    out['markdown_render']=r.panel('card',"(()=>{try{window.__LOOK_PANEL__.render({kind:'card',view:'answer',item:{id:'adversarial',subject:'Model response',turns:[{id:'turn',q:'Question',a:'['.repeat(11999)+' ',status:'streaming'}]}});return {ok:true}}catch(e){return {error:e.name,message:e.message,visible:document.body.innerText}}})()")
     out['pathological_markdown']=r.panel('card', """(()=>{
       const cases={nesting:'> '.repeat(6000)+'word ', fences:'`'.repeat(12000)+'\\nbody\\n',
         table:'|x'.repeat(3000)+'|\\n'+'|-'.repeat(3000)+'|\\n'+('|x|\\n'.repeat(3000)),
         closedBrackets:'['.repeat(6000)+']'.repeat(6000)};
       return Object.entries(cases).map(([name,text])=>{const start=performance.now();
-        window.__HERMES_GAZE_PANEL__.render({kind:'card',view:'answer',item:{id:name,subject:name,
+        window.__LOOK_PANEL__.render({kind:'card',view:'answer',item:{id:name,subject:name,
           turns:[{id:name,q:'Question',a:text,status:'streaming'}]}});
         return {name,ms:performance.now()-start,controls:!!document.querySelector('[data-act="dismiss"]')};
       });

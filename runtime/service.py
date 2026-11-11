@@ -1,4 +1,4 @@
-"""Runtime service layer for hermes-gaze.
+"""Runtime service layer for look.
 
 Holds the live plugin config + optional PluginLlm handle (``set_runtime``),
 owns the single resolution path (``resolve_now``) shared by the model tools
@@ -54,9 +54,9 @@ def _whisper_model_name() -> str:
 def _record_path() -> Path:
     try:
         from plugins.plugin_storage import plugin_data_dir
-        root = plugin_data_dir("hermes-gaze")
+        root = plugin_data_dir("look")
     except ImportError:
-        root = Path.home() / ".cache" / "hermes-gaze"
+        root = Path.home() / ".cache" / "look"
     return Path(root) / "replay.jsonl"
 
 
@@ -128,7 +128,7 @@ def _render_scope(session: GazeSession, info: Dict[str, Any]) -> None:
     selected = info["top"]
     owner = session.last_resolution_input
     session.cdp.eval_js_once(
-        f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([selected])})",
+        f"window.__LOOK_OVERLAY__.renderPins({json.dumps([selected])})",
         target=owner.get("browser_target"), document=owner.get("browser_document"), route=owner.get("browser_route"))
 
 def resolve_now(
@@ -208,8 +208,8 @@ def resolve_now(
         if payload["chrome_connected"]:
             try:
                 session.cdp.eval_js_once(
-                    f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(payload['ranked'])});"
-                    f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(payload)});return true}})()",
+                    f"(() => {{window.__LOOK_OVERLAY__.renderPins({json.dumps(payload['ranked'])});"
+                    f"window.__LOOK_OVERLAY__.renderScopeContext({json.dumps(payload)});return true}})()",
                     target=payload.get("browser_target"), document=payload.get("browser_document"))
             except Exception:
                 logger.debug("Cursor source is no longer foreground", exc_info=True)
@@ -267,7 +267,7 @@ def resolve_now(
             sel = json.dumps(res.top.candidate.selector)
             try:
                 table_payload = session.cdp.eval_js_once(
-                    f"window.__HERMES_GAZE_OVERLAY__.extractTableData({sel})",
+                    f"window.__LOOK_OVERLAY__.extractTableData({sel})",
                     target=owner["browser_target"], document=owner["browser_document"], route=owner["browser_route"])
             except Exception as exc:
                 logger.debug("extractTableData eval failed: %s", exc)
@@ -291,7 +291,7 @@ def resolve_now(
         view = {key: payload[key] for key in ("scopes", "selected_scope_id", "resolution_id", "utterance")}
         try:
             session.cdp.eval_js_once(
-                f"window.__HERMES_GAZE_OVERLAY__.renderScopeContext({json.dumps(view)})",
+                f"window.__LOOK_OVERLAY__.renderScopeContext({json.dumps(view)})",
                 target=owner["browser_target"], document=owner["browser_document"], route=owner["browser_route"])
         except Exception:
             logger.debug("Resolution source is no longer foreground", exc_info=True)

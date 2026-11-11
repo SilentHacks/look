@@ -1,5 +1,5 @@
 ---
-name: gaze-telepathy
+name: look
 description: Understand what the user points at in Chrome using exact cursor evidence, surrounding page structure, snapshot highlights and guarded actions.
 ---
 
@@ -62,7 +62,7 @@ Inbox content renders only in the focused tab's script-disabled, opaque-origin p
 
 Saved inbox evidence remains immutable, not action authority. A fresh voice/typed user turn, including an explicit follow-up, may use the guarded task tools from its captured foreground source document. Only task navigation, new-tab operations or captured-control clicks transfer that owner; a focus switch never does. Esc or Stop revokes further task steps and pending review.
 
-Without a connected/authorized Hermes session, Chrome can answer read-only one-shot questions, clearly labeled as having no conversation followups or actions. `/look stop` detaches and disables that overlay too. Gateway sessions require `plugins.entries.hermes-gaze.allow_gateway_injection: true` and in-process plugin isolation.
+Without a connected/authorized Hermes session, Chrome can answer read-only one-shot questions, clearly labeled as having no conversation followups or actions. `/look stop` detaches and disables that overlay too. Gateway sessions require `plugins.entries.look.allow_gateway_injection: true` and in-process plugin isolation.
 
 The stock native lane uses one-use authenticated tickets from this in-process
 POSIX gateway's private direct control socket and the command's exact profile/
@@ -84,4 +84,4 @@ frontends keep untracked SDK input; check Hermes if no answer arrives.
 
 Scope-ladder/up/down/save-trial controls are removed. Local replay recording is off by default; enable `record_trials` to write evidence, never audio. Treat replay files as sensitive browsing data. Cross-origin frames, closed-shadow/canvas widgets and arbitrary custom semantics remain unsupported, not an excuse to fall back to raw browser code.
 
-Regular commands: `/look [start|stop|status|eyes|calibrate|cursor|setup|diagnostics|help]`. `/look help advanced` lists demo, simulated mode, resolve, listen and benchmark. `/gaze` is a compatibility alias; `connect`, `disconnect`, `tracker stop`, `voice` and `timing` still work. Internal plugin/config/package/skill/tool names and profile paths remain unchanged. The shell `hermes look` (`hermes gaze`) commands do not bind or stop an interactive Hermes conversation.
+Regular commands: `/look [start|stop|status|eyes|calibrate|cursor|setup|diagnostics|help]`. `/look help advanced` lists demo, simulated mode, resolve, listen and benchmark. `connect`, `disconnect`, `tracker stop`, `voice` and `timing` still work. The shell `hermes look` commands do not bind or stop an interactive Hermes conversation.

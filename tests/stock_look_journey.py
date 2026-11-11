@@ -17,11 +17,11 @@ from tests.extension_setup_chrome import Driver, EXTENSION
 from tests.calibration_chrome import Scripted, Window
 from tests.test_webcam import appearance_observations
 from tests.ui_review.devlib import FakeInput
-from hermes_gaze.browser import webcam, extension_host, extension
-from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
-from hermes_gaze.audio import voice
+from look.browser import webcam, extension_host, extension
+from look.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
+from look.audio import voice
 
-from hermes_gaze.runtime import service
+from look.runtime import service
 
 FIXTURE = ('<title>Local journey</title><style>p{position:absolute;width:200px;height:100px}'
            '#cursor{left:20px;top:0}#gaze{left:500px;top:220px}</style>'
@@ -76,13 +76,13 @@ async def journey(args, base, session, turns, look, create, sid):
                                 dict(type='mouseMoved', x=100 if submit else 400, y=24 if submit else 250))
         if session.tracker.mode == 'webcam' and session.cdp.source == 'extension':
             geometry = await asyncio.to_thread(page, tab,
-                f'window.__HERMES_GAZE_OVERLAY__.webcamViewport({host.profile["screen"]["dpr"]})')
+                f'window.__LOOK_OVERLAY__.webcamViewport({host.profile["screen"]["dpr"]})')
             check(label + ': trusted pointer measures viewport origin', 'origin_x' in geometry)
             zoom = geometry['dpr'] / host.profile['screen']['dpr']
             Scripted.script = lambda f, t: ScreenPoint(
                 geometry['origin_x'] + 600 * zoom, geometry['origin_y'] + 280 * zoom, t)
             def gaze_evidence():
-                data = session.cdp.capture('window.__HERMES_GAZE_OVERLAY__.captureNoisyContext()')
+                data = session.cdp.capture('window.__LOOK_OVERLAY__.captureNoisyContext()')
                 return data if data['fixations'] and all(
                     s['source'] == 'webcam' and abs(s['x_vp'] - 600) < 1 and abs(s['y_vp'] - 280) < 1
                     for s in data['fixations']) else None
@@ -290,14 +290,14 @@ async def journey(args, base, session, turns, look, create, sid):
         await command('cursor', replacement)
         await until(lambda: host._process.poll() is not None)
         check('explicit cursor stops camera and changes page source',
-              await asyncio.to_thread(page, tab, 'window.__HERMES_GAZE_OVERLAY__.state.mode') == 'hover')
+              await asyncio.to_thread(page, tab, 'window.__LOOK_OVERLAY__.state.mode') == 'hover')
         host.profile_path.write_text('{"model_id":"invalid"}')
         await command('eyes', replacement)
         await until(lambda: host.state == 'running')
         await front(tab)
         check('invalid saved calibration never falls back to cursor',
               host.profile is None and session.tracker.mode == 'webcam' and
-              await asyncio.to_thread(page, tab, 'window.__HERMES_GAZE_OVERLAY__.state.mode') == 'webcam')
+              await asyncio.to_thread(page, tab, 'window.__LOOK_OVERLAY__.state.mode') == 'webcam')
         await asyncio.to_thread(cmd, tab, 'Input.dispatchMouseEvent', dict(type='mouseMoved', x=100, y=24))
         await asyncio.to_thread(cmd, tab, 'Input.dispatchKeyEvent', dict(type='keyDown', code='Space', key=' ', windowsVirtualKeyCode=32))
         await asyncio.sleep(1)

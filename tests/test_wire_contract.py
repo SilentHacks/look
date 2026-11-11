@@ -15,18 +15,18 @@ import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.config import GazeConfig
-from hermes_gaze.resolver.cursor_context import MAX_CONTEXT
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.config import GazeConfig
+from look.resolver.cursor_context import MAX_CONTEXT
+from look.runtime.voice_turns import VoiceTurns
 
-from hermes_gaze.resolver.bayesian_fusion import (
+from look.resolver.bayesian_fusion import (
     BONUS_DIRECT_HIT,
     CandidateElement,
     resolve_candidates,
 )
-from hermes_gaze.tracker.simulated_gaze import FixationSample
+from look.tracker.simulated_gaze import FixationSample
 
 
 def _twin(cid: str, is_direct_hit: bool) -> CandidateElement:

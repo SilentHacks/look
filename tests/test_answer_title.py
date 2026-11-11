@@ -3,8 +3,8 @@ import time
 import unittest
 from types import SimpleNamespace
 
-from hermes_gaze.runtime.answer_title import INSTRUCTION, TitleStream
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime.answer_title import INSTRUCTION, TitleStream
+from look.runtime.voice_turns import VoiceTurns
 from .test_companion_ui import Chrome, snapshot
 
 

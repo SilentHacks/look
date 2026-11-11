@@ -1,6 +1,9 @@
 """Turn-owned, fixed browser verbs. No model-supplied code or selectors."""
 from __future__ import annotations
 
+import ipaddress
+import re
+import socket
 import threading
 from urllib.parse import urlsplit
 
@@ -22,7 +25,9 @@ def navigation_url(value):
     except ValueError:
         raise InvalidDestination("Invalid destination URL") from None
     if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username is not None
-            or parsed.password is not None or "\\" in value or port == 0):
+            or parsed.password is not None or "\\" in value or port == 0
+            or parsed.netloc.endswith(':')
+            or parsed.netloc.startswith('[') and not re.fullmatch(r'\[[^\]]+\](?::[0-9]+)?', parsed.netloc)):
         raise InvalidDestination("Use an absolute http(s) URL without credentials")
     return value
 
@@ -138,7 +143,7 @@ class BrowserTasks:
         if self._stopped.is_set():
             return failure('Task stopped')
         self._check_owner()
-        capture = capture or self.session.cdp.capture('window.__HERMES_GAZE_OVERLAY__.captureActionContext()')
+        capture = capture or self.session.cdp.capture('window.__LOOK_OVERLAY__.captureActionContext()')
         if any(capture.get(key) != self.grant.get(key) for key in self._owner()):
             return failure('Task source is no longer the foreground document; ask again')
         if not capture.get('snapshot_id') or not isinstance(capture.get('handles'), dict):
@@ -165,11 +170,45 @@ class BrowserTasks:
         return self.session.actions._browser(method, self.snapshot['snapshot_id'], self.snapshot['resolution_id'], *args)
 
     def _destination(self, url):
+        """Preflight only: Chrome may resolve again or follow redirects after dispatch."""
+        from ..runtime import service
+
         url = navigation_url(url)
         destination = urlsplit(url)
         control = urlsplit(self.session.cdp_http_url)
-        if (destination.port or (443 if destination.scheme == 'https' else 80)) == (control.port or 80):
+        port = destination.port or (443 if destination.scheme == 'https' else 80)
+        if port == (control.port or 80):
             raise InvalidDestination('The companion debugging port is not a browsing destination')
+        try:
+            # Accept ASCII DNS names (including punycode), avoiding differing IDNA mappings in Chrome.
+            host = destination.hostname.encode('ascii').decode('ascii').lower().removesuffix('.')
+            if not host or '%' in host:
+                raise ValueError()
+            try:
+                literal = ipaddress.ip_address(host)
+            except ValueError:
+                literal = None
+                if (len(host) > 253 or any(not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label)
+                                          for label in host.split('.'))):
+                    raise ValueError()
+                # Chrome accepts legacy integer, short, octal and hexadecimal IPv4 forms.
+                if re.fullmatch(r'(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*', host):
+                    raise ValueError()
+            addresses = [literal] if literal else [
+                ipaddress.ip_address(answer[4][0])
+                for answer in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
+            if not addresses:
+                raise ValueError()
+        except (OSError, ValueError, UnicodeError):
+            raise InvalidDestination('Destination host could not be safely resolved') from None
+        allow_private = getattr(service._CONFIG, 'allow_private_network', False) is True
+        local_name = host == 'localhost' or host.endswith(('.localhost', '.local', '.localdomain'))
+        if not allow_private and (local_name or any(
+                not address.is_global or address.is_multicast or address.is_reserved
+                or str(address) in ('168.63.129.16', '192.0.0.192')  # Cloud platform/metadata services.
+                or isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None
+                for address in addresses)):
+            raise InvalidDestination('Destination must resolve only to public network addresses')
         return url
 
     def _navigate(self, url, *, new_tab):
@@ -189,11 +228,11 @@ class BrowserTasks:
             return live
         if new_tab and (live.get('tag') != 'a' or control_requires_confirmation(live)):
             return failure('new_tab:true requires a safe navigation link; use false for buttons and guarded controls')
-        if live.get('tag') == 'a' and live.get('url') and not control_requires_confirmation(live):
+        if live.get('tag') == 'a':
             destination = self._dom('actionLinkUrl', handle, live['fingerprint'])
             if not destination.get('ok'):
                 return destination
-            if not force_confirmation and (new_tab or live.get('new_tab')):
+            if not force_confirmation and not control_requires_confirmation(live) and (new_tab or live.get('new_tab')):
                 return {**self._navigate(destination['url'], new_tab=True), 'executed': True}
             self._destination(destination['url'])
         result = self.session.actions.click(handle, rid, force_confirmation=force_confirmation,
@@ -234,7 +273,7 @@ class BrowserTasks:
                     return stale
                 if self._stopped.is_set():
                     return failure('Task stopped')
-                if op in ('fill', 'press', 'scroll', 'open_tab', 'navigate'):
+                if op in ('fill', 'press', 'scroll'):
                     self.session.actions.invalidate()
                 started = op in ('fill', 'click', 'request_commit', 'press', 'open_tab', 'navigate', 'scroll')
                 if op == 'fill':

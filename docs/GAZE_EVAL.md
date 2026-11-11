@@ -15,7 +15,7 @@ Install the project runtime dependencies, Chrome, FFmpeg and ffprobe as describe
 in the [recording guide](GAZE_RECORDING.md). SciPy is not required.
 
 ```bash
-CACHE="$HOME/.cache/hermes-gaze-eval"
+CACHE="$HOME/.cache/look-eval"
 .venv/bin/python scripts/gaze.py data list
 .venv/bin/python scripts/gaze.py data load --stride 2 --out "$CACHE/owned-frames"
 .venv/bin/python scripts/gaze.py eval extract "$CACHE/owned-frames/manifest.json" --out "$CACHE/owned-features"
@@ -193,7 +193,7 @@ does not measure device startup, live drops, thermals or battery cost.
 ## Resolver noise-transfer experiment
 
 ```bash
-.venv/bin/python -c 'import tests, runpy; runpy.run_module("hermes_gaze.benchmark.run_benchmark", run_name="__main__")' \
+.venv/bin/python -c 'import tests, runpy; runpy.run_module("look.benchmark.run_benchmark", run_name="__main__")' \
   --gaze-trace "$CACHE/owned-scores/owned-features-ridge10-25-same-session-trace.json" --trials 100
 ```
 

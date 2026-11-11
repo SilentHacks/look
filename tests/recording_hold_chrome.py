@@ -12,10 +12,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tests
-from hermes_gaze.runtime import service
-from hermes_gaze.audio import voice
-from hermes_gaze.audio.microphone import Microphone
-from hermes_gaze.resolver.cursor_context import cursor_result
+from look.runtime import service
+from look.audio import voice
+from look.audio.microphone import Microphone
+from look.resolver.cursor_context import cursor_result
 from tests.owned_chrome import private_session
 
 
@@ -166,7 +166,7 @@ def run():
                 assert 'document' in reasons[0].lower(), reasons
                 print('PASS: full navigation cancels: ' + reasons[0])
                 until(lambda: a._context_unique_id and a._context_unique_id != document and a._ui_frames
-                      and a.eval_js("(() => {const t=window.__HERMES_GAZE_OVERLAY__?.debug().talk;return t?.ready && t.nonce})()"))
+                      and a.eval_js("(() => {const t=window.__LOOK_OVERLAY__?.debug().talk;return t?.ready && t.nonce})()"))
                 document = a._context_unique_id
                 # Real native deadline, warning transport and visible private renderer.
                 events.clear()

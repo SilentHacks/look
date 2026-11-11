@@ -1,11 +1,14 @@
 """Action-task authorization, cancellation, URL and schema boundaries."""
 import json
+import socket
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.browser.browser_tasks import BrowserTasks, navigation_url
-from hermes_gaze import tools
+from look.browser.browser_tasks import BrowserTasks, navigation_url
+from look import tools
+from look.config import GazeConfig
+from look.runtime import service
 
 
 class BrowserTaskTests(unittest.TestCase):
@@ -15,6 +18,13 @@ class BrowserTaskTests(unittest.TestCase):
         self.session.cdp_http_url = 'http://127.0.0.1:9333'
         self.tasks = BrowserTasks(self.session)
         self.assertTrue(self.tasks.begin('session', 'turn', self.owner)['ok'])
+        dns = patch('socket.getaddrinfo', return_value=[
+            (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))])
+        self.dns = dns.start()
+        self.addCleanup(dns.stop)
+        config = patch.object(service, '_CONFIG', GazeConfig())
+        config.start()
+        self.addCleanup(config.stop)
 
     def test_exact_turn_authorization_and_terminal_stop(self):
         for ids in ({}, dict(session_id='session'), dict(session_id='foreign', turn_id='turn'),
@@ -160,7 +170,7 @@ class BrowserTaskTests(unittest.TestCase):
         self.session.actions._inspect.assert_not_called()
 
     def test_provider_rejection_stops_the_trial_instead_of_looping_over_fixtures(self):
-        from hermes_gaze.tests.browser_actions.browser_actions_production import run_turn
+        from look.tests.browser_actions.browser_actions_production import run_turn
         agent = Mock(session_id='trial-session')
         agent._memory_store._system_prompt_snapshot = {'user': 'Alex Morgan alex@example.test'}
         agent.run_conversation.return_value = {'completed': False, 'final_response': 'HTTP 429 free-models-per-day'}
@@ -178,7 +188,7 @@ class BrowserTaskTests(unittest.TestCase):
                 run_turn(SimpleNamespace(), trial_tools, 'Fill this out', 'unused', 'http://fixture.test')
 
     def test_trial_auth_failure_stops_without_disclosing_credentials(self):
-        from hermes_gaze.tests.browser_actions.browser_actions_production import runtime_credentials
+        from look.tests.browser_actions.browser_actions_production import runtime_credentials
         auth = Mock()
         auth.resolve_nous_runtime_credentials.side_effect = RuntimeError('secret-token-in-provider-error')
         with patch.dict('sys.modules', hermes_cli=SimpleNamespace(auth=auth)):
@@ -196,6 +206,119 @@ class BrowserTaskTests(unittest.TestCase):
                                            session_id='session', turn_id='turn')
                 self.assertFalse(result['ok'])
         self.session.cdp.action_navigate.assert_not_called()
+
+    def destination_call(self, op, url, **extra):
+        self.tasks._current = lambda _: None
+        self.tasks._read = Mock(return_value={'ok': True})
+        self.tasks.snapshot = {'resolution_id': 1}
+        self.tasks._dom = Mock(return_value={'ok': True, 'url': url})
+        self.session.actions._inspect.return_value = {
+            'ok': True, 'tag': 'a', 'fingerprint': 'captured', 'url': url}
+        self.session.actions.click.return_value = {'ok': True, 'executed': False}
+        self.session.cdp.action_navigate.return_value = self.owner
+        self.session.actions.reset_mock()
+        self.session.cdp.action_navigate.reset_mock()
+        return self.tasks.handle(op, {'resolution_id': 1, 'url': url, 'handle': '@link',
+                                     'new_tab': False, **extra},
+                                 session_id='session', turn_id='turn')
+
+    def test_nonpublic_destinations_rejected_before_all_dispatch_paths(self):
+        blocked = (
+            '10.0.0.1', '172.16.0.1', '192.168.1.1', '127.0.0.1', '0.0.0.0',
+            '169.254.169.254', '168.63.129.16', '192.0.0.192', '100.100.100.200', '100.64.0.1', '224.0.0.1',
+            '240.0.0.1', '192.0.2.1', '[::]', '[::1]', '[fc00::1]', '[fe80::1]',
+            '[ff02::1]', '[2001:db8::1]', '[::ffff:127.0.0.1]',
+            '[::ffff:93.184.216.34]', 'localhost', 'LOCALHOST.', 'a.localhost',
+            'printer.local', 'host.localdomain', '127.1', '2130706433',
+            '0177.0.0.1', '0x7f000001', '0x7f.0.0.1',
+            '127%2e0%2e0%2e1', '[fe80::1%25en0]', '-bad.test', 'bad..test',
+            'example.test..', '[::1]example.test', 'example.test:',
+            'faß.test', '１２７.０.０.１',
+        )
+        for op in ('navigate', 'open_tab', 'click', 'request_commit'):
+            for host in blocked:
+                with self.subTest(op=op, host=host):
+                    result = self.destination_call(op, f'http://{host}/')
+                    self.assertFalse(result['ok'])
+                    self.assertFalse(result['executed'])
+                    self.session.cdp.action_navigate.assert_not_called()
+                    self.session.actions.click.assert_not_called()
+                    self.session.actions.invalidate.assert_not_called()
+                    if op in ('click', 'request_commit'):
+                        self.tasks._dom.assert_called_once_with('actionLinkUrl', '@link', 'captured')
+
+    def test_dns_is_fail_closed_including_mixed_answers_and_aliases(self):
+        for answers in ([], ['10.0.0.1'], ['169.254.169.254'],
+                        ['93.184.216.34', '127.0.0.1'],
+                        ['2606:4700:4700::1111', '::ffff:93.184.216.34']):
+            self.dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, 80))
+                                     for ip in answers]
+            for op in ('navigate', 'open_tab', 'click', 'request_commit'):
+                with self.subTest(op=op, answers=answers):
+                    self.assertFalse(self.destination_call(op, 'http://alias.example/')['ok'])
+                    self.session.cdp.action_navigate.assert_not_called()
+                    self.session.actions.click.assert_not_called()
+        self.dns.side_effect = socket.gaierror('unavailable')
+        for allow_private in (False, True):
+            with patch.object(service, '_CONFIG', GazeConfig(allow_private_network=allow_private)):
+                for op in ('navigate', 'open_tab', 'click', 'request_commit'):
+                    self.assertFalse(self.destination_call(op, 'https://example.test/')['ok'])
+                    self.session.cdp.action_navigate.assert_not_called()
+                    self.session.actions.click.assert_not_called()
+
+    def test_public_destinations_dispatch_without_rewriting(self):
+        url = 'https://example.test/watch?v=123#chapter'
+        for op in ('navigate', 'open_tab', 'click', 'request_commit'):
+            with self.subTest(op=op):
+                self.assertTrue(self.destination_call(op, url)['ok'])
+                if op in ('navigate', 'open_tab'):
+                    self.session.cdp.action_navigate.assert_called_once_with(
+                        url, new_tab=op == 'open_tab', **self.owner)
+                else:
+                    self.session.actions.click.assert_called_once_with('@link', 1,
+                        force_confirmation=op == 'request_commit', skip_confirmation=False)
+        self.assertTrue(self.destination_call('click', url, new_tab=True)['ok'])
+        self.session.cdp.action_navigate.assert_called_once_with(url, new_tab=True, **self.owner)
+        for url in ('https://93.184.216.34/', 'https://[2606:4700:4700::1111]/'):
+            self.assertEqual(self.tasks._destination(url), url)
+
+    def test_private_network_requires_strict_owner_opt_in_and_blocks_debugger(self):
+        self.assertFalse(GazeConfig().allow_private_network)
+        for value in (None, False, 0, 1, 'true', 'false', True):
+            ctx = SimpleNamespace(get_config=lambda key, default:
+                value if key == 'allow_private_network' else default)
+            self.assertIs(GazeConfig.from_ctx(ctx).allow_private_network, value is True)
+            self.assertIs(GazeConfig(allow_private_network=value).allow_private_network, value is True)
+            with patch.object(service, '_CONFIG', SimpleNamespace(allow_private_network=value)):
+                for op in ('navigate', 'open_tab', 'click', 'request_commit'):
+                    result = self.destination_call(op, 'http://192.168.1.1/', allow_private_network=True)
+                    self.assertIs(result['ok'], value is True)
+        self.dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('127.0.0.1', 8080))]
+        with patch.object(service, '_CONFIG', GazeConfig(allow_private_network=True)):
+            for op in ('navigate', 'open_tab', 'click', 'request_commit'):
+                self.assertTrue(self.destination_call(op, 'http://localhost:8080/')['ok'])
+                for host in ('127.0.0.1', '127.1', 'localhost', 'alias.example', '[::1]'):
+                    with self.subTest(op=op, host=host):
+                        self.assertFalse(self.destination_call(op, f'http://{host}:9333/json')['ok'])
+                        self.session.cdp.action_navigate.assert_not_called()
+                        self.session.actions.click.assert_not_called()
+
+    def test_new_tab_links_and_allow_all_still_require_public_destinations(self):
+        for allow_all in (False, True):
+            self.tasks.grant['allow_all'] = allow_all
+            self.session.actions._inspect.return_value = {
+                'ok': True, 'tag': 'a', 'fingerprint': 'captured', 'new_tab': True,
+                'url': 'http://10.0.0.1/'}
+            self.tasks.snapshot = {'resolution_id': 1}
+            self.tasks._current = lambda _: None
+            self.tasks._dom = Mock(return_value={'ok': True, 'url': 'http://10.0.0.1/'})
+            for op in ('click', 'request_commit'):
+                self.session.actions.reset_mock()
+                result = self.tasks.handle(op, dict(resolution_id=1, handle='@link', new_tab=True),
+                                           session_id='session', turn_id='turn')
+                self.assertFalse(result['ok'])
+                self.session.cdp.action_navigate.assert_not_called()
+                self.session.actions.click.assert_not_called()
 
 
 if __name__ == '__main__':

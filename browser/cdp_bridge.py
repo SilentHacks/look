@@ -1,4 +1,4 @@
-"""Chrome DevTools Protocol (CDP) bridge for hermes-gaze.
+"""Chrome DevTools Protocol (CDP) bridge for look.
 
 Companion discovery follows foreground Chrome pages. Each page has one persistent
 websocket and worker loop; the overlay and nonce-checked intent binding live in
@@ -53,8 +53,8 @@ logger = logging.getLogger(__name__)
 _OVERLAY_JS_PATH = Path(__file__).with_name("overlay.js")
 _PANEL_SOURCES = ("markdown.js", "panel.js")
 _UI_FRAMES = ("card", "pill")
-_INTENT_BINDING = "__hermesGazeIntent"
-_WORLD = "hermes-gaze"
+_INTENT_BINDING = "__lookIntent"
+_WORLD = "look"
 _overlay_cache: Tuple[float, str] = (0.0, "")
 
 
@@ -118,7 +118,7 @@ class CdpSession:
         self.session_event: Optional[Dict[str, Any]] = None
         self._intent_handler: Optional[Callable[[Dict[str, Any], Callable[[Dict[str, Any]], None]], None]] = None
         self._handler_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="hermes-gaze-intent"
+            max_workers=1, thread_name_prefix="look-intent"
         )
         self._closed = False
         # Pushed after every (re)injection so the overlay survives navigations/reloads
@@ -145,7 +145,7 @@ class CdpSession:
                 raise ConnectionError("CDP transport is closed")
             if self._thread is None or not self._thread.is_alive():
                 self._loop_ready.clear()
-                self._thread = threading.Thread(target=self._thread_main, name="hermes-gaze-cdp", daemon=True)
+                self._thread = threading.Thread(target=self._thread_main, name="look-cdp", daemon=True)
                 self._thread.start()
         if not self._loop_ready.wait(timeout=5.0):
             raise RuntimeError("CDP worker thread failed to start")
@@ -227,7 +227,7 @@ class CdpSession:
                                          {"identifier": self._script_id}, timeout=2.)
                     self._script_id = None
                 if self._context_unique_id:
-                    await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.destroy();true", timeout=2.)
+                    await self._eval_coro("window.__LOOK_OVERLAY__?.destroy();true", timeout=2.)
                 await self._send_cmd("Runtime.removeBinding", {"name": _INTENT_BINDING}, timeout=2.)
         finally:
             await self._drop_ws()
@@ -297,7 +297,7 @@ class CdpSession:
         # IIFE is mandatory: top-level const/let in Runtime.evaluate persists in the
         # page's global lexical scope and would collide on the next push/re-inject.
         expr = (
-            "(() => { const api = window.__HERMES_GAZE_OVERLAY__; if (api) {"
+            "(() => { const api = window.__LOOK_OVERLAY__; if (api) {"
             f"api.Configure({json.dumps(self.overlay_config)});"
             f"api.setIntentNonce({json.dumps(self.intent_nonce)});"
             "} return true; })()"
@@ -310,7 +310,7 @@ class CdpSession:
         panel = "\n".join(Path(__file__).with_name(name).read_text() for name in _PANEL_SOURCES)
         for name in _UI_FRAMES:
             remote = await self._send_cmd("Runtime.evaluate", {
-                "expression": f"window.__HERMES_GAZE_OVERLAY__.uiFrames.{name}",
+                "expression": f"window.__LOOK_OVERLAY__.uiFrames.{name}",
                 "uniqueContextId": document}, timeout=5., operation="read")
             object_id = remote["result"]["objectId"]
             try:
@@ -326,7 +326,7 @@ class CdpSession:
         self._ui_frames = frames
         self._ui_context_id, self._ui_context_unique_id = frames["card"]
         self._displayed_event = None  # Everything is new to this renderer, including recall.
-        await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.uiReady();true", timeout=5.,
+        await self._eval_coro("window.__LOOK_OVERLAY__.uiReady();true", timeout=5.,
                               context_id=document, operation="presentation")
 
     async def _render_ui(self, message: dict) -> None:
@@ -339,7 +339,7 @@ class CdpSession:
             if trace is not None and matches_release:
                 trace.mark("release_ui_render_start")
             rendered = await self._eval_coro(
-                "(() => {const panel = window.__HERMES_GAZE_PANEL__; if (!panel) return false;"
+                "(() => {const panel = window.__LOOK_PANEL__; if (!panel) return false;"
                 "panel.render(" + json.dumps(message) + "); return true})()",
                 timeout=5., context_id=frame[1], operation="presentation")
             if rendered is not True:
@@ -362,7 +362,7 @@ class CdpSession:
 
         async def send() -> None:
             try:
-                await self._eval_coro(f"window.__HERMES_GAZE_PANEL__?.level({float(level):.3f})",
+                await self._eval_coro(f"window.__LOOK_PANEL__?.level({float(level):.3f})",
                                       timeout=1., context_id=frame[1], operation="presentation")
             except Exception:
                 logger.debug("Waveform frame dropped", exc_info=True)
@@ -376,7 +376,7 @@ class CdpSession:
             return
         delivered = await self._eval_coro(
             "(() => {if(document.visibilityState !== 'visible' || !document.hasFocus()) return false;"
-            "window.__HERMES_GAZE_OVERLAY__?.onIntentResult(" + json.dumps(message) + ");return true})()",
+            "window.__LOOK_OVERLAY__?.onIntentResult(" + json.dumps(message) + ");return true})()",
             timeout=5., context_id=document)
         if not delivered:
             self._reply_queue.append((document, message))
@@ -396,7 +396,7 @@ class CdpSession:
             if not isinstance(message, dict):
                 return
             if frame:
-                await self._eval_coro("window.__HERMES_GAZE_OVERLAY__.fromPanel(" + json.dumps(frame) + ","
+                await self._eval_coro("window.__LOOK_OVERLAY__.fromPanel(" + json.dumps(frame) + ","
                                       + json.dumps(message) + ");true", timeout=5.,
                                       operation="presentation" if message.get("t") in ("size", "hover", "engaged") else "mutation")
             elif message.get("type") == "_ui_render":
@@ -405,7 +405,7 @@ class CdpSession:
                 if getattr(self._owner, "source", "") == "extension":
                     await self._send_cmd("Look.lease", {"uniqueContextId": self._context_unique_id}, timeout=2.)
                 else:
-                    await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.transportAlive();true", timeout=2.)
+                    await self._eval_coro("window.__LOOK_OVERLAY__?.transportAlive();true", timeout=2.)
         except Exception:
             logger.debug("Private UI unavailable", exc_info=True)
 
@@ -508,7 +508,7 @@ class CdpSession:
 
     async def _revoke_route_actions(self) -> None:
         try:
-            await self._eval_coro("window.__HERMES_GAZE_OVERLAY__?.revokeActionAuthority();true", timeout=5.,
+            await self._eval_coro("window.__LOOK_OVERLAY__?.revokeActionAuthority();true", timeout=5.,
                                   operation="presentation")
         except Exception:
             logger.debug("Route revocation met a navigating document", exc_info=True)
@@ -548,7 +548,7 @@ class CdpSession:
                     if self._closed:
                         return False
                     src = _overlay_source()
-                    if src and (force or not await self._eval_coro("!!window.__HERMES_GAZE_OVERLAY__", timeout=5.0,
+                    if src and (force or not await self._eval_coro("!!window.__LOOK_OVERLAY__", timeout=5.0,
                                                                   context_id=document, operation="read")):
                         if self._closed:
                             return False
@@ -794,7 +794,7 @@ class GazeSession:
         if not self._cdp.is_connected:
             return False
         try:
-            return bool(self.eval_js("!!window.__HERMES_GAZE_OVERLAY__", timeout=2.0))
+            return bool(self.eval_js("!!window.__LOOK_OVERLAY__", timeout=2.0))
         except Exception:
             return False
 
@@ -919,7 +919,7 @@ class GazeSession:
             return "mode_changed"
         try:
             geometry = self._cdp.capture(
-                f"window.__HERMES_GAZE_OVERLAY__?.webcamViewport({float(screen['dpr'])})")
+                f"window.__LOOK_OVERLAY__?.webcamViewport({float(screen['dpr'])})")
         except NoForegroundTab:
             return "no_foreground_tab"
         sample = screen_to_viewport(point, geometry, screen, self.tracker.sigma_px)
@@ -928,7 +928,7 @@ class GazeSession:
         if self.tracker.mode != "webcam":
             return "mode_changed"
         delivered = self._cdp.eval_js_once(
-            f"window.__HERMES_GAZE_OVERLAY__?.acceptWebcamSample({json.dumps(sample)})",
+            f"window.__LOOK_OVERLAY__?.acceptWebcamSample({json.dumps(sample)})",
             target=geometry.get("browser_target"), document=geometry.get("browser_document"),
             route=geometry.get("browser_route"))
         if delivered is True:
@@ -1014,7 +1014,7 @@ class GazeSession:
             with self._lock:
                 self.last_candidates = []
             return [], {}
-        js = f"window.__HERMES_GAZE_OVERLAY__?.captureNoisyContext({float(radius_px)})"
+        js = f"window.__LOOK_OVERLAY__?.captureNoisyContext({float(radius_px)})"
         data = self._cdp.capture(js)
         cands = [CandidateElement.from_wire(raw) for raw in data.get("candidates") or [] if isinstance(raw, dict)]
         return cands, data
@@ -1041,10 +1041,10 @@ class GazeSession:
             return rid
         if resolution.decision in ("open_semantic_lens", "confirm_destructive"):
             cards = [sc.to_dict() for sc in resolution.ranked[:4]]
-            js = f"window.__HERMES_GAZE_OVERLAY__.renderSemanticLens({json.dumps(cards)}, null, {rid}); true;"
+            js = f"window.__LOOK_OVERLAY__.renderSemanticLens({json.dumps(cards)}, null, {rid}); true;"
         else:
             pins = [sc.to_dict() for sc in (resolution.multi_referents or resolution.ranked[:1])]
-            js = f"window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps(pins)}); true;"
+            js = f"window.__LOOK_OVERLAY__.renderPins({json.dumps(pins)}); true;"
         try:
             self._cdp.eval_js_once(f"(() => {{{js}}})()", target=evidence.get("browser_target"),
                                    document=evidence.get("browser_document"), route=evidence.get("browser_route"))
@@ -1081,7 +1081,7 @@ class GazeSession:
             if self.is_chrome_reachable():
                 try:
                     self._cdp.eval_js_once(
-                        f"(() => {{window.__HERMES_GAZE_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])});"
+                        f"(() => {{window.__LOOK_OVERLAY__.renderPins({json.dumps([chosen.to_dict()])});"
                         f"return true;}})()", target=self._resolution_target,
                         document=self._resolution_document, route=self._resolution_route)
                 except Exception as exc:

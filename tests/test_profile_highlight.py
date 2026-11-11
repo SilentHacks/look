@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from hermes_gaze.runtime import service
+from look.runtime import service
 from tests import test_first_run
 from tests.test_chrome_consent import until
 

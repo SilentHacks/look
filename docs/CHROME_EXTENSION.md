@@ -90,7 +90,7 @@ debugger remains outside this website/other-user boundary.
   A live or waiting Look runtime refuses setup/removal. A conflicting registration
   or symlink is refused rather than overwritten. Eye calibration is not removed.
   All browser sources now share the account-scoped runtime path
-  `~/.cache/hermes-gaze/chrome-profile`, not Hermes-profile data. Restart every
+  `~/.cache/look/chrome-profile`, not Hermes-profile data. Restart every
   Hermes process when upgrading. Earlier per-profile separate-browser folders are
   left untouched, not copied or deleted.
 - **Moved checkout:** the staged extension/native host do not depend on its old

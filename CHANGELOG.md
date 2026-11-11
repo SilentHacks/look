@@ -4,6 +4,20 @@
 
 No public release, catalogue admission, Store listing or release date is asserted.
 
+- Browser navigation, new tabs and link clicks resolve destinations before dispatch
+  and reject nonpublic/metadata addresses by default. Owner-only
+  `allow_private_network` enables local destinations; the debugger port stays blocked.
+  This is preflight validation, not redirect or DNS-rebinding containment.
+- Native speech workers, Chrome, ffmpeg and say receive explicit allowlisted
+  environments rather than inherited provider credentials.
+- Native input consent uses Hermes's YAML loader and fails closed if unavailable.
+  Live development probes require a dedicated `LOOK_PROBE_API_KEY`; no account
+  `.env` or `auth.json` is copied.
+- Plugin/package/config/skill/cache identities now use `look`; retired the old
+  command alias. Re-enable the renamed plugin and grant its input permission.
+  Old profile/cache/calibration data remains untouched. Gaze-specific tools keep
+  their existing names. Regenerated the dependency lock without removed v2 packages.
+
 - Public model downloads now explicitly disable Hugging Face authentication.
   A real hub-header regression rejects ambient credential resolution.
 - Raised the Hermes compatibility floor to 0.23.1, the released native-input

@@ -6,10 +6,10 @@ import threading
 import unittest
 from types import SimpleNamespace
 
-from hermes_gaze.runtime import service
-from hermes_gaze.runtime.naming import clean_subject, plain_error, safe_link, speech_text, subject_hint
-from hermes_gaze.resolver.cursor_context import cursor_result
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime import service
+from look.runtime.naming import clean_subject, plain_error, safe_link, speech_text, subject_hint
+from look.resolver.cursor_context import cursor_result
+from look.runtime.voice_turns import VoiceTurns
 
 
 class Chrome:

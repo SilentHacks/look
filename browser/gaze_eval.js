@@ -42,12 +42,12 @@
       const image = new Image(); image.src = src; await image.decode();
       const start = performance.now();
       const result = model.detectForVideo(image, timestamp);
-      const features = globalThis.__hermesGazeFeatures(result.faceLandmarks[0]);
+      const features = globalThis.__lookFeatures(result.faceLandmarks[0]);
       const inference_ms = performance.now() - start;
       const extra = tuningFeatures(result.faceLandmarks[0], image.naturalWidth, image.naturalHeight);
       const blinks = result.faceBlendshapes[0]?.categories.filter(c => c.categoryName.startsWith("eyeBlink")) || [];
       const patchStart = performance.now();
-      const appearance = globalThis.__hermesGazeAppearance(image, result.faceLandmarks[0], features);
+      const appearance = globalThis.__lookAppearance(image, result.faceLandmarks[0], features);
       return {features, inference_ms, ...extra, blink: Math.max(0, ...blinks.map(c => c.score)),
         appearance,
         appearance_inference_ms: inference_ms + performance.now() - patchStart};
@@ -56,5 +56,5 @@
   globalThis.__HERMES_WEBCAM__ = {stop() { model?.close(); }};
   document.title = "Look offline evaluation (no camera)";
   document.body.textContent = "Offline frame evaluation. No camera or microphone is open.";
-  __hermesGazeIntent(JSON.stringify({type: "ready", nonce: opts.nonce}));
+  __lookIntent(JSON.stringify({type: "ready", nonce: opts.nonce}));
 })

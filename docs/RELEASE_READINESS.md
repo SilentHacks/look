@@ -134,7 +134,7 @@ Stock PM prepared the isolated runtime and plugin dependencies.
 | Check | Observed result |
 |---|---|
 | Public HTTPS install with the README's exact `--ref` and `--enable`, no TTY | Exit 0, installed disabled because dependency consent was skipped |
-| `hermes plugins enable hermes-gaze` | Exit 0, dependencies prepared and plugin enabled |
+| `hermes plugins enable look` | Exit 0, dependencies prepared and plugin enabled |
 | Fresh-process list and installed Git HEAD | Enabled `git pinned@10ff13d7`, HEAD exactly matched the full public pin |
 | Installed plugin doctor with `--ci` | Exit 0, discovery/import/registration passed, 14 tools and 7 hooks |
 | Both README `hermes config set` commands | Exit 0, saved `in_process` and Boolean input permission in the isolated profile |
@@ -165,9 +165,9 @@ an independently bootstrapped Hermes application installer from a blank machine.
 |---|---|
 | `hermes plugins validate CHECKOUT` | Baseline exit 0 with the historical private-core warning below; integrated validation exits 0, safe, with no warnings. |
 | `hermes plugins install file://CHECKOUT --ref BASELINE_SHA --enable`, no TTY | Exit 0 but **installed disabled**, explicitly skipped dependency preparation. Exact committed revision installed; no untracked files imported. |
-| `hermes plugins enable hermes-gaze` | Exit 0; stock PM resolved 377 packages and installed the selected dependency environment. Explicit enable did not ask a second dependency question at this stock revision. |
+| `hermes plugins enable look` | Exit 0; stock PM resolved 377 packages and installed the selected dependency environment. Explicit enable did not ask a second dependency question at this stock revision. |
 | Fresh-process list and doctor | Enabled `git pinned@3b850207`, version 0.1.0; installed Git HEAD exactly matched baseline; doctor exit 0, import/registration passed, 14 tools and 7 hooks. |
-| `hermes plugins remove hermes-gaze` | Exit 0; temporary installed plugin directory absent afterward. No real installation was touched. |
+| `hermes plugins remove look` | Exit 0; temporary installed plugin directory absent afterward. No real installation was touched. |
 | Interactive pinned reinstall; answer **n** to dependency prompt | Exit 0; `dependency install declined`; source retained, enabled list empty. |
 | Later explicit enable and fresh-process compact list | Exit 0; enabled at the same pin, no second dependency prompt. |
 
@@ -387,8 +387,8 @@ content; both entries remain. Untracked `docs/research/` was left untouched.
   failure. Reading raw stdin avoids the buffered-reader finalization lock without
   a join delay or changes to framing, consent, foreground guards or terminal loss.
 
-`~/.hermes/plugins/hermes-gaze` was verified as a symlink to
-`/Users/Abid/Projects/hermes-gaze`. Running Hermes still needs a restart; staged
+`~/.hermes/plugins/look` was verified as a symlink to
+`/Users/Abid/Projects/look`. Running Hermes still needs a restart; staged
 extension files still need setup and Chrome Reload. Follow the
 [stopped update sequence](CHROME_EXTENSION.md#update-move-or-remove), including
 gateway restart and page reload. Calibration remains intact.

@@ -8,10 +8,10 @@ import threading
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
-from hermes_gaze.browser.ownership import OwnedChrome, OwnershipError
-from hermes_gaze.browser.companion import Companion
-from hermes_gaze.config import GazeConfig
+from look.browser.cdp_bridge import CdpSession, GazeSession
+from look.browser.ownership import OwnedChrome, OwnershipError
+from look.browser.companion import Companion
+from look.config import GazeConfig
 
 
 class Endpoint(http.server.BaseHTTPRequestHandler):
@@ -133,7 +133,7 @@ class Ownership(unittest.TestCase):
         owner = self.owner()
         owner._token = "a" * 64
         args = ["chrome", "--enable-automation", f"--user-data-dir={self.profile}",
-                "--remote-debugging-port=1", "--hermes-gaze-owner=" + "a" * 64]
+                "--remote-debugging-port=1", "--look-owner=" + "a" * 64]
         owner.verify_arguments({"arguments": args})
         for index in range(1, len(args)):
             with self.subTest(index=index), self.assertRaises(OwnershipError):

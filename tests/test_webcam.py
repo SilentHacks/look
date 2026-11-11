@@ -11,12 +11,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from hermes_gaze.benchmark.gaze_research import Candidate, Fit
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.tracker.webcam_gaze import (CHECK_ENOUGH_TRIALS, CHECK_ORDERS, CHECK_PASS_TRIALS, CHECK_POINTS, AppearanceEstimator,
+from look.benchmark.gaze_research import Candidate, Fit
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.tracker.webcam_gaze import (CHECK_ENOUGH_TRIALS, CHECK_ORDERS, CHECK_PASS_TRIALS, CHECK_POINTS, AppearanceEstimator,
                                              LandmarkEstimator, ScreenPoint, check_map, score_check_trial, screen_to_viewport, summarize_check)
-from hermes_gaze.browser.webcam import WebcamHost
+from look.browser.webcam import WebcamHost
 
 SCREEN = {"left": 0, "top": 0, "width": 1440, "height": 900, "dpr": 2,
           "screen_width": 1440, "screen_height": 900, "screen_left": 0, "screen_top": 25}
@@ -115,7 +115,7 @@ class WebcamContracts(unittest.TestCase):
         def send(features):
             nonlocal now
             now += .001
-            host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+            host._event({"method": "Runtime.bindingCalled", "params": {"name": "__lookIntent",
                 "executionContextId": 8, "payload": json.dumps({"type": "sample", "nonce": "owned",
                     "t": now, "features": features, "calibration": 0})}})
         features = [10.] + [0.] * 127 + [.2, .3]
@@ -139,9 +139,9 @@ class WebcamContracts(unittest.TestCase):
             self.addCleanup(host.stop)
             def camera():
                 host.state = "running"; host._ready.set(); host._stop.wait(5)
-            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(directory)), \
-                 patch("hermes_gaze.browser.webcam.apple_silicon_mac", return_value=True), \
-                 patch("hermes_gaze.browser.webcam.Path.is_file", return_value=True), \
+            with patch("look.browser.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("look.browser.webcam.apple_silicon_mac", return_value=True), \
+                 patch("look.browser.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 status = host.start(wait=2)
                 self.assertEqual(status["state"], "running")
@@ -169,7 +169,7 @@ class WebcamContracts(unittest.TestCase):
         host._context, host._nonce = 8, "private"
         now = time.time()
         def send(t=now, nonce="private", context=8, features=None):
-            host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+            host._event({"method": "Runtime.bindingCalled", "params": {"name": "__lookIntent",
                 "executionContextId": context, "payload": json.dumps({"type": "sample", "nonce": nonce,
                 "t": t, "features": [.25, .75] if features is None else features})}})
         send(nonce="page-forged"); send(context=7); send(t=12.5); send(t=now + 10)
@@ -270,11 +270,11 @@ class WebcamContracts(unittest.TestCase):
                 host._ready.set()
                 host._stop.wait(5)
             def event(kind, **data):
-                host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+                host._event({"method": "Runtime.bindingCalled", "params": {"name": "__lookIntent",
                     "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", "setup": host._setup, **data})}})
-            with patch("hermes_gaze.browser.webcam.prepare_assets", return_value=Path(directory)), \
-                 patch("hermes_gaze.browser.webcam.apple_silicon_mac", return_value=True), \
-                 patch("hermes_gaze.browser.webcam.Path.is_file", return_value=True), \
+            with patch("look.browser.webcam.prepare_assets", return_value=Path(directory)), \
+                 patch("look.browser.webcam.apple_silicon_mac", return_value=True), \
+                 patch("look.browser.webcam.Path.is_file", return_value=True), \
                  patch.object(host, "_run", side_effect=camera):
                 host.start(wait=2)
                 event("calibration_start", screen=SCREEN, viewport={"left": 0, "top": 0, "width": 1440, "height": 900})
@@ -306,7 +306,7 @@ class WebcamContracts(unittest.TestCase):
             def send(features, t=None):
                 nonlocal now
                 now += .001
-                host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+                host._event({"method": "Runtime.bindingCalled", "params": {"name": "__lookIntent",
                     "executionContextId": 8, "payload": json.dumps({"type": "sample", "nonce": "owned",
                     "t": now if t is None else t, "features": features})}})
             features = appearance_features(.3, .7)
@@ -320,7 +320,7 @@ class WebcamContracts(unittest.TestCase):
                 self.assertIsNone(host.status()["delivery_age_seconds"])
             send(features)
             self.assertLess(host.status()["delivery_age_seconds"], .8)
-            with patch("hermes_gaze.browser.webcam.time.monotonic", return_value=host.last_delivery + 1):
+            with patch("look.browser.webcam.time.monotonic", return_value=host.last_delivery + 1):
                 self.assertGreaterEqual(host.status()["delivery_age_seconds"], 1)
             drops = host.status()["drops"]
             self.assertEqual(host.delivered, 1)
@@ -353,7 +353,7 @@ class CalibrationCheckFlow(unittest.TestCase):
         self.now = time.time()
 
     def event(self, kind, **data):
-        self.host._event({"method": "Runtime.bindingCalled", "params": {"name": "__hermesGazeIntent",
+        self.host._event({"method": "Runtime.bindingCalled", "params": {"name": "__lookIntent",
             "executionContextId": 8, "payload": json.dumps({"type": kind, "nonce": "owned", **data})}})
 
     def sample(self, features, **tags):

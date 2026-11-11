@@ -1,6 +1,6 @@
-name: hermes-gaze
+name: look
 version: "0.1.0"
-description: "Look lets you ask about pages and review browser actions in Chrome. Beta support is limited to Apple Silicon Mac. Linux and Intel cursor paths are unverified. Start with /look. /gaze is an alias."
+description: "Look lets you ask about pages and review browser actions in Chrome. Beta support is limited to Apple Silicon Mac. Linux and Intel cursor paths are unverified. Start with /look."
 author: "Abid"
 kind: standalone
 license: MIT
@@ -51,6 +51,10 @@ config_schema:
     type: str
     default: "http://127.0.0.1:9333"
     description: "Verified Look companion only: http://127.0.0.1:<port> (localhost accepted). Arbitrary existing browsers and remote endpoints are refused. Never expose it to Hermes browser_exec/browser_cdp or BROWSER_CDP_URL."
+  allow_private_network:
+    type: bool
+    default: false
+    description: "Allow browser destinations on private and local networks. Owner configuration only; the companion debugging port remains blocked. Destination checks are preflight only, not redirect or DNS-rebinding containment."
   sigma_px:
     type: float
     default: 120.0

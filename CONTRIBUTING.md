@@ -53,8 +53,11 @@ Node, Chrome, UI or stock-startup layers.
 Use a self-contained virtualenv with Hermes and its dependencies installed.
 The managed store interpreter alone cannot select dependencies from the
 disposable home. The harness does not share or modify host dependency state.
-These commands copy configured credentials, call the configured provider and
-retain answers/browser evidence. They require explicit authorization:
+These commands call the selected API-key provider and retain answers/browser
+evidence. Set `LOOK_PROBE_API_KEY` to a dedicated test-only key in your environment;
+never put it in the command line. Account `.env` and `auth.json` files are not copied,
+and inherited provider credentials are not forwarded. OAuth/account-only providers
+are unsupported; custom endpoints require `model.base_url`.
 
 ```sh
 python benchmark/probe_sessions.py --prompt-only --trials 10 --sources tui --require-pass --output /tmp/look-prompts-neutral.json
@@ -66,9 +69,10 @@ No dummy warmup or retired open-shadow HUD flow remains. `--repo-folder` loads
 project rules. Otherwise the working folder is neutral. `--turn-interval 6` can
 pace free quotas. Provider errors/timeouts are failed trials, not fallback answers.
 The optional protected-UI probe is `benchmark/probe_companion_ui.py`. It uses
-scripted input audio, not a physical microphone. Both probes isolate the account
-runtime profile in their temporary home. Prepare needed ASR assets there for
-the audio probe. Neither is part of offline release verification.
+scripted input audio, not a physical microphone. Both probes construct minimal
+temporary profiles from only the selected model/provider/base URL and explicitly
+supplied test key. Prepare needed ASR assets there for the audio probe.
+Neither is part of offline release verification.
 
 
 ## Packaging and review

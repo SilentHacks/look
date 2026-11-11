@@ -21,9 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
 import tests
-from hermes_gaze.runtime import service
-from hermes_gaze.audio import voice
-from hermes_gaze.browser.webcam import WebcamHost
+from look.runtime import service
+from look.audio import voice
+from look.browser.webcam import WebcamHost
 from benchmark.probe_companion_ui import Tab
 
 PORTRAIT = "https://www.nasa.gov/wp-content/uploads/2023/03/464436main_S69-31741_full.jpg"
@@ -111,7 +111,7 @@ def run(out):
             click_action(camera, "start-check")
             until(lambda: camera_state()["phase"] == "checkIntro")
             assert not host.profile_path.exists()
-            with patch("hermes_gaze.browser.webcam.summarize_check", return_value="good"):
+            with patch("look.browser.webcam.summarize_check", return_value="good"):
                 for trial in range(10):
                     until(lambda: camera_state()["phase"] == "checkIntro" and camera_state()["checkIndex"] == trial)
                     for kind in ("keyDown", "keyUp"):
@@ -124,7 +124,7 @@ def run(out):
             assert runtime["frames"] > 1 and runtime["sample_hz"] > 0
             # Main-world code cannot see the isolated runtime or call its binding.
             assert camera.main("typeof __HERMES_WEBCAM__") == "undefined"
-            assert camera.main("typeof __hermesGazeIntent") == "undefined"
+            assert camera.main("typeof __lookIntent") == "undefined"
             report["isolated_camera_context"] = True
 
             # Return directly from the first completed calibration: no restart, new tab,
@@ -132,7 +132,7 @@ def run(out):
             click_action(camera, "done")
             until(lambda: camera_state()["phase"] == "tracking", 10)
             until(lambda: rig.page("document.hasFocus() && !document.hidden"))
-            assert rig.iso("window.__HERMES_GAZE_OVERLAY__.state.mode") == "webcam"
+            assert rig.iso("window.__LOOK_OVERLAY__.state.mode") == "webcam"
             # Returning focus can itself produce a trusted mousemove; do not assume
             # the anchor is still missing just because the probe hasn't moved yet.
             report["native_focus_handoff"] = {"existing_tab": True, "focus_emulation": False}
@@ -141,7 +141,7 @@ def run(out):
             with patch.object(host, "on_point", return_value="outside_page"):
                 time.sleep(1.1)
                 rig.space_down()
-                until(lambda: "No fresh gaze. Check /gaze tracker." in rig.text("pill"))
+                until(lambda: "No fresh gaze. Check /look tracker." in rig.text("pill"))
                 rig.space_up()
                 assert "pointer" not in rig.text("pill").lower()
                 assert rig.session.microphone._stream is None
@@ -154,7 +154,7 @@ def run(out):
             until(lambda: rig.page("document.hasFocus() && !document.hidden"))
             # History can contain pre-focus samples; wait for usable frozen evidence.
             data = until(lambda: data if (data := rig.session.cdp.capture(
-                "window.__HERMES_GAZE_OVERLAY__.captureNoisyContext()")).get("fixations") else None)
+                "window.__LOOK_OVERLAY__.captureNoisyContext()")).get("fixations") else None)
             assert data["fixations"] and all(s["source"] == "webcam" for s in data["fixations"])
             age = time.time() - data["fixations"][-1]["t"]
             assert 0 <= age < 1, age
@@ -190,8 +190,8 @@ def run(out):
                                     "scripted_answer": "Great Red Spot", "context_has_jupiter": True}
             # Explicitly reset just the page's mode to exercise an unmeasured page,
             # independently of OS-generated pointer events during native focus.
-            rig.iso("window.__HERMES_GAZE_OVERLAY__.Configure({mode:'hover'});"
-                    "window.__HERMES_GAZE_OVERLAY__.Configure({mode:'webcam'})")
+            rig.iso("window.__LOOK_OVERLAY__.Configure({mode:'hover'});"
+                    "window.__LOOK_OVERLAY__.Configure({mode:'webcam'})")
             until(lambda: host.drops["no_page_anchor"] > 0)
             rig.space_down()
             until(lambda: "Move the pointer once" in rig.text("pill"))
@@ -248,10 +248,10 @@ def run(out):
             # Restore native focus after the rig helper's default emulation.
             rig.cmd("Emulation.setFocusEmulationEnabled", {"enabled": False}, other)
             rig.move(300, 250)
-            until(lambda: rig.iso("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer.some(s=>s.source==='webcam')"), 45)
-            saved = len(tab.eval_js("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer"))
+            until(lambda: rig.iso("window.__LOOK_OVERLAY__.state.ringBuffer.some(s=>s.source==='webcam')"), 45)
+            saved = len(tab.eval_js("window.__LOOK_OVERLAY__.state.ringBuffer"))
             time.sleep(.5)
-            assert len(tab.eval_js("window.__HERMES_GAZE_OVERLAY__.state.ringBuffer")) == saved
+            assert len(tab.eval_js("window.__LOOK_OVERLAY__.state.ringBuffer")) == saved
             report["focused_tab_ownership"] = True
             rig.session.configure(mode="hover")
             assert host.state == "stopped" and host._process.poll() is not None
@@ -266,8 +266,8 @@ def run(out):
             print("Failed webcam probe:", json.dumps(host.status()), flush=True)
             if rig.tab:
                 print("Companion state:", rig.iso("({focused:document.hasFocus(), hidden:document.hidden,"
-                      "mode:window.__HERMES_GAZE_OVERLAY__.state.mode,"
-                      "geometry:window.__HERMES_GAZE_OVERLAY__.webcamViewport(devicePixelRatio).drop_reason || 'measured'})"),
+                      "mode:window.__LOOK_OVERLAY__.state.mode,"
+                      "geometry:window.__LOOK_OVERLAY__.webcamViewport(devicePixelRatio).drop_reason || 'measured'})"),
                       flush=True)
             raise
         finally:

@@ -18,11 +18,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import tests
-from hermes_gaze.runtime import service
-from hermes_gaze.audio import voice
-from hermes_gaze.config import GazeConfig
-from hermes_gaze.resolver.cursor_context import cursor_result
-from hermes_gaze.runtime.voice_turns import VoiceTurns
+from look.runtime import service
+from look.audio import voice
+from look.config import GazeConfig
+from look.resolver.cursor_context import cursor_result
+from look.runtime.voice_turns import VoiceTurns
 
 
 def until(predicate, seconds=10):
@@ -60,7 +60,7 @@ def node(tab, selector, expression):
 def click(tab, selector):
     time.sleep(.5)  # Let the plate's spring settle before aiming at something on it.
     r = until(lambda: node(tab, selector, 'const r=this.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}'))
-    frame = tab.eval_js('(()=>{const r=window.__HERMES_GAZE_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()')
+    frame = tab.eval_js('(()=>{const r=window.__LOOK_OVERLAY__.uiFrame.getBoundingClientRect();return {x:r.x,y:r.y}})()')
     for kind in ('mousePressed', 'mouseReleased'):
         command(tab, 'Input.dispatchMouseEvent', {'type': kind, 'button': 'left', 'clickCount': 1,
             'x': r['x'] + frame['x'], 'y': r['y'] + frame['y']})
@@ -76,7 +76,7 @@ def aim(tab, selector):
 
 
 def capture(tab):
-    data = tab.eval_js('window.__HERMES_GAZE_OVERLAY__.captureCursorContext()')
+    data = tab.eval_js('window.__LOOK_OVERLAY__.captureCursorContext()')
     data.update(browser_target=tab._target_id, browser_document=tab._context_unique_id, browser_route=tab._route_id)
     return data
 
@@ -95,7 +95,7 @@ def talk(tab, session, *, hold=.4):
     try:
         until(lambda: session.microphone._stream is not None)
     except AssertionError:
-        print('talk did not start:', view(tab)['talk'], tab._context_id, tab._ui_frames, tab.eval_js('window.__HERMES_GAZE_OVERLAY__===undefined'), tab.eval_js('[document.hasFocus(),document.activeElement?.tagName,window.__HERMES_GAZE_OVERLAY__.state.mode]'),
+        print('talk did not start:', view(tab)['talk'], tab._context_id, tab._ui_frames, tab.eval_js('window.__LOOK_OVERLAY__===undefined'), tab.eval_js('[document.hasFocus(),document.activeElement?.tagName,window.__LOOK_OVERLAY__.state.mode]'),
               node(tab, 'html', 'return [document.hasFocus(),document.activeElement?.tagName]'), [(r['type'], r.get('ok'), r.get('error')) for r in replies[-5:]], flush=True)
         raise
     time.sleep(hold)
@@ -111,7 +111,7 @@ def compose(tab):
 
 
 def view(tab):
-    return tab.eval_js('window.__HERMES_GAZE_OVERLAY__.debug()')
+    return tab.eval_js('window.__LOOK_OVERLAY__.debug()')
 
 
 def foreground(tab, others=()):
@@ -242,11 +242,11 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
         with patch.object(service, 'get_shared_session', return_value=session), \
              patch.object(voice, 'recognition_ready', return_value=True), \
              patch.object(service, '_VOICE_TURNS', turns), patch.object(service, '_CONFIG', GazeConfig()):
-            assert page(a, 'return document.querySelector("#hermes-gaze-root").shadowRoot') is None
-            assert page(a, 'return typeof window.__HERMES_GAZE_OVERLAY__+":"+typeof window.__hermesGazeIntent') == 'undefined:undefined'
+            assert page(a, 'return document.querySelector("#look-root").shadowRoot') is None
+            assert page(a, 'return typeof window.__LOOK_OVERLAY__+":"+typeof window.__lookIntent') == 'undefined:undefined'
             boundary = page(a, 'try {return {readable:!!window.frames[0].document,frames:frames.length}}catch(e){return {error:e.name,frames:frames.length}}')
             assert boundary.get('error') == 'SecurityError' or boundary['frames'] == 0, boundary
-            assert a.eval_js('(()=>{try{window.__HERMES_GAZE_OVERLAY__.uiFrame.contentWindow.document;return false}catch(e){return e.name}})()') == 'SecurityError'
+            assert a.eval_js('(()=>{try{window.__LOOK_OVERLAY__.uiFrame.contentWindow.document;return false}catch(e){return e.name}})()') == 'SecurityError'
             assert view(a)['view'] is None
             compose(a)
             page(a, 'keys=[]')
@@ -483,14 +483,14 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             aim(b, '#cross-target')
             with patch.object(service, '_LLM', None):
                 lens = service.resolve_now(session, utterance='Open this', mode='simulated')
-            b.eval_js('window.__HERMES_GAZE_OVERLAY__.renderSemanticLens(' +
+            b.eval_js('window.__LOOK_OVERLAY__.renderSemanticLens(' +
                 json.dumps(lens['ranked'][:1]) + ',"Choose the captured test control",' + str(lens['resolution_id']) + ');true')
             until(lambda: node(b, '.lens-card', 'return this.getBoundingClientRect().width>0'))
             key(b, 'Escape', 'Escape')
             key(b, 'Digit1', '1')
             assert page(b, 'return crossClicks') == 0
-            assert not b.eval_js('window.__HERMES_GAZE_OVERLAY__.state.lensActive')
-            b.eval_js('window.__HERMES_GAZE_OVERLAY__.renderSemanticLens(' +
+            assert not b.eval_js('window.__LOOK_OVERLAY__.state.lensActive')
+            b.eval_js('window.__LOOK_OVERLAY__.renderSemanticLens(' +
                 json.dumps(lens['ranked'][:1]) + ',null,' + str(lens['resolution_id']) + ');true')
             until(lambda: node(b, '.lens-card', 'return this.getBoundingClientRect().width>0'))
             node(b, '.lens-card', 'this.focus();return true')
@@ -499,7 +499,7 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             until(lambda: session.last_resolution is None)
             assert page(b, 'return crossClicks') == 0  # Lens selection cannot bypass guarded input.
             command(b, 'Emulation.setDeviceMetricsOverride', {'width':390,'height':420,'deviceScaleFactor':1,'mobile':False})
-            b.eval_js('window.__HERMES_GAZE_OVERLAY__.showHudMessage("Long private reply ".repeat(500));true')
+            b.eval_js('window.__LOOK_OVERLAY__.showHudMessage("Long private reply ".repeat(500));true')
             def inside():
                 state = view(b)
                 card = state['card']
@@ -547,7 +547,7 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             extents = set()
             def extent():
                 x = view(c)['card']['x'] + 100
-                return page(c, '''const host=document.querySelector("#hermes-gaze-root");let top=-1,bottom=-1;
+                return page(c, '''const host=document.querySelector("#look-root");let top=-1,bottom=-1;
                     for(let y=0;y<innerHeight;y+=1){if(document.elementFromPoint(%f,y)===host){
                       if(top<0||y<top)top=y;if(y>bottom)bottom=y;}}
                     return top<0?null:bottom-top+1;''' % x)
@@ -601,7 +601,7 @@ with tempfile.TemporaryDirectory(prefix='hermes-trust-chrome-') as tmp:
             markers = ['PLATE_QUESTION', 'PLATE_LABEL', 'PLATE_SECRET_ANSWER', 'PLATE_BOLD', 'PLATE_VOICE_QUESTION',
                        'PLATE_TYPED', '/leak', 'class="bar', 'Looking into', 'Listening']
             seen = page(c, '''const results=window.__seen.join("\\n");
-              const host=document.querySelector("#hermes-gaze-root");
+              const host=document.querySelector("#look-root");
               const inner=document.getAnimations().map(a=>a.effect&&a.effect.target&&a.effect.target.nodeName);
               const fields={results,hostHtml:host.innerHTML,hostText:host.textContent,selection:String(getSelection()),body:document.documentElement.outerHTML};
               const hits=[];for(const m of ''' + json.dumps(markers) + ''')for(const f in fields)if(fields[f].includes(m))hits.push([m,f,fields[f].slice(Math.max(0,fields[f].indexOf(m)-80),fields[f].indexOf(m)+80)]);

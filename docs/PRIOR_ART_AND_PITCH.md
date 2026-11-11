@@ -65,7 +65,7 @@ Citing two or three of these in your README and video shows deep technical groun
    - *What it did:* Used an AR headset's eye tracker + object detection + LLM to resolve *"What is this?"* in the physical world.
    - *How you build on it:* Brings gaze-assisted pronoun disambiguation to desktop web browsing with a standard webcam, adding exact DOM/AX handles, Bayesian spatial-semantic fusion, and an interactive disambiguation Lens so the agent can take reliable browser actions.
 
-4. **Apple Vision Pro (visionOS, 2024) & Neuralink "Telepathy" (Noland Arbaugh demo, 2024)**
+4. **Apple Vision Pro (visionOS, 2024) & Neuralink "Look" (Noland Arbaugh demo, 2024)**
    - *Vision Pro:* Proved that **eyes select ("where"), hands/voice confirm ("what")** is the most natural interaction loop ever shipped—and that hiding the raw eye cursor while only highlighting the snapped UI element is critical so users don't feel jitter.
    - *Neuralink:* Demonstrated effortless cursor/intent control ("I just look where I want to go and think about clicking").
 
@@ -88,6 +88,6 @@ Use a **two-layer pitch**:
   > *"Raw webcam gaze has ~120 px of error—worse than the size of a button. What makes this actually work is **Bayesian Reference Resolution**: fusing a fixation ring buffer aligned to speech word-timestamps, Chrome's live Accessibility/DOM tree, and LLM intent scoring—plus a semantic Lens that pops apart ambiguous targets when confidence is low."*
 
 ### Name & Tagline Ideas
-- **Plugin ID:** `hermes-gaze` or `telepathy` or `fovea-hermes` (`telepathy` leans into the Neuralink spin—Neuralink's first product is literally named **Telepathy**—while `hermes-gaze` is self-explanatory in the catalog. **Recommendation:** Catalog slug `hermes-gaze`, display title **"Hermes Telepathy (Gaze & Intent)"** or **"Hermes Gaze — Telepathy for the Browser"**).
+- **Plugin ID:** `look` or `telepathy` or `fovea-hermes` (`telepathy` leans into the Neuralink spin—Neuralink's first product is literally named **Look**—while `look` is self-explanatory in the catalog. **Recommendation:** Catalog slug `look`, display title **"Hermes Look (Gaze & Intent)"** or **"Look — Look for the Browser"**).
 - **One-line catalog description (must be concise per catalog rules):**
   > *"Point with your eyes, command with your voice: multimodal gaze + DOM + speech reference resolution for Chrome and Hermes Agent."*

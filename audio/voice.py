@@ -15,6 +15,7 @@ import wave
 from typing import Any, Dict, List, Optional, Tuple
 
 from .asset_cache import AssetIntegrityError, AssetsMissing, WHISPER, prepare
+from ..process_env import minimal_env
 
 
 logger = logging.getLogger(__name__)
@@ -231,7 +232,7 @@ def decode_audio_to_float32(raw_bytes: bytes, sample_rate: int = 16000, mime_typ
             "-ac", "1", "-ar", str(sample_rate), "pipe:1",
         ]
         try:
-            proc = subprocess.run(cmd, input=raw_bytes, capture_output=True, check=True)
+            proc = subprocess.run(cmd, input=raw_bytes, capture_output=True, check=True, env=minimal_env())
         except subprocess.CalledProcessError as exc:
             detail = exc.stderr.decode("utf-8", errors="replace").strip()[-500:]
             raise ValueError(f"Could not decode recorded audio: {detail or 'ffmpeg rejected the recording'}") from exc

@@ -1,4 +1,4 @@
-"""Plugin configuration for hermes-gaze, populated from ``ctx.get_config`` (plugin.yaml defaults)."""
+"""Plugin configuration for look, populated from ``ctx.get_config`` (plugin.yaml defaults)."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ class GazeConfig:
     mode: str = "hover"
     sigma_px: float = 120.0
     cdp_url: str = "http://127.0.0.1:9333"
+    allow_private_network: bool = False
     dwell_ms: int = 450
     wiggle_trigger: bool = False
     hotkey: str = "AltRight"  # JS KeyboardEvent.code (e.g. "AltRight", "Backquote", "F8")
@@ -43,6 +44,7 @@ class GazeConfig:
 
     def __post_init__(self) -> None:
         self.cdp_url = local_cdp_url(self.cdp_url)
+        self.allow_private_network = self.allow_private_network is True
         if self.whisper_model == "auto":
             self.whisper_model = "parakeet-v3" if apple_silicon_mac() else "base.en"
 
@@ -56,6 +58,7 @@ class GazeConfig:
             mode=str(get("mode", cls.mode) or cls.mode),
             sigma_px=float(get("sigma_px", cls.sigma_px) or cls.sigma_px),
             cdp_url=str(get("cdp_url", cls.cdp_url) or cls.cdp_url),
+            allow_private_network=get("allow_private_network", cls.allow_private_network) is True,
             dwell_ms=int(get("dwell_ms", cls.dwell_ms) or cls.dwell_ms),
             wiggle_trigger=bool(get("wiggle_trigger", cls.wiggle_trigger)),
             hotkey=str(get("hotkey", cls.hotkey) or cls.hotkey),

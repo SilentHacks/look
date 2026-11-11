@@ -1,4 +1,4 @@
-"""Behaviour contracts for service.py: intent dispatch over the __hermesGazeIntent binding.
+"""Behaviour contracts for service.py: intent dispatch over the __lookIntent binding.
 
 Every test drives a REAL ``GazeSession()`` — the pushed path (pointer + wire fixations +
 wire candidates carried inside the resolve intent) needs no Chrome and no CDP transport.
@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import GazeSession
-from hermes_gaze.config import GazeConfig
+from look.runtime import service
+from look.browser.cdp_bridge import GazeSession
+from look.config import GazeConfig
 
 
 def _wire_candidates() -> List[Dict[str, Any]]:
@@ -216,7 +216,7 @@ class TestServiceIntents(unittest.TestCase):
 
     def test_transcribe_small_garbage_degrades_to_reply(self) -> None:
         """Tiny undecodable audio must reply (ok False, or ok True with empty text) — never raise."""
-        from hermes_gaze.audio import voice
+        from look.audio import voice
 
         replies: List[Dict[str, Any]] = []
         # Stub the decode so the result is deterministic regardless of which

@@ -20,8 +20,8 @@ import tests
 from tests.calibration_chrome import Window, Scripted, fixture, HEADLESS, PERIOD
 from tests.test_webcam import appearance_observations
 from tests.ui_review.devlib import Rig, until
-from hermes_gaze.browser.webcam import WebcamHost
-from hermes_gaze.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
+from look.browser.webcam import WebcamHost
+from look.tracker.webcam_gaze import AppearanceEstimator, ScreenPoint
 
 
 def run(out, headed=False):
@@ -61,7 +61,7 @@ def run(out, headed=False):
             camera, ctx = window.tab, host._context
             host.calibrate()
             until(lambda: window.state()["face"], PERIOD + 8)
-            check(camera.main("typeof __hermesGazeIntent === 'undefined' && typeof __HERMES_WEBCAM__ === 'undefined'"), "camera main world has no binding or runtime")
+            check(camera.main("typeof __lookIntent === 'undefined' && typeof __HERMES_WEBCAM__ === 'undefined'"), "camera main world has no binding or runtime")
             # Actual trusted measurement entry, one count and below-dot cue geometry.
             window.click("calibrate"); window.wait("calibrate")
             geometry = camera.main("(()=>{const d=document.querySelector('#dot').getBoundingClientRect(), c=document.querySelector('#cue').getBoundingClientRect();return {below:c.top>d.top,bottom:c.bottom,height:innerHeight}})()")
@@ -95,7 +95,7 @@ def run(out, headed=False):
             window.shot("guided-example", .1)
             camera.main("document.querySelector('[data-action=return]').click()")
             check(window.state()["phase"] == "practice", "synthetic completion click is inert")
-            camera.iso("__hermesGazeIntent(JSON.stringify({type:'return_browsing',nonce:'forged',flow:999}))", ctx)
+            camera.iso("__lookIntent(JSON.stringify({type:'return_browsing',nonce:'forged',flow:999}))", ctx)
             check(window.state()["phase"] == "practice", "forged completion binding is inert")
             identity = (host._process.pid, host._context, camera.iso("document.getElementById('feed').srcObject.id", ctx))
             window.click("return")
@@ -113,10 +113,10 @@ def run(out, headed=False):
             check(host.samples > count + 3 and host.delivered > 0, "background camera continues real-frame inference and foreground delivery")
             check("Hold Space" not in rig.text("pill"), "completed rehearsal suppresses repeated hold coaching")
             # An actual changed anchor produces persistent private guidance, not a timer.
-            rig.iso("window.__HERMES_GAZE_OVERLAY__.Configure({mode:'hover'});window.__HERMES_GAZE_OVERLAY__.Configure({mode:'webcam'});window.__HERMES_GAZE_OVERLAY__.returnFromCalibration()")
+            rig.iso("window.__LOOK_OVERLAY__.Configure({mode:'hover'});window.__LOOK_OVERLAY__.Configure({mode:'webcam'});window.__LOOK_OVERLAY__.returnFromCalibration()")
             until(lambda: "Move the pointer in this page." in rig.text("pill"))
             rig.press("AltRight", "Alt"); until(lambda: rig.dbg()["view"] == "compose")
-            rig.iso("window.__HERMES_GAZE_OVERLAY__.returnFromCalibration()")
+            rig.iso("window.__LOOK_OVERLAY__.returnFromCalibration()")
             rig.press("Escape", "Escape")
             until(lambda: "Move the pointer in this page." in rig.text("pill"))
             check(True, "origin guidance resumes after composer closes or return arrives during compose")
@@ -129,7 +129,7 @@ def run(out, headed=False):
             rig.move(470, 340)
             until(lambda: "Move the pointer" not in rig.text("pill"))
             check(True, "accepted trusted origin clears private pointer guidance")
-            rig.iso("window.__HERMES_GAZE_OVERLAY__.returnFromCalibration()")
+            rig.iso("window.__LOOK_OVERLAY__.returnFromCalibration()")
             check("Move the pointer" not in rig.text("pill"), "anchored page gets no pointer coaching")
             # A real private answer fixture exercises native footer keyboard activation.
             from tests.test_companion_ui import snapshot
@@ -147,7 +147,7 @@ def run(out, headed=False):
                 until(lambda: rig.dbg()["view"] == "answer")
             rig.press("Escape", "Escape")
             # Cached initialization cannot acknowledge a website-removed protected host.
-            rig.iso("window.__HERMES_GAZE_OVERLAY__.uiFrame.getRootNode().host.remove()")
+            rig.iso("window.__LOOK_OVERLAY__.uiFrame.getRootNode().host.remove()")
             camera.send("Page.bringToFront", {})
             window.click("return"); window.wait("return-error")
             check("Couldn’t bring your page forward" in window.text(), "missing protected renderer cannot report return success")

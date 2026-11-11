@@ -41,7 +41,7 @@
   if (typeof module !== "undefined") module.exports = {protocol, scheduleLength, target};
   return async function (opts) {
   const blockDuration = block => opts.duration ?? scheduleLength(protocol(block, 1));
-  const emit = (type, data = {}) => __hermesGazeIntent(JSON.stringify({type, nonce: opts.nonce, ...data}));
+  const emit = (type, data = {}) => __lookIntent(JSON.stringify({type, nonce: opts.nonce, ...data}));
   const make = (tag, text) => { const n = document.createElement(tag); n.textContent = text || ""; return n; };
   document.head.append(make("style", "body{margin:0;background:#17191c;color:#f5f5f7;font:18px system-ui;text-align:center}main{max-width:850px;margin:auto;padding:24px}video{width:240px;transform:scaleX(-1)}button,input,textarea{font:inherit;padding:8px;margin:6px}label{display:block}input,textarea{width:340px}button{cursor:pointer}#dot{position:fixed;width:20px;height:20px;border-radius:50%;background:#a9d7ff;transform:translate(-50%,-50%);display:none}#instruction{position:fixed;bottom:0;width:100%;pointer-events:none;font-size:14px}body.recording main{display:none}button:focus-visible{outline:3px solid #a9d7ff}"));
   document.title = "Look private dataset recorder";

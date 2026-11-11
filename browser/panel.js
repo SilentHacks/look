@@ -2,8 +2,8 @@
 // for the capsule. Holds every private string and the voice level. setTimeout never fires here,
 // so timing comes from outside over CDP; CSS animation and requestAnimationFrame do work.
 (() => {
-  if (window.__HERMES_GAZE_PANEL__) return;
-  const send = m => window.__hermesGazeIntent(JSON.stringify(m));
+  if (window.__LOOK_PANEL__) return;
+  const send = m => window.__lookIntent(JSON.stringify(m));
   // Plates are rounded to coarse steps, so the page cannot read an answer's exact length.
   const STEP_H = 24, STEP_W = 16;
   document.documentElement.style.cssText = 'background:transparent;overflow:hidden;height:100%';
@@ -642,7 +642,7 @@
     if (key !== lastMeasure) { lastMeasure = key; send(sizes); }
   }
 
-  window.__HERMES_GAZE_PANEL__ = {
+  window.__LOOK_PANEL__ = {
     render(m) {
       if (m.kind === 'pill') { renderPill(m); return; }
       scheme(m.dark, m.reduce);

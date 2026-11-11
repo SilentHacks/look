@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
-from hermes_gaze.runtime import service
-from hermes_gaze.browser.cdp_bridge import CdpSession, GazeSession
-from hermes_gaze.config import GazeConfig
-from hermes_gaze.resolver import bayesian_fusion
-from hermes_gaze.resolver.temporal_aligner import extract_deictic_anchors
+from look.runtime import service
+from look.browser.cdp_bridge import CdpSession, GazeSession
+from look.config import GazeConfig
+from look.resolver import bayesian_fusion
+from look.resolver.temporal_aligner import extract_deictic_anchors
 
 try:
     import numpy as np
@@ -92,7 +92,7 @@ class TestIntentNonce(unittest.TestCase):
 class TestSessionLifecycle(unittest.TestCase):
     def test_closed_tab_cannot_reopen_on_delayed_attachment_or_read(self) -> None:
         import threading
-        from hermes_gaze.browser.companion import Companion
+        from look.browser.companion import Companion
         companion = Companion("http://127.0.0.1:1")
         tab = CdpSession(companion.http_url)
         companion._tabs["tab"] = tab
@@ -227,7 +227,7 @@ class TestTemporalAlignmentEpochs(unittest.TestCase):
 
     @unittest.skipIf(np is None, "numpy not installed")
     def test_transcribe_shifts_words_by_audio_epoch(self) -> None:
-        from hermes_gaze.audio import voice
+        from look.audio import voice
 
         seg = types.SimpleNamespace(
             text="press this",
@@ -274,7 +274,7 @@ class TestLlmRerankReorders(unittest.TestCase):
             )
         ] if hasattr(bayesian_fusion, "FixationSample") else []
         if not fixations:
-            from hermes_gaze.tracker.simulated_gaze import FixationSample
+            from look.tracker.simulated_gaze import FixationSample
 
             fixations = [
                 FixationSample(

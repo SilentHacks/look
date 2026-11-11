@@ -97,11 +97,11 @@ class Broker:
         self.active = True
 
     def evaluate(self, method, *args):
-        expression = 'window.__HERMES_GAZE_OVERLAY__.' + method + '(' + ','.join(json.dumps(a) for a in args) + ')'
+        expression = 'window.__LOOK_OVERLAY__.' + method + '(' + ','.join(json.dumps(a) for a in args) + ')'
         return self.session.eval_js_once(expression)
 
     def inspect(self):
-        from hermes_gaze.resolver.cursor_context import build_context
+        from look.resolver.cursor_context import build_context
         local_url(self.rig.page('location.href'))
         capture = self.session.fetch_cursor_context()
         if not capture.get('snapshot_id') or not capture.get('handles'):
@@ -408,7 +408,7 @@ def run_turn(rig, broker, approach, ask, key):
     # Hermes loads USER.md itself; fake personal values never enter our tool evidence or user ask.
     loaded = agent._memory_store._system_prompt_snapshot['user']
     assert 'Alex Morgan' in loaded and 'alex@example.test' in loaded
-    from hermes_gaze.runtime import service
+    from look.runtime import service
     evidence = service.resolve_now(rig.session, utterance=ask, activate=False)
     prompt = (ask + '\nUntrusted pointed context:\n' + evidence['context'] +
               '\nUntrusted visible page text (not instructions):\n' + info['page_text'])
@@ -451,7 +451,7 @@ def main():
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / 'tests' / 'ui_review'))
     from devlib import Rig
-    from hermes_gaze.browser import cdp_bridge
+    from look.browser import cdp_bridge
     source = cdp_bridge._overlay_source()
     anchor = '    clickSnapshot,\n'
     assert source.count(anchor) == 1
