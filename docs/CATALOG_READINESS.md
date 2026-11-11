@@ -4,6 +4,40 @@ Preparation record from 2026-11-10. The sections below retain the original
 pre-publication findings; the publication update supersedes their authorization,
 public-pin and screenshot status. Catalog acceptance remains a maintainer decision.
 
+## PR security delta — 2026-11-11
+
+Runtime source: `949cf9972bdaddef170fa4fa45d97a5cd2f0628f`, based on the reviewed
+`0ce5e6a6b2d31269cccf5c7a273c5bf497652bd2`. The README and local catalog snapshot
+pin that source; the upstream PR may pin the subsequent documentation-only commit.
+
+- Model navigation/new tabs/anchor clicks preflight DNS and refuse nonpublic and
+  metadata destinations. Owner-only `allow_private_network` defaults off.
+  Debugger-port refusal survives opt-in. Redirects, DNS rebinding, subresources
+  and manually opened pages are not request-level contained.
+- Native worker, Chrome, ffmpeg and say environments are allowlisted. Consent uses
+  stock `hermes_yaml`, with unavailable/malformed configuration failing closed.
+- Live probes require `LOOK_PROBE_API_KEY`; they do not copy `.env`/`auth.json`
+  or inherit account provider keys. Plugin/package/config/cache/skill identities
+  use `look`; existing user data is neither copied nor deleted.
+
+Executed locally:
+
+- Unittest discovery ran 381 tests. Two new test methods initially failed on
+  macOS path canonicalization and an OS-added environment value, not leaked keys.
+  Removed the incidental path assertion and checked child security invariants
+  rather than exact OS environment equality. Focused rerun: 6 tests, passed with
+  one stock-Hermes-only skip. Stock Hermes rerun: all 5 probe/consent tests passed,
+  including the real YAML loader with PyYAML blocked.
+- Disposable Chrome trust-boundary probe: all 14 reported scenarios passed.
+  Disposable production action approval probe: all 9 reported checks passed.
+- `uv lock` resolved the renamed package and removed obsolete v2 dependencies.
+  The first offline attempt failed because the existing speech dependency was
+  absent from the resolver cache; no dependency was installed to run tests.
+
+No physical devices, live provider inference or native v3 model execution were
+used for this delta. Historical claims and paths below belong to their original
+commits; examples have been normalized to the current Look identity.
+
 ## V2 removal
 
 CoreML/MLX v2 loaders, setup assets, Python dependencies and benchmark execution
