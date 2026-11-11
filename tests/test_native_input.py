@@ -194,6 +194,100 @@ class NativeCancellationTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client._rpc.await_count, 1)
         self.assertNotIn("ended", run)
 
+    async def test_live_revocation_blocks_submit_but_keeps_pinned_receipts(self):
+        import asyncio
+        import json
+        import os
+        from pathlib import Path
+        from unittest.mock import AsyncMock
+        from tests.test_probe_boundaries import grant
+        from look.runtime.native_input import consent
+        try:
+            import hermes_cli.config
+        except ImportError:
+            self.skipTest("Stock Hermes is not installed in this interpreter")
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"HERMES_CONFIG_BACKEND": "file"}):
+            home = Path(directory).resolve()
+            path = home / "config.yaml"
+            path.write_text(json.dumps(grant()))
+            client = NativeInput.__new__(NativeInput)
+            client.logical_id, client.plugin_id, client.home = "owned", "look", home
+            client.loop = asyncio.get_running_loop()
+            client.identity = None
+            client.receipt_admission = ""
+            client.changed = asyncio.Event()
+            identity = dict(pid=os.getpid(), runtime_protocol=1, state="ready",
+                            capabilities=["session-authority-v1"], instance_id="instance", authority_epoch=7,
+                            served_profiles=[dict(home=str(home), profile_id=str(home))],
+                            api_origin="http://127.0.0.1:12345")
+            ticket = dict(instance_id="instance", profile_id=str(home), runtime_protocol=1, ticket="fixture")
+            with patch("look.runtime.native_input._control", side_effect=[identity, ticket]):
+                client.identity, _, _ = client._bootstrap()
+            # A different owner process cannot acquire even a granted profile.
+            with patch("look.runtime.native_input._control", return_value={**identity, "pid": os.getpid() + 1}):
+                with self.assertRaisesRegex(NativeError, "not_own_canonical_runtime"):
+                    client._bootstrap()
+
+            valid = json.dumps(grant())
+            stamp = path.stat()
+            for failure in ("revoked", "missing", "malformed", "unavailable", "nonfile"):
+                with self.subTest(failure=failure):
+                    path.write_text(valid)
+                    self.assertTrue(consent(home, "look"))
+                    path.write_text(valid.replace("true", "null"))
+                    os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                    if failure == "missing":
+                        path.unlink()
+                    elif failure == "malformed":
+                        path.write_text("plugins: [")
+                    backend = (patch.dict(os.environ, {"HERMES_CONFIG_BACKEND": "invalid-look-test"})
+                               if failure == "unavailable" else
+                               patch("hermes_cli.config.get_config_backend", return_value=SimpleNamespace(name="remote"))
+                               if failure == "nonfile" else patch.dict(os.environ, {}))
+                    with backend:
+                        client._rpc = AsyncMock()
+                        receipts = []
+                        await asyncio.wrap_future(client.submit(dict(request_id="new", wire="new wire"),
+                                                               lambda r, receipt: receipts.append(receipt)))
+                        self.assertEqual(receipts, [{"status": "refused", "error": "gateway_injection_not_granted"}])
+                        client._rpc.assert_not_awaited()
+                        # A previously handed-off but unadmitted request stays unknown, never resubmits.
+                        receipts.clear()
+                        await asyncio.wrap_future(client.submit(
+                            dict(request_id="uncertain", wire="exact wire", native_attempted=True),
+                            lambda r, receipt: receipts.append(receipt)))
+                        self.assertEqual(receipts[0]["status"], "unknown")
+                        client._rpc.assert_not_awaited()
+
+            # Recovery after revocation may authenticate only the already pinned owner.
+            client.receipt_admission = "only-this-admission"
+            path.unlink(missing_ok=True)
+            with patch("look.runtime.native_input._control", side_effect=[identity, ticket]):
+                self.assertEqual(client._bootstrap()[0], client.identity)
+            with patch("look.runtime.native_input._control", return_value={**identity, "authority_epoch": 8}):
+                with self.assertRaisesRegex(NativeError, "native_owner_changed"):
+                    client._bootstrap()
+            client._rpc = AsyncMock(side_effect=[
+                {"status": "started"},
+                {"status": "terminal", "ref": {"profile_id": str(home), "session_id": "owned"},
+                 "authority_epoch": 7, "outcome": "cancelled"}])
+            receipts = []
+            await asyncio.wrap_future(client.submit(
+                dict(request_id="admitted", wire="exact wire", admission_id="only-this-admission", cancel_requested=True),
+                lambda r, receipt: receipts.append(receipt)))
+            self.assertEqual([call.args[0] for call in client._rpc.await_args_list], ["prompt.cancel", "prompt.receipt"])
+            self.assertEqual(receipts[0]["outcome"], "cancelled")
+            for call in client._rpc.await_args_list:
+                self.assertEqual(call.kwargs["admission_id"], "only-this-admission")
+            client._rpc.reset_mock()
+            for run in (dict(request_id="new", wire="new wire"),
+                        dict(request_id="foreign", wire="foreign wire", admission_id="someone-else")):
+                receipts.clear()
+                await asyncio.wrap_future(client.submit(run, lambda r, receipt: receipts.append(receipt)))
+                self.assertEqual(receipts, [{"status": "unknown", "error": "receipt_owner_mismatch"}])
+                client._rpc.assert_not_awaited()
+
 
 class NativeAuthTransport(unittest.TestCase):
     def test_redirect_cannot_forward_native_ticket(self):

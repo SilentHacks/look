@@ -15,10 +15,35 @@ pin that source; the upstream PR may pin the subsequent documentation-only commi
   Debugger-port refusal survives opt-in. Redirects, DNS rebinding, subresources
   and manually opened pages are not request-level contained.
 - Native worker, Chrome, ffmpeg and say environments are allowlisted. Consent uses
-  stock `hermes_yaml`, with unavailable/malformed configuration failing closed.
+  public explicit-path `read_config_doc`; only the local-file backend is supported.
+  Missing/malformed/duplicate/unavailable configuration fails closed without
+  raw-loader diagnostics or backups. The permission remains exact-profile Boolean
+  `true`, with receipt-only recovery after revocation.
 - Live probes require `LOOK_PROBE_API_KEY`; they do not copy `.env`/`auth.json`
   or inherit account provider keys. Plugin/package/config/cache/skill identities
   use `look`; existing user data is neither copied nor deleted.
+
+Private-import replacement, 2026-11-11: the native consent and disposable probes
+share a synchronous captured-profile reader using public Hermes APIs. Probes write
+stdlib JSON and accept bundled API-key providers/aliases, `openai-api`, and `custom`
+with an endpoint; `auto` means OpenRouter. Non-key auth and source-home provider
+plugins are unsupported. URL environment variables never receive the test key.
+See [supported scope](REFERENCE.md#disposable-inference-probes).
+
+Verification on stock Hermes v0.23.1 (`3b421578588243f920886e6fe79a6faa87ea026e`):
+20 focused profile/native tests passed, including real public-reader and bundled
+metadata behavior, concurrent profiles, quiet malformed/duplicate failures,
+consumer-level revocation and pinned receipt/cancel recovery. A separate cold-import
+malformed-profile check also refused quietly without extra files. No live inference,
+accounts or physical devices were used.
+
+Actual `hermes plugins validate <worktree> --install-deps` ran through stock CLI
+code from a tracked-source copy, neutral cwd and isolated HOME/HERMES_HOME/runtime,
+using an existing dependency interpreter. Validation passed without warnings.
+Dependency preparation **did not complete**: the isolated PM runtime was absent
+and lazy installs were disabled. The capability probe used the prepared interpreter;
+this is not evidence of fresh dependency installation. Installed Hermes and user
+credentials were not modified.
 
 Executed locally:
 

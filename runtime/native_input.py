@@ -35,8 +35,8 @@ class Refused(NativeError):
 def consent(home, plugin_id):
     # Read the captured profile, not a worker thread's ambient HERMES_HOME.
     try:
-        from hermes_yaml import safe_load
-        config = safe_load((home / "config.yaml").read_text()) or {}
+        from .profile_config import read_local_profile
+        config = read_local_profile(home) or {}
         plugins = config.get("plugins") or {}
         # Stock Hermes defaults to in_process when this key is omitted.
         return (plugins.get("isolation", "in_process") == "in_process" and

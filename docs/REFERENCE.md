@@ -29,9 +29,38 @@ attempt prevents switching conversations. Reset/compaction revoke the binding.
 Stale exact questions are withheld by the pre-inference hook. Stock has no
 atomic caller-supplied reset/authority fence. This is not a claim of one.
 
+Native consent is an uncached, explicit-path public `read_config_doc` read of the
+captured profile's `config.yaml`, under a synchronous profile scope. Only the
+local-file backend is supported. Missing, malformed, duplicate-key, unavailable
+or non-file configuration refuses input quietly, without raw-loader diagnostics
+or backups. `plugins.isolation` must be `in_process` (the omitted-key default);
+the exact plugin entry's `allow_gateway_injection` must be Boolean `true`.
+Bootstrap and each unadmitted submission recheck that grant. Revocation does not
+atomically cancel an already running turn: pinned admissions retain receipt/cancel
+access only, never new submission or browser-action authority.
+
 TypeSafe is optional. No key is required for startup or the ordinary answer.
 The existing optional post-answer Hermes scope selector can still make an
 auxiliary inference. Questions/evidence may persist in Hermes history.
+
+### Disposable inference probes
+
+`benchmark/probe_sessions.py` and `benchmark/probe_companion_ui.py` require
+`LOOK_PROBE_API_KEY` before importing Hermes or launching children. They read only
+the selected local-file profile, copy allowed model fields/settings into a 0600
+JSON `config.yaml`, and use temporary `HOME`/`HERMES_HOME`. Account keys, auth stores,
+provider implementations, MCP servers and fallback models are not copied.
+
+Supported providers are stock bundled API-key metadata and its aliases, stock
+`openai-api` (absent from bundled profiles on 0.23.1), and `custom` with an explicit
+`model.base_url`; `auto` selects OpenRouter. Effective auth is
+`registry_auth_type or auth_type`. OAuth, AWS SDK, external-process, provider-owned
+and source-home-only providers are refused. Bundled metadata executes trusted
+bundled declarations, not credential/model-listing hooks. Only credential env names
+receive the dedicated key; URL env names never do. These remain live-inference
+tools when launched; neither the disposable profile nor endpoint validation is a
+network sandbox. Public reader/metadata behavior was checked on Hermes 0.23.1,
+not older or arbitrary future releases.
 
 ### Use my existing Chrome
 
